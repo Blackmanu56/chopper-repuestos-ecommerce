@@ -243,6 +243,43 @@ export async function uploadStaffPhotoAction(
 }
 
 /**
+ * Elimina la foto de perfil del usuario en disco y BDD
+ */
+export async function deleteStaffPhotoAction(
+  userId: number
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const usuario = await prisma.usuario.findUnique({ where: { id: userId } });
+    if (!usuario) {
+      return { success: false, error: "Usuario no encontrado." };
+    }
+
+    if (usuario.fotoUrl && usuario.fotoUrl.startsWith("/uploads/avatars/")) {
+      const filename = path.basename(usuario.fotoUrl);
+      try {
+        await fs.unlink(path.join(UPLOAD_DIR, filename));
+      } catch {}
+      try {
+        await fs.unlink(path.join(SGI_UPLOAD_DIR, filename));
+      } catch {}
+    }
+
+    await prisma.usuario.update({
+      where: { id: userId },
+      data: {
+        fotoUrl: null,
+        fotoActualizadaEn: new Date(),
+      },
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error("Error en deleteStaffPhotoAction:", error);
+    return { success: false, error: "Error al eliminar la foto de perfil." };
+  }
+}
+
+/**
  * Obtiene la información fresca de un usuario desde la BDD
  */
 export async function getFreshUserAction(userId: number): Promise<AuthUserResponse | null> {

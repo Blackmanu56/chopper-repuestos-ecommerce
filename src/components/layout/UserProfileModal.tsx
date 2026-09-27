@@ -28,8 +28,19 @@ const AVATAR_PRESETS = [
   { id: "moto5", label: "Velocidad", emoji: "⚡", bg: "bg-purple-500/15 text-purple-500 border-purple-500/30" },
 ];
 
+const isImageAvatar = (val?: string | null): boolean => {
+  if (!val) return false;
+  return (
+    val.startsWith("/") ||
+    val.startsWith("http://") ||
+    val.startsWith("https://") ||
+    val.startsWith("data:") ||
+    val.startsWith("blob:")
+  );
+};
+
 export default function UserProfileModal() {
-  const { user, isProfileOpen, closeProfile, updateUserProfile, uploadProfilePhoto, logout } = useAuth();
+  const { user, isProfileOpen, closeProfile, updateUserProfile, uploadProfilePhoto, removeProfilePhoto, logout } = useAuth();
 
   const [nombre, setNombre] = useState("");
   const [username, setUsername] = useState("");
@@ -165,13 +176,13 @@ export default function UserProfileModal() {
           {/* FOTO DE PERFIL / AVATAR */}
           <div className="rounded-xl border border-slate-200 dark:border-line/70 bg-slate-50 dark:bg-surface/50 p-4 space-y-3">
             <label className="block font-bold text-slate-900 dark:text-white">
-              Foto o Avatar de Cliente
+              {user.rol === "CLIENTE" ? "Foto o Avatar de Cliente" : "Foto de Perfil"}
             </label>
 
             <div className="flex items-center gap-4">
               <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-2xl border-2 border-brand bg-white dark:bg-[#1a1b22] flex items-center justify-center shadow-md">
                 {avatar ? (
-                  avatar.startsWith("data:") || avatar.startsWith("http") ? (
+                  isImageAvatar(avatar) ? (
                     <img
                       src={avatar}
                       alt="Avatar"
@@ -223,8 +234,11 @@ export default function UserProfileModal() {
                   {avatar && (
                     <button
                       type="button"
-                      onClick={() => setAvatar("")}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                      onClick={async () => {
+                        setAvatar("");
+                        await removeProfilePhoto();
+                      }}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
                       title="Quitar foto y usar inicial"
                     >
                       <Trash2 size={13} />

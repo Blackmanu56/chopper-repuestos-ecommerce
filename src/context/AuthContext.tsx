@@ -5,6 +5,7 @@ import {
   loginStaffAction,
   updateStaffProfileAction,
   uploadStaffPhotoAction,
+  deleteStaffPhotoAction,
   getFreshUserAction,
 } from "@/actions/auth";
 
@@ -31,6 +32,7 @@ interface AuthContextType {
     data: Partial<UserSession> & { currentPassword?: string; newPassword?: string }
   ) => Promise<{ success: boolean; error?: string }>;
   uploadProfilePhoto: (file: File) => Promise<{ success: boolean; fotoUrl?: string; error?: string }>;
+  removeProfilePhoto: () => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   isLoginOpen: boolean;
   openLogin: () => void;
@@ -47,6 +49,7 @@ const AuthContext = createContext<AuthContextType>({
   loginStaff: async () => ({ success: false }),
   updateUserProfile: async () => ({ success: false }),
   uploadProfilePhoto: async () => ({ success: false }),
+  removeProfilePhoto: async () => ({ success: false }),
   logout: () => {},
   isLoginOpen: false,
   openLogin: () => {},
@@ -307,6 +310,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
+  const removeProfilePhoto = async (): Promise<{ success: boolean; error?: string }> => {
+    if (!user) return { success: false, error: "No hay sesión activa." };
+
+    if (user.rol !== "CLIENTE") {
+      const res = await deleteStaffPhotoAction(user.id);
+      if (res.success) {
+        const updated = { ...user, avatar: undefined };
+        setUser(updated);
+        localStorage.setItem("chopper_user", JSON.stringify(updated));
+        return { success: true };
+      }
+      return { success: false, error: res.error || "No se pudo eliminar la foto." };
+    }
+
+    const updated = { ...user, avatar: undefined };
+    setUser(updated);
+    localStorage.setItem("chopper_user", JSON.stringify(updated));
+    return { success: true };
+  };
+
   const logout = () => {
     setUser(null);
     localStorage.removeItem("chopper_user");
@@ -322,6 +345,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         loginStaff,
         updateUserProfile,
         uploadProfilePhoto,
+        removeProfilePhoto,
         logout,
         isLoginOpen,
         openLogin: () => setIsLoginOpen(true),

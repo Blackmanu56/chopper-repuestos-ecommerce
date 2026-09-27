@@ -28,6 +28,17 @@ import {
   LogOut,
 } from "lucide-react";
 
+const isImageAvatar = (val?: string | null): boolean => {
+  if (!val) return false;
+  return (
+    val.startsWith("/") ||
+    val.startsWith("http://") ||
+    val.startsWith("https://") ||
+    val.startsWith("data:") ||
+    val.startsWith("blob:")
+  );
+};
+
 export default function Header() {
   const { totalItems } = useCart();
   const { user, openLogin, logout, openProfile } = useAuth();
@@ -231,7 +242,7 @@ export default function Header() {
                 >
                   <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-brand/10 border border-brand/30 text-brand text-xs font-bold shrink-0 overflow-hidden">
                     {user.avatar ? (
-                      user.avatar.startsWith("data:") || user.avatar.startsWith("http") ? (
+                      isImageAvatar(user.avatar) ? (
                         <img src={user.avatar} alt="Avatar" className="h-full w-full object-cover" />
                       ) : (
                         <span>{user.avatar}</span>
