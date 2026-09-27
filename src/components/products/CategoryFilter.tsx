@@ -7,7 +7,11 @@ import { CategoryItem } from "@/actions/ecommerce";
 export default function CategoryFilter({ categories }: { categories: CategoryItem[] }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const selectedCatId = searchParams.get("cat") ? Number(searchParams.get("cat")) : undefined;
+  const catParam = searchParams.get("cat") || "";
+  const selectedCat = categories.find(
+    (c) => c.id.toString() === catParam || c.nombre.toLowerCase() === catParam.toLowerCase()
+  );
+  const selectedCatId = selectedCat ? selectedCat.id : (!catParam ? undefined : -1);
   const currentQ = searchParams.get("q") || "";
 
   const handleSelect = (catId?: number) => {
@@ -16,7 +20,7 @@ export default function CategoryFilter({ categories }: { categories: CategoryIte
     if (catId) params.set("cat", catId.toString());
 
     const qs = params.toString();
-    router.push(qs ? `/?${qs}` : "/");
+    router.push(qs ? `/?${qs}#catalogo` : "/#catalogo");
   };
 
   return (

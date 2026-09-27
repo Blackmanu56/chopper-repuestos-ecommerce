@@ -131,6 +131,7 @@ model Usuario {
   notificaciones            Notificacion[]
   preferenciasNotificacion  PreferenciaNotificacion[]
   ajustesPrecio             AjustePrecio[]
+  pedidosEcommercePreparados PedidoEcommerce[]        @relation("preparadorPedido")
 
   @@map("usuarios")
 }
@@ -158,6 +159,7 @@ model Cliente {
   creadoEn  DateTime @default(now()) @map("creado_en")
   cuit      String?  @unique
   ventas    Venta[]
+  pedidosEcommerce PedidoEcommerce[]
 
   @@map("clientes")
 }
@@ -215,6 +217,9 @@ model Producto {
   solicitudesPrecio     SolicitudPrecio[]
   notificaciones        Notificacion[]
   ajustesPrecioDetalle  AjustePrecioDetalle[]
+  ecommerce             ProductoEcommerce?
+  comboItems            ComboItemEcommerce[]
+  detallesPedidoEcommerce DetallePedidoEcommerce[]
 
   @@map("productos")
 }
@@ -605,3 +610,114 @@ model AjustePrecioDetalle {
   @@index([productoId])
   @@map("ajuste_precio_detalles")
 }
+
+model ProductoEcommerce {
+  id              Int      @id @default(autoincrement())
+  productoId      Int      @unique @map("producto_id")
+  publicadoOnline Boolean  @default(true) @map("publicado_online")
+  enOferta        Boolean  @default(false) @map("en_oferta")
+  precioOferta    Float?   @map("precio_oferta")
+  destacado       Boolean  @default(false)
+  recomendado     Boolean  @default(false)
+  badgePromo      String?  @map("badge_promo")
+  ordenOferta     Int      @default(0) @map("orden_oferta")
+  actualizadoEn   DateTime @updatedAt @map("actualizado_en")
+
+  producto        Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
+
+  @@index([publicadoOnline, enOferta])
+  @@map("productos_ecommerce")
+}
+
+model ComboEcommerce {
+  id             Int                   @id @default(autoincrement())
+  nombre         String
+  slug           String?
+  descripcion    String?
+  badge          String?
+  precio         Float
+  precioRegular  Float?                @map("precio_regular")
+  imagen         String?
+  activo         Boolean               @default(true)
+  destacado      Boolean               @default(false)
+  orden          Int                   @default(0)
+  creadoEn       DateTime              @default(now()) @map("creado_en")
+  actualizadoEn  DateTime              @updatedAt @map("actualizado_en")
+  items          ComboItemEcommerce[]
+  detallesPedido DetallePedidoEcommerce[]
+
+  @@map("combos_ecommerce")
+}
+
+model ComboItemEcommerce {
+  id         Int            @id @default(autoincrement())
+  comboId    Int            @map("combo_id")
+  productoId Int            @map("producto_id")
+  cantidad   Int            @default(1)
+
+  combo      ComboEcommerce @relation(fields: [comboId], references: [id], onDelete: Cascade)
+  producto   Producto       @relation(fields: [productoId], references: [id])
+
+  @@map("combo_items_ecommerce")
+}
+
+model ConfiguracionEcommerce {
+  id            Int      @id @default(autoincrement())
+  clave         String   @unique
+  valor         String
+  descripcion   String?
+  actualizadoEn DateTime @updatedAt @map("actualizado_en")
+
+  @@map("configuracion_ecommerce")
+}
+
+model PedidoEcommerce {
+  id                  Int                      @id @default(autoincrement())
+  numero              Int                      @unique
+  clienteId           Int?                     @map("cliente_id")
+  nombreCliente       String                   @map("nombre_cliente")
+  dniCliente          String                   @map("dni_cliente")
+  telefonoCliente     String?                  @map("telefono_cliente")
+  emailCliente        String?                  @map("email_cliente")
+  direccionEnvio      String?                  @map("direccion_envio")
+  modalidadEntrega    String                   @map("modalidad_entrega")
+  costoEnvio          Float                    @default(0.0) @map("costo_envio")
+  metodoPago          String                   @map("metodo_pago")
+  estado              String                   @default("PENDIENTE")
+  comprobanteUrl      String?                  @map("comprobante_url")
+  preparadorUsuarioId Int?                     @map("preparador_usuario_id")
+  preparadorNombre    String?                  @map("preparador_nombre")
+  fechaPreparacion    DateTime?                @map("fecha_preparacion")
+  total               Float
+  notas               String?
+  creadoEn            DateTime                 @default(now()) @map("creado_en")
+  actualizadoEn       DateTime                 @updatedAt @map("actualizado_en")
+
+  cliente             Cliente?                 @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  preparadorUsuario   Usuario?                 @relation("preparadorPedido", fields: [preparadorUsuarioId], references: [id], onDelete: SetNull)
+  items               DetallePedidoEcommerce[]
+
+  @@index([dniCliente])
+  @@index([estado])
+  @@map("pedidos_ecommerce")
+}
+
+model DetallePedidoEcommerce {
+  id             Int             @id @default(autoincrement())
+  pedidoId       Int             @map("pedido_id")
+  productoId     Int?            @map("producto_id")
+  comboId        Int?            @map("combo_id")
+  nombre         String
+  marca          String?
+  cantidad       Int
+  precioUnitario Float           @map("precio_unitario")
+  subtotal       Float
+
+  pedido         PedidoEcommerce @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
+  producto       Producto?       @relation(fields: [productoId], references: [id], onDelete: SetNull)
+  combo          ComboEcommerce? @relation(fields: [comboId], references: [id], onDelete: SetNull)
+
+  @@map("detalle_pedidos_ecommerce")
+}
+
+

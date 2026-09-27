@@ -12,6 +12,7 @@ export interface CartItem {
   cantidad: number;
   stock: number;
   imagen?: string | null;
+  esCombo?: boolean;
 }
 
 export interface PedidoItem {
@@ -29,7 +30,10 @@ export interface Pedido {
   dni: string;
   tel: string;
   email: string;
-  pago: "EFECTIVO" | "TRANSFERENCIA";
+  pago: "TRANSFERENCIA" | "TARJETA" | "EFECTIVO_LOCAL" | "EFECTIVO";
+  modalidadEntrega: "RETIRO_LOCAL" | "MOTOMANDADO";
+  costoEnvio?: number;
+  codigoTicket?: string;
   estado: "PENDIENTE" | "CONFIRMADO" | "PREPARANDO" | "LISTO_PARA_RETIRAR" | "RETIRADO" | "CANCELADO";
   items: PedidoItem[];
   total: number;
@@ -50,9 +54,14 @@ interface CartContextType {
     dni: string;
     tel: string;
     email: string;
-    pago: "EFECTIVO" | "TRANSFERENCIA";
+    pago: "TRANSFERENCIA" | "TARJETA" | "EFECTIVO_LOCAL" | "EFECTIVO";
+    modalidadEntrega?: "RETIRO_LOCAL" | "MOTOMANDADO";
+    costoEnvio?: number;
+    itemsVerificados?: PedidoItem[];
+    totalVerificado?: number;
   }) => number | null;
   cambiarEstadoPedido: (numero: number, nuevoEstado: Pedido["estado"]) => void;
+  cancelarPedido: (numero: number) => void;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
@@ -73,17 +82,84 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       if (savedPedidos) {
         setPedidos(JSON.parse(savedPedidos));
       } else {
-        // Sample order matching mockup
+        // Sample orders matching Chopper Posadas business rules
         const defaultPedidos: Pedido[] = [
           {
+            numero: 1043,
+            fecha: "26/09/2026 17:30",
+            nombre: "Cliente Chopper",
+            dni: "34.567.890",
+            tel: "376 524-3554",
+            email: "cliente@gmail.com",
+            pago: "EFECTIVO_LOCAL",
+            modalidadEntrega: "RETIRO_LOCAL",
+            codigoTicket: "OC-1043",
+            estado: "PREPARANDO",
+            items: [
+              {
+                id: 1,
+                nombre: "Aceite Motul 5100 15W-50 4T 1L",
+                marca: "MOTUL",
+                precio: 16800,
+                cantidad: 2,
+              },
+              {
+                id: 2,
+                nombre: "Cadena DID 520 Reforzada Dorada 118L",
+                marca: "DID",
+                precio: 48500,
+                cantidad: 1,
+              },
+              {
+                id: 3,
+                nombre: "Pastillas de Freno Brenta Cerámica Delanteras",
+                marca: "BREMBO",
+                precio: 18900,
+                cantidad: 1,
+              },
+            ],
+            total: 101000,
+          },
+          {
+            numero: 1028,
+            fecha: "26/09/2026 11:15",
+            nombre: "Carlos Motero",
+            dni: "34.567.890",
+            tel: "376 524-3554",
+            email: "cliente@gmail.com",
+            pago: "TRANSFERENCIA",
+            modalidadEntrega: "MOTOMANDADO",
+            costoEnvio: 2500,
+            estado: "CONFIRMADO",
+            items: [
+              {
+                id: 4,
+                nombre: "Cubierta Delantera Pirelli Diablo Rosso IV 110/70-17",
+                marca: "PIRELLI",
+                precio: 98000,
+                cantidad: 1,
+              },
+              {
+                id: 5,
+                nombre: "Bujía NGK CR9E Japón Iridium",
+                marca: "NGK",
+                precio: 14500,
+                cantidad: 2,
+              },
+            ],
+            total: 127000,
+          },
+          {
             numero: 1001,
-            fecha: "26/09/2026 14:22",
+            fecha: "20/09/2026 14:22",
             nombre: "Juan García",
             dni: "31.254.770",
-            tel: "351 555-4433",
+            tel: "376 524-3554",
             email: "juan.garcia@gmail.com",
-            pago: "EFECTIVO",
-            estado: "LISTO_PARA_RETIRAR",
+            pago: "TRANSFERENCIA",
+            modalidadEntrega: "RETIRO_LOCAL",
+            codigoTicket: "TK-1001",
+            estado: "RETIRADO",
             items: [
               {
                 id: 1,
@@ -171,6 +247,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
             cantidad: Math.min(cantidad, product.stock),
             stock: product.stock,
             imagen: product.imagen,
+            esCombo: (product as unknown as { esCombo?: boolean }).esCombo || false,
           },
         ];
       }
@@ -211,12 +288,37 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     dni: string;
     tel: string;
     email: string;
-    pago: "EFECTIVO" | "TRANSFERENCIA";
+    pago: "TRANSFERENCIA" | "TARJETA" | "EFECTIVO_LOCAL" | "EFECTIVO";
+    modalidadEntrega?: "RETIRO_LOCAL" | "MOTOMANDADO";
+    costoEnvio?: number;
+    itemsVerificados?: PedidoItem[];
+    totalVerificado?: number;
   }): number | null => {
     if (items.length === 0) return null;
 
     const nextNumero =
       pedidos.length > 0 ? Math.max(...pedidos.map((p) => p.numero)) + 1 : 1001;
+
+    const esEfectivo = datos.pago === "EFECTIVO_LOCAL" || datos.pago === "EFECTIVO";
+    const modEntrega: "RETIRO_LOCAL" | "MOTOMANDADO" = esEfectivo
+      ? "RETIRO_LOCAL"
+      : (datos.modalidadEntrega || "RETIRO_LOCAL");
+
+    const costoEnvio = modEntrega === "MOTOMANDADO" ? 2500 : 0;
+    const codigoTicket = esEfectivo ? `OC-${nextNumero}` : `TK-${nextNumero}`;
+
+    // Si el checkout validó los precios contra PostgreSQL, usamos los datos seguros del servidor
+    const itemsFinales = datos.itemsVerificados || items.map((i) => ({
+      id: i.id,
+      nombre: i.nombre,
+      marca: i.marca,
+      precio: i.precio,
+      cantidad: i.cantidad,
+    }));
+
+    const totalFinal = datos.totalVerificado !== undefined
+      ? datos.totalVerificado + costoEnvio
+      : subtotal + costoEnvio;
 
     const nuevoPedido: Pedido = {
       numero: nextNumero,
@@ -232,15 +334,12 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       tel: datos.tel,
       email: datos.email,
       pago: datos.pago,
-      estado: "PENDIENTE",
-      items: items.map((i) => ({
-        id: i.id,
-        nombre: i.nombre,
-        marca: i.marca,
-        precio: i.precio,
-        cantidad: i.cantidad,
-      })),
-      total: subtotal,
+      modalidadEntrega: modEntrega,
+      costoEnvio: costoEnvio > 0 ? costoEnvio : undefined,
+      codigoTicket: codigoTicket,
+      estado: esEfectivo ? "PENDIENTE" : "CONFIRMADO",
+      items: itemsFinales,
+      total: totalFinal,
     };
 
     setPedidos((prev) => [nuevoPedido, ...prev]);
@@ -253,6 +352,13 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       prev.map((p) => (p.numero === numero ? { ...p, estado: nuevoEstado } : p))
     );
     showToast(`Pedido #${numero} actualizado a ${nuevoEstado.replace(/_/g, " ")}`);
+  };
+
+  const cancelarPedido = (numero: number) => {
+    setPedidos((prev) =>
+      prev.map((p) => (p.numero === numero ? { ...p, estado: "CANCELADO" } : p))
+    );
+    showToast(`Orden #${numero} cancelada`);
   };
 
   return (
@@ -269,6 +375,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         pedidos,
         crearPedido,
         cambiarEstadoPedido,
+        cancelarPedido,
       }}
     >
       {children}

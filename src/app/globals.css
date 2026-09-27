@@ -1,24 +1,213 @@
 @import "tailwindcss";
 
+/* Enforce class-based dark mode so OS dark mode does NOT interfere with light mode */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-brand: #d62828;
   --color-brandhover: #b91c1c;
-  --color-surface: #17181c;
-  --color-card: #1d1e24;
-  --color-line: #26272e;
+  --color-surface: var(--surface);
+  --color-card: var(--card);
+  --color-line: var(--line);
 }
 
 :root {
   --bg: #101114;
+  --surface: #17181c;
+  --card: #1d1e24;
+  --line: #26272e;
+}
+
+html.light {
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --line: #e2e8f0;
 }
 
 body {
   background-color: var(--bg);
-  color: #ffffff;
+  color: #f8fafc;
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-/* Custom scrollbar matching mockup */
+/* ==========================================================================
+   MODO CLARO (LIGHT THEME) - LIMPIO, LUMINOSO Y DE ALTO CONTRASTE
+   ========================================================================== */
+html.light body {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+/* Headings en modo claro */
+html.light h1,
+html.light h2,
+html.light h3,
+html.light h4,
+html.light h5,
+html.light h6 {
+  color: #0f172a !important;
+}
+
+/* Textos oscuros de alto contraste en modo claro */
+html.light .text-slate-900,
+html.light .text-slate-800 {
+  color: #0f172a !important;
+}
+
+html.light .text-slate-700,
+html.light .text-slate-600 {
+  color: #334155 !important;
+}
+
+html.light .text-slate-500 {
+  color: #64748b !important;
+}
+
+html.light .text-slate-400 {
+  color: #475569 !important;
+}
+
+html.light .text-slate-300:not(button, button *, .keep-white, .keep-white *, [class*="bg-brand"] *, [class*="bg-emerald"] *, [class*="bg-amber"] *, [class*="bg-red"] *) {
+  color: #334155 !important;
+}
+
+/* Evitar que text-white y dark:text-white vuelvan blanco el texto en modo claro fuera de botones de color */
+html.light .text-white:not(.keep-white, .keep-white *, button, button *, [class*="bg-brand"], [class*="bg-brand"] *, [class*="bg-emerald"], [class*="bg-emerald"] *, [class*="bg-blue"], [class*="bg-blue"] *, [class*="bg-amber"], [class*="bg-amber"] *, [class*="bg-red"], [class*="bg-red"] *, [class*="bg-slate-900"], [class*="bg-slate-900"] *),
+html.light [class*="dark:text-white"]:not(.keep-white, .keep-white *, button, button *, [class*="bg-brand"], [class*="bg-brand"] *, [class*="bg-emerald"], [class*="bg-emerald"] *, [class*="bg-blue"], [class*="bg-blue"] *, [class*="bg-amber"], [class*="bg-amber"] *, [class*="bg-red"], [class*="bg-red"] *, [class*="bg-slate-900"], [class*="bg-slate-900"] *) {
+  color: #0f172a !important;
+}
+
+/* Tablas y especificaciones en modo claro */
+html.light table td,
+html.light table th {
+  color: #0f172a !important;
+  border-color: #e2e8f0 !important;
+}
+html.light table tr.bg-surface\/50,
+html.light table tr:nth-child(odd) {
+  background-color: #f8fafc !important;
+}
+
+
+/* Barra superior de anuncios e información comercial en modo claro */
+html.light header > div:first-child,
+html.light .top-announcement-bar {
+  background-color: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+  color: #334155 !important;
+}
+
+html.light header > div:first-child a,
+html.light .top-announcement-bar a {
+  color: #334155 !important;
+}
+
+html.light header > div:first-child a:hover,
+html.light .top-announcement-bar a:hover {
+  color: #d62828 !important;
+}
+
+/* Header principal */
+html.light header {
+  background-color: rgba(255, 255, 255, 0.98) !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* Tarjetas y superficies en modo claro */
+html.light .bg-card {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+html.light .bg-surface {
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+html.light .border-line {
+  border-color: #e2e8f0 !important;
+}
+
+/* Tarjetas de línea de tiempo y steppers en modo claro */
+html.light .timeline-step-card {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  color: #0f172a !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+}
+
+html.light .timeline-step-card span {
+  color: #0f172a !important;
+}
+
+html.light .timeline-step-card span.text-slate-500 {
+  color: #64748b !important;
+}
+
+/* Inputs y Selects en modo claro */
+html.light input:not(.keep-dark-input),
+html.light select:not(.keep-dark-input),
+html.light textarea:not(.keep-dark-input) {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+html.light input::placeholder,
+html.light textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* Footer adaptativo */
+html.light footer {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.03) !important;
+}
+
+html.light footer * {
+  border-color: #e2e8f0 !important;
+}
+
+html.light footer p,
+html.light footer div,
+html.light footer span:not(.badge-pill, .badge-pill *) {
+  color: #0f172a !important;
+}
+
+html.light footer .text-slate-900,
+html.light footer .font-black,
+html.light footer .font-extrabold {
+  color: #0f172a !important;
+}
+
+html.light footer a {
+  color: #334155 !important;
+}
+
+html.light footer a:hover {
+  color: #d62828 !important;
+}
+
+html.light footer .text-slate-600,
+html.light footer .text-slate-500,
+html.light footer .text-slate-400 {
+  color: #64748b !important;
+}
+
+/* Footer en modo oscuro */
+html.dark footer,
+html:not(.light) footer {
+  background-color: #0c0d10 !important;
+  color: #cbd5e1 !important;
+  border-color: #1e2028 !important;
+}
+
+/* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -29,4 +218,30 @@ body {
 }
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* Marquesina continua infinita */
+@keyframes marquee-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-marquee-smooth {
+  display: flex;
+  width: max-content;
+  animation: marquee-scroll 28s linear infinite;
+  will-change: transform;
+}
+
+.animate-marquee-smooth:hover {
+  animation-play-state: paused;
+}
+
+/* Ocultar barra de desplazamiento manteniendo el scroll horizontal */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
