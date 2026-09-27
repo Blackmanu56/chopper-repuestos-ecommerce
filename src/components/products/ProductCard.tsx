@@ -52,13 +52,6 @@ export default function ProductCard({ product }: { product: ProductItem }) {
         {formatPrice(product.precio)}
       </div>
 
-      <div className="mt-1">
-        {product.stock > 0 ? (
-          <span className="text-xs text-green-400">Stock: {product.stock} u.</span>
-        ) : (
-          <span className="text-xs font-semibold text-red-400">Sin stock</span>
-        )}
-      </div>
 
       {product.stock > 0 ? (
         <button

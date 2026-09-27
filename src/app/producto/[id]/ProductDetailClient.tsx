@@ -69,7 +69,7 @@ export default function ProductDetailClient({ product }: { product: ProductItem 
             }`}
           >
             {product.stock > 0
-              ? `Hay ${product.stock} unidades disponibles en el local`
+              ? "Disponible para retiro en el local"
               : "Producto sin stock"}
           </div>
 
