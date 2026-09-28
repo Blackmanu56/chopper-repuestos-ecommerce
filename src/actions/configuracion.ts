@@ -346,7 +346,7 @@ function sanitizeModulo(m: string): string {
   return m
     .replace(/Identidad & Branding/gi, "Identidad")
     .replace(/Combos & Kits/gi, "Combos y kits")
-    .replace(/Catálogo & Ofertas/gi, "Catálogo y marcas")
+    .replace(/Catálogo & Ofertas/gi, "Catálogo y Ofertas")
     .replace(/\s*&\s*/g, " y ");
 }
 

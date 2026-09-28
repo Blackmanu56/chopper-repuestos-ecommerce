@@ -567,7 +567,7 @@ export default function PanelPage() {
         await registrarAuditoriaAction(
           user.nombreCompleto || "Administrador",
           `Editó configuración comercial de "${editingProduct.nombre}"`,
-          "Catálogo y marcas",
+          "Catálogo y Ofertas",
           `Precio: $${productNormalPrice} · Oferta: ${productEnOferta ? `${productDescuentoPct}% OFF ($${precioOferta})` : "No"}`
         );
         setEditingProduct(null);
@@ -686,7 +686,7 @@ export default function PanelPage() {
         await registrarAuditoriaAction(
           user.nombreCompleto || "Administrador",
           `Aplicó oferta masiva del ${bulkDescuentoPct}% (${bulkBadgePromo}) a ${selectedProductIds.length} repuestos`,
-          "Catálogo y marcas",
+          "Catálogo y Ofertas",
           `Productos: [${selectedProductIds.join(", ")}]`
         );
         setShowBulkOfferModal(false);
@@ -713,7 +713,7 @@ export default function PanelPage() {
         await registrarAuditoriaAction(
           user.nombreCompleto || "Administrador",
           `Quitó ofertas comerciales en lote a ${selectedProductIds.length} productos`,
-          "Catálogo y marcas",
+          "Catálogo y Ofertas",
           `Productos: [${selectedProductIds.join(", ")}]`
         );
         setSelectedProductIds([]);
@@ -1283,7 +1283,7 @@ export default function PanelPage() {
     return m
       .replace(/Identidad & Branding/gi, "Identidad")
       .replace(/Combos & Kits/gi, "Combos y kits")
-      .replace(/Catálogo & Ofertas/gi, "Catálogo y marcas")
+      .replace(/Catálogo & Ofertas/gi, "Catálogo y Ofertas")
       .replace(/\s*&\s*/g, " y ");
   };
 
@@ -1428,7 +1428,7 @@ export default function PanelPage() {
                     : "text-[#9a9ba3] hover:bg-[#1c1d22] hover:text-white"
                 }`}
               >
-                Catálogo y marcas
+                Catálogo y Ofertas
               </button>
 
               <button
@@ -2018,7 +2018,7 @@ export default function PanelPage() {
           <section>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-6">
               <div>
-                <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Catálogo y marcas</h1>
+                <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Catálogo y Ofertas</h1>
                 <p className="text-xs sm:text-[13px] text-[#9a9ba3] mt-0.5">
                   Buscá cualquier producto, ajustá precios, gestioná ofertas y cargá hasta 4 fotos.
                 </p>
