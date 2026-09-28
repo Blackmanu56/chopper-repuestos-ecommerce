@@ -22,6 +22,8 @@ export interface CrearPedidoOnlineInput {
   modalidadEntrega: "RETIRO_LOCAL" | "MOTOMANDADO";
   costoEnvio?: number;
   metodoPago: "TRANSFERENCIA" | "EFECTIVO_LOCAL" | "TARJETA";
+  cuotas?: number;
+  comprobanteUrl?: string;
   items: ItemPedidoInput[];
   notas?: string;
 }
@@ -210,37 +212,122 @@ export async function crearPedidoOnlineAction(
     });
     const proximoNumero = ultimoPedido ? Math.max(1050, ultimoPedido.numero + 1) : 1050;
 
-    // 4. Crear el pedido en transacción atómica
-    const nuevoPedido = await prisma.pedidoEcommerce.create({
-      data: {
-        numero: proximoNumero,
-        clienteId: cliente.id,
-        nombreCliente: cleanNombre,
-        dniCliente: cleanDni,
-        telefonoCliente: cleanTel,
-        emailCliente: cleanEmail,
-        direccionEnvio: cleanDir,
-        modalidadEntrega: input.modalidadEntrega,
-        costoEnvio,
-        metodoPago: input.metodoPago,
-        estado: "PENDIENTE",
-        total: totalFinal,
-        notas: input.notas?.trim() || null,
-        items: {
-          create: verifiedItems.map((vit) => ({
-            productoId: vit.productoId,
-            comboId: vit.comboId,
-            nombre: vit.nombre,
-            marca: vit.marca,
-            cantidad: vit.cantidad,
-            precioUnitario: vit.precioUnitario,
-            subtotal: vit.subtotal,
-          })),
+    // 4. Determinar estado inicial y notas automáticas de pago
+    let initialEstado: "PENDIENTE" | "CONFIRMADO" = "PENDIENTE";
+    const extraNotas: string[] = [];
+    if (input.notas?.trim()) {
+      extraNotas.push(input.notas.trim());
+    }
+
+    if (input.metodoPago === "TARJETA") {
+      initialEstado = "CONFIRMADO";
+      extraNotas.push(`Pago con tarjeta aprobado por pasarela online (${input.cuotas || 1} cuota(s)).`);
+    } else if (input.metodoPago === "TRANSFERENCIA") {
+      initialEstado = "PENDIENTE";
+      if (input.comprobanteUrl) {
+        extraNotas.push("Transferencia bancaria con comprobante adjunto. Pendiente de verificación comercial por Ventas.");
+      } else {
+        extraNotas.push("Transferencia bancaria. Pendiente de carga de comprobante por el cliente.");
+      }
+    } else if (input.metodoPago === "EFECTIVO_LOCAL") {
+      initialEstado = "CONFIRMADO";
+      extraNotas.push("Pago en efectivo al retirar en mostrador (Av. Roque Sáenz Peña 1500). Pendiente de cobro en caja.");
+    }
+
+    // 5. Crear el pedido en transacción atómica y descontar stock reservado
+    const nuevoPedido = await prisma.$transaction(async (tx) => {
+      const pedidoCreado = await tx.pedidoEcommerce.create({
+        data: {
+          numero: proximoNumero,
+          clienteId: cliente.id,
+          nombreCliente: cleanNombre,
+          dniCliente: cleanDni,
+          telefonoCliente: cleanTel,
+          emailCliente: cleanEmail,
+          direccionEnvio: cleanDir,
+          modalidadEntrega: input.modalidadEntrega,
+          costoEnvio,
+          metodoPago: input.metodoPago,
+          estado: initialEstado,
+          comprobanteUrl: input.comprobanteUrl || null,
+          total: totalFinal,
+          notas: extraNotas.length > 0 ? extraNotas.join(" | ") : null,
+          items: {
+            create: verifiedItems.map((vit) => ({
+              productoId: vit.productoId,
+              comboId: vit.comboId,
+              nombre: vit.nombre,
+              marca: vit.marca,
+              cantidad: vit.cantidad,
+              precioUnitario: vit.precioUnitario,
+              subtotal: vit.subtotal,
+            })),
+          },
         },
-      },
-      include: {
-        items: true,
-      },
+        include: {
+          items: true,
+        },
+      });
+
+      // Descontar inventario físico y asentar movimientos
+      for (const vit of verifiedItems) {
+        if (vit.productoId) {
+          const prodActual = await tx.producto.findUnique({
+            where: { id: vit.productoId },
+            select: { id: true, cantidad: true },
+          });
+          if (prodActual) {
+            const nuevaCantidad = Math.max(0, prodActual.cantidad - vit.cantidad);
+            await tx.producto.update({
+              where: { id: vit.productoId },
+              data: { cantidad: nuevaCantidad },
+            });
+            await tx.movimientoProducto.create({
+              data: {
+                productoId: vit.productoId,
+                usuarioId: 1,
+                tipo: "VENTA",
+                cantidadAnterior: prodActual.cantidad,
+                cantidadNueva: nuevaCantidad,
+                motivo: `Venta E-Commerce orden #ORD-${proximoNumero}`,
+              },
+            });
+          }
+        } else if (vit.comboId) {
+          const comboDb = await tx.comboEcommerce.findUnique({
+            where: { id: vit.comboId },
+            include: { items: true },
+          });
+          if (comboDb && comboDb.items) {
+            for (const cItem of comboDb.items) {
+              const prodActual = await tx.producto.findUnique({
+                where: { id: cItem.productoId },
+                select: { id: true, cantidad: true },
+              });
+              if (prodActual) {
+                const totalDescontar = cItem.cantidad * vit.cantidad;
+                const nuevaCantidad = Math.max(0, prodActual.cantidad - totalDescontar);
+                await tx.producto.update({
+                  where: { id: cItem.productoId },
+                  data: { cantidad: nuevaCantidad },
+                });
+                await tx.movimientoProducto.create({
+                  data: {
+                    productoId: cItem.productoId,
+                    usuarioId: 1,
+                    tipo: "VENTA",
+                    cantidadAnterior: prodActual.cantidad,
+                    cantidadNueva: nuevaCantidad,
+                    motivo: `Venta E-Commerce orden #ORD-${proximoNumero} (Componente de Combo: ${comboDb.nombre})`,
+                  },
+                });
+              }
+            }
+          }
+        }
+      }
+
+      return pedidoCreado;
     });
 
     try {
@@ -452,6 +539,7 @@ export async function actualizarEstadoPedidoAction(
   try {
     const pedidoActual = await prisma.pedidoEcommerce.findUnique({
       where: { id: pedidoId },
+      include: { items: true },
     });
 
     if (!pedidoActual) {
@@ -468,7 +556,27 @@ export async function actualizarEstadoPedidoAction(
 
     // Si pasa a estado PREPARANDO, o si se especifica un preparador
     if (nuevoEstado === "PREPARANDO" || asignarPreparadorId !== undefined) {
-      const targetPreparerId = asignarPreparadorId !== undefined ? asignarPreparadorId : (pedidoActual.preparadorUsuarioId || userId);
+      let targetPreparerId = asignarPreparadorId;
+      if (targetPreparerId === undefined) {
+        if (pedidoActual.preparadorUsuarioId) {
+          targetPreparerId = pedidoActual.preparadorUsuarioId;
+        } else {
+          // Si el usuario logueado es de Stock, se autoasigna
+          if (auth.rol === "ENCARGADO_STOCK") {
+            targetPreparerId = userId;
+          } else {
+            // Si es Ventas o Administrador, asignar al encargado de Stock (María García)
+            const stockWorker = await prisma.usuario.findFirst({
+              where: {
+                activo: true,
+                rol: { nombre: "ENCARGADO_STOCK" },
+              },
+              select: { id: true },
+            });
+            targetPreparerId = stockWorker ? stockWorker.id : userId;
+          }
+        }
+      }
 
       if (targetPreparerId) {
         const preparerUser = await prisma.usuario.findUnique({
@@ -486,6 +594,66 @@ export async function actualizarEstadoPedidoAction(
       } else {
         updateData.preparadorUsuarioId = null;
         updateData.preparadorNombre = null;
+      }
+    }
+
+    // Si se cancela el pedido y no estaba cancelado previamente, restituir el stock físico
+    if (nuevoEstado === "CANCELADO" && pedidoActual.estado !== "CANCELADO") {
+      for (const it of pedidoActual.items) {
+        if (it.productoId) {
+          const prodActual = await prisma.producto.findUnique({
+            where: { id: it.productoId },
+            select: { id: true, cantidad: true },
+          });
+          if (prodActual) {
+            const nuevaCantidad = prodActual.cantidad + it.cantidad;
+            await prisma.producto.update({
+              where: { id: it.productoId },
+              data: { cantidad: nuevaCantidad },
+            });
+            await prisma.movimientoProducto.create({
+              data: {
+                productoId: it.productoId,
+                usuarioId: userId,
+                tipo: "REPOSICION_DIRECTA",
+                cantidadAnterior: prodActual.cantidad,
+                cantidadNueva: nuevaCantidad,
+                motivo: `Restitución por cancelación de orden E-Commerce #ORD-${pedidoActual.numero}`,
+              },
+            });
+          }
+        } else if (it.comboId) {
+          const comboDb = await prisma.comboEcommerce.findUnique({
+            where: { id: it.comboId },
+            include: { items: true },
+          });
+          if (comboDb && comboDb.items) {
+            for (const cItem of comboDb.items) {
+              const prodActual = await prisma.producto.findUnique({
+                where: { id: cItem.productoId },
+                select: { id: true, cantidad: true },
+              });
+              if (prodActual) {
+                const totalRestituir = cItem.cantidad * it.cantidad;
+                const nuevaCantidad = prodActual.cantidad + totalRestituir;
+                await prisma.producto.update({
+                  where: { id: cItem.productoId },
+                  data: { cantidad: nuevaCantidad },
+                });
+                await prisma.movimientoProducto.create({
+                  data: {
+                    productoId: cItem.productoId,
+                    usuarioId: userId,
+                    tipo: "REPOSICION_DIRECTA",
+                    cantidadAnterior: prodActual.cantidad,
+                    cantidadNueva: nuevaCantidad,
+                    motivo: `Restitución por cancelación de orden E-Commerce #ORD-${pedidoActual.numero} (Componente de Combo: ${comboDb.nombre})`,
+                  },
+                });
+              }
+            }
+          }
+        }
       }
     }
 
@@ -616,7 +784,8 @@ export async function subirComprobantePedidoAction(
       where: { numero: pedidoNumero },
       data: {
         comprobanteUrl,
-        estado: pedido.estado === "PENDIENTE" ? "CONFIRMADO" : pedido.estado,
+        // No pasar a CONFIRMADO automáticamente: requiere revisión por Ventas / Admin
+        notas: "Comprobante de transferencia cargado por el cliente. Pendiente de verificación por Ventas.",
       },
     });
 
@@ -629,5 +798,86 @@ export async function subirComprobantePedidoAction(
   } catch (error) {
     console.error("Error al subir comprobante:", error);
     return { success: false, error: "Error al procesar el comprobante." };
+  }
+}
+
+/**
+ * Permite a Ventas o Administrador rechazar un comprobante ilegible o con monto incorrecto
+ */
+export async function rechazarComprobantePedidoAction(
+  userId: number,
+  pedidoId: number,
+  motivoRechazo: string
+): Promise<{ success: boolean; pedido?: PedidoDTO; error?: string }> {
+  const auth = await verifyStaff(userId);
+  if (!auth.authorized) {
+    return { success: false, error: auth.error };
+  }
+
+  try {
+    const pedidoActual = await prisma.pedidoEcommerce.findUnique({
+      where: { id: pedidoId },
+      include: { items: true },
+    });
+
+    if (!pedidoActual) {
+      return { success: false, error: "Pedido no encontrado." };
+    }
+
+    const notaRechazo = `Comprobante rechazado por ${auth.nombre || "Ventas"}: "${motivoRechazo.trim()}". El cliente debe adjuntar un comprobante válido.`;
+
+    const updated = await prisma.pedidoEcommerce.update({
+      where: { id: pedidoId },
+      data: {
+        estado: "PENDIENTE",
+        comprobanteUrl: null,
+        notas: notaRechazo,
+      },
+      include: { items: true },
+    });
+
+    try {
+      revalidatePath("/panel");
+      revalidatePath("/mis-pedidos");
+    } catch {}
+
+    return {
+      success: true,
+      pedido: {
+        id: updated.id,
+        numero: updated.numero,
+        clienteId: updated.clienteId,
+        nombreCliente: updated.nombreCliente,
+        dniCliente: updated.dniCliente,
+        telefonoCliente: updated.telefonoCliente,
+        emailCliente: updated.emailCliente,
+        direccionEnvio: updated.direccionEnvio,
+        modalidadEntrega: updated.modalidadEntrega,
+        costoEnvio: updated.costoEnvio,
+        metodoPago: updated.metodoPago,
+        estado: updated.estado,
+        comprobanteUrl: updated.comprobanteUrl,
+        preparadorUsuarioId: updated.preparadorUsuarioId,
+        preparadorNombre: updated.preparadorNombre,
+        fechaPreparacion: updated.fechaPreparacion,
+        total: updated.total,
+        notas: updated.notas,
+        creadoEn: updated.creadoEn,
+        actualizadoEn: updated.actualizadoEn,
+        items: updated.items.map((i) => ({
+          id: i.id,
+          productoId: i.productoId,
+          comboId: i.comboId,
+          nombre: i.nombre,
+          marca: i.marca,
+          cantidad: i.cantidad,
+          precioUnitario: i.precioUnitario,
+          subtotal: i.subtotal,
+        })),
+      },
+    };
+  } catch (error) {
+    console.error("Error al rechazar comprobante:", error);
+    return { success: false, error: "Error al rechazar el comprobante." };
   }
 }

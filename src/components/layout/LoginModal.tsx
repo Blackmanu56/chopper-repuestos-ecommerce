@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -36,6 +36,22 @@ export default function LoginModal() {
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Limpiar campos para que siempre se ingresen a mano
+  useEffect(() => {
+    if (isLoginOpen) {
+      setUsername("");
+      setPassword("");
+      setNombreCompleto("");
+      setTelefono("");
+      setEmail("");
+      setRecoveryCode("");
+      setRecoverySent(false);
+      setError("");
+      setSuccessMsg("");
+      setLoading(false);
+    }
+  }, [isLoginOpen]);
 
   if (!isLoginOpen) return null;
 
@@ -196,7 +212,7 @@ export default function LoginModal() {
 
         {/* 1. MODO INICIAR SESIÓN (CLIENTES) */}
         {mode === "LOGIN" && (
-          <form onSubmit={handleLogin} className="space-y-3.5 text-xs">
+          <form onSubmit={handleLogin} className="space-y-3.5 text-xs" autoComplete="off">
             <div>
               <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1">
                 Usuario o Correo
@@ -204,6 +220,7 @@ export default function LoginModal() {
               <div className="relative">
                 <input
                   required
+                  autoComplete="off"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="Ingresá tu usuario o correo"
@@ -227,6 +244,8 @@ export default function LoginModal() {
               <div className="relative">
                 <input
                   type="password"
+                  required
+                  autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
@@ -243,24 +262,6 @@ export default function LoginModal() {
               <span>Ingresar a mi cuenta</span>
               <ArrowRight size={14} />
             </button>
-
-            <div className="pt-2 border-t border-line/60">
-              <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1.5">
-                <span>Cuenta de prueba rápida:</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setUsername("cliente@gmail.com");
-                  setPassword("cliente123");
-                  loginClient("cliente@gmail.com", "cliente123");
-                }}
-                className="w-full flex items-center justify-between rounded-lg border border-dashed border-brand/40 bg-brand/5 px-2.5 py-1.5 text-[11px] text-brand hover:bg-brand/10 transition-colors"
-              >
-                <span className="font-mono">👤 cliente@gmail.com / cliente123</span>
-                <span className="font-bold underline text-[10px]">Auto-login</span>
-              </button>
-            </div>
           </form>
         )}
 
@@ -389,7 +390,7 @@ export default function LoginModal() {
 
         {/* 4. MODO PERSONAL Y ADMINISTRACIÓN (SIN AUTO-LOGIN) */}
         {mode === "STAFF" && (
-          <form onSubmit={handleStaffLogin} className="space-y-3.5 text-xs">
+          <form onSubmit={handleStaffLogin} className="space-y-3.5 text-xs" autoComplete="off">
             <div className="rounded-xl border border-brand/40 bg-brand/10 p-3 flex items-start gap-2.5">
               <ShieldCheck size={18} className="text-brand shrink-0 mt-0.5" />
               <div>
@@ -407,6 +408,7 @@ export default function LoginModal() {
               <div className="relative">
                 <input
                   required
+                  autoComplete="off"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="admin, ventas o stock"
@@ -424,6 +426,7 @@ export default function LoginModal() {
                 <input
                   required
                   type="password"
+                  autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"

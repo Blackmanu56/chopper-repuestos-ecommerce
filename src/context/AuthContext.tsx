@@ -334,6 +334,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     localStorage.removeItem("chopper_user");
     setIsProfileOpen(false);
+    setIsLoginOpen(false);
+    if (typeof window !== "undefined" && window.location.pathname.startsWith("/panel")) {
+      window.location.href = "/";
+    }
   };
 
   return (

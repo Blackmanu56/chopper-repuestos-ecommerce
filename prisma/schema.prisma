@@ -227,6 +227,7 @@ model Producto {
 model Marca {
   id        Int        @id @default(autoincrement())
   nombre    String     @unique
+  imagen    String?
   activo    Boolean    @default(true)
   productos Producto[]
 

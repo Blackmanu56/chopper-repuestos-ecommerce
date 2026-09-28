@@ -15,9 +15,12 @@ import {
   Ticket,
   RefreshCw,
   CheckCircle,
+  Upload,
+  Sparkles,
+  Zap,
 } from "lucide-react";
 import { validarPreciosServerAction, ValidatedCartItem } from "@/actions/commercial";
-import { crearPedidoOnlineAction } from "@/actions/pedidos";
+import { crearPedidoOnlineAction, subirComprobantePedidoAction } from "@/actions/pedidos";
 
 export default function CheckoutPage() {
   const router = useRouter();
@@ -33,6 +36,24 @@ export default function CheckoutPage() {
     direccionEnvio: "Posadas, Misiones",
     pago: "TRANSFERENCIA" as "TRANSFERENCIA" | "TARJETA" | "EFECTIVO_LOCAL",
   });
+
+  // Simulación de Tarjeta y Cuotas
+  const [tarjetaCuotas, setTarjetaCuotas] = useState<number>(1);
+  const [tarjetaNumero, setTarjetaNumero] = useState("");
+  const [tarjetaTitular, setTarjetaTitular] = useState("");
+  const [tarjetaVence, setTarjetaVence] = useState("");
+  const [tarjetaCvv, setTarjetaCvv] = useState("");
+
+  const cargarTarjetaFicticia = () => {
+    setTarjetaNumero("4509 8812 3456 7890");
+    setTarjetaTitular("CARLOS LOPEZ");
+    setTarjetaVence("08/29");
+    setTarjetaCvv("742");
+  };
+
+  // Transferencia (Comprobante directo en checkout)
+  const [archivoComprobante, setArchivoComprobante] = useState<File | null>(null);
+  const [previewComprobante, setPreviewComprobante] = useState<string | null>(null);
 
   const [verificandoPrecios, setVerificandoPrecios] = useState(false);
   const [serverWarnings, setServerWarnings] = useState<string[]>([]);
@@ -112,6 +133,7 @@ export default function CheckoutPage() {
         modalidadEntrega: modFinal,
         costoEnvio: modFinal === "MOTOMANDADO" ? costoMotomandado : 0,
         metodoPago: formData.pago,
+        cuotas: formData.pago === "TARJETA" ? tarjetaCuotas : undefined,
         items: items.map((i) => ({
           id: i.id,
           nombre: i.nombre,
@@ -125,6 +147,17 @@ export default function CheckoutPage() {
         alert(resOnline.error || "No se pudo registrar el pedido.");
         setVerificandoPrecios(false);
         return;
+      }
+
+      // 4. Si pagó por transferencia y adjuntó comprobante en checkout, subirlo de inmediato
+      if (formData.pago === "TRANSFERENCIA" && archivoComprobante && resOnline.pedido) {
+        try {
+          const compFd = new FormData();
+          compFd.append("comprobante", archivoComprobante);
+          await subirComprobantePedidoAction(resOnline.pedido.numero, compFd);
+        } catch (errComp) {
+          console.error("Error al subir comprobante adjunto:", errComp);
+        }
       }
 
       // También mantener sincronizado el contexto del cliente y vaciar carrito
@@ -370,6 +403,72 @@ export default function CheckoutPage() {
                 </div>
               </label>
 
+              {formData.pago === "TRANSFERENCIA" && (
+                <div className="bg-slate-50 dark:bg-[#141519] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 space-y-3.5 ml-2 mr-2">
+                  <div className="flex items-center justify-between border-b border-slate-200 dark:border-[#26272e] pb-2">
+                    <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5 text-xs">
+                      <Building className="w-4 h-4 text-brand" /> Datos de la cuenta para transferir
+                    </span>
+                    <span className="text-[10px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold px-2 py-0.5 rounded-full border border-emerald-500/20">
+                      Acreditación inmediata
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    <div className="bg-white dark:bg-[#0f1012] p-2.5 rounded-lg border border-slate-200 dark:border-[#26272e]">
+                      <span className="text-[10px] text-slate-500 dark:text-[#6b6c75] block font-semibold">ALIAS:</span>
+                      <b className="text-brand text-sm tracking-wide">CHOPPER.REPUESTOS</b>
+                    </div>
+                    <div className="bg-white dark:bg-[#0f1012] p-2.5 rounded-lg border border-slate-200 dark:border-[#26272e]">
+                      <span className="text-[10px] text-slate-500 dark:text-[#6b6c75] block font-semibold">CBU:</span>
+                      <b className="text-slate-800 dark:text-white text-xs select-all">0000003100012345678901</b>
+                    </div>
+                  </div>
+                  <div className="text-[11px] text-slate-600 dark:text-[#9a9ba3]">
+                    Banco: <strong>Banco Macro</strong> · Titular: <strong>Chopper Repuestos S.R.L.</strong>
+                  </div>
+
+                  {/* Adjuntar comprobante */}
+                  <div className="pt-2 border-t border-slate-200 dark:border-[#26272e]">
+                    <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1.5 flex items-center gap-1.5">
+                      <Upload className="w-3.5 h-3.5 text-brand" />
+                      Adjuntar captura o comprobante de transferencia (Opcional ahora):
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setArchivoComprobante(file);
+                          if (file.type.startsWith("image/")) {
+                            setPreviewComprobante(URL.createObjectURL(file));
+                          } else {
+                            setPreviewComprobante(null);
+                          }
+                        }
+                      }}
+                      className="block w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-brand/10 file:text-brand hover:file:bg-brand/20 cursor-pointer"
+                    />
+                    {previewComprobante && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <img
+                          src={previewComprobante}
+                          alt="Comprobante preview"
+                          className="w-16 h-16 object-cover rounded-lg border border-slate-300 dark:border-[#35363d]"
+                        />
+                        <div className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                          <CheckCircle className="w-4 h-4" /> Comprobante adjuntado listo para enviar
+                        </div>
+                      </div>
+                    )}
+                    <p className="text-[10px] text-slate-500 dark:text-[#6b6c75] mt-1">
+                      Si aún no hiciste la transferencia, podés confirmar ahora y adjuntar el comprobante más tarde en <strong>Mis Pedidos</strong>.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Opción 2: Tarjeta Débito / Crédito */}
               <label
                 onClick={() => setFormData((prev) => ({ ...prev, pago: "TARJETA" }))}
@@ -395,6 +494,135 @@ export default function CheckoutPage() {
                   </p>
                 </div>
               </label>
+
+              {formData.pago === "TARJETA" && (
+                <div className="bg-slate-50 dark:bg-[#141519] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 space-y-4 ml-2 mr-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 dark:border-[#26272e] pb-2">
+                    <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5 text-xs">
+                      <CreditCard className="w-4 h-4 text-brand" /> Simulación de Pago con Tarjeta
+                    </span>
+                    <button
+                      type="button"
+                      onClick={cargarTarjetaFicticia}
+                      className="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 dark:text-amber-400 border border-amber-500/30 rounded-lg text-[11px] font-bold transition-colors flex items-center gap-1 self-start sm:self-auto"
+                    >
+                      <Zap className="w-3.5 h-3.5" /> ⚡ Cargar tarjeta ficticia de prueba
+                    </button>
+                  </div>
+
+                  {/* Selector de Cuotas */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1.5">
+                      Seleccioná el plan de cuotas:
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setTarjetaCuotas(1)}
+                        className={`p-2.5 rounded-lg border text-left transition-all ${
+                          tarjetaCuotas === 1
+                            ? "border-brand bg-brand/10 text-brand font-bold"
+                            : "border-slate-200 dark:border-[#26272e] bg-white dark:bg-[#0f1012] text-slate-700 dark:text-[#b8b9c0]"
+                        }`}
+                      >
+                        <div className="text-xs font-bold">1 pago</div>
+                        <div className="text-[11px] font-extrabold">{formatPrice(totalConEnvio)}</div>
+                        <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">Sin interés</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setTarjetaCuotas(3)}
+                        className={`p-2.5 rounded-lg border text-left transition-all ${
+                          tarjetaCuotas === 3
+                            ? "border-brand bg-brand/10 text-brand font-bold"
+                            : "border-slate-200 dark:border-[#26272e] bg-white dark:bg-[#0f1012] text-slate-700 dark:text-[#b8b9c0]"
+                        }`}
+                      >
+                        <div className="text-xs font-bold">3 cuotas</div>
+                        <div className="text-[11px] font-extrabold">{formatPrice(Math.round(totalConEnvio / 3))} / mes</div>
+                        <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">Sin interés</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setTarjetaCuotas(6)}
+                        className={`p-2.5 rounded-lg border text-left transition-all ${
+                          tarjetaCuotas === 6
+                            ? "border-brand bg-brand/10 text-brand font-bold"
+                            : "border-slate-200 dark:border-[#26272e] bg-white dark:bg-[#0f1012] text-slate-700 dark:text-[#b8b9c0]"
+                        }`}
+                      >
+                        <div className="text-xs font-bold">6 cuotas</div>
+                        <div className="text-[11px] font-extrabold">{formatPrice(Math.round(totalConEnvio / 6))} / mes</div>
+                        <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">Cuotas fijas</div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Formulario de tarjeta simulada */}
+                  <div className="space-y-2.5 text-xs">
+                    <div>
+                      <span className="text-[11px] font-semibold text-slate-600 dark:text-[#9a9ba3] block mb-1">
+                        Número de Tarjeta
+                      </span>
+                      <input
+                        type="text"
+                        placeholder="•••• •••• •••• ••••"
+                        value={tarjetaNumero}
+                        onChange={(e) => setTarjetaNumero(e.target.value)}
+                        className="w-full rounded-xl border border-slate-300 dark:border-[#35363d] bg-white dark:bg-[#0f1012] px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-brand font-mono"
+                      />
+                    </div>
+                    <div>
+                      <span className="text-[11px] font-semibold text-slate-600 dark:text-[#9a9ba3] block mb-1">
+                        Nombre y Apellido (Como figura en el plástico)
+                      </span>
+                      <input
+                        type="text"
+                        placeholder="Ej: CARLOS LOPEZ"
+                        value={tarjetaTitular}
+                        onChange={(e) => setTarjetaTitular(e.target.value.toUpperCase())}
+                        className="w-full rounded-xl border border-slate-300 dark:border-[#35363d] bg-white dark:bg-[#0f1012] px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-brand uppercase"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="text-[11px] font-semibold text-slate-600 dark:text-[#9a9ba3] block mb-1">
+                          Vencimiento
+                        </span>
+                        <input
+                          type="text"
+                          placeholder="MM/AA"
+                          value={tarjetaVence}
+                          onChange={(e) => setTarjetaVence(e.target.value)}
+                          className="w-full rounded-xl border border-slate-300 dark:border-[#35363d] bg-white dark:bg-[#0f1012] px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-brand font-mono text-center"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[11px] font-semibold text-slate-600 dark:text-[#9a9ba3] block mb-1">
+                          Código de Seguridad
+                        </span>
+                        <input
+                          type="password"
+                          maxLength={4}
+                          placeholder="•••"
+                          value={tarjetaCvv}
+                          onChange={(e) => setTarjetaCvv(e.target.value)}
+                          className="w-full rounded-xl border border-slate-300 dark:border-[#35363d] bg-white dark:bg-[#0f1012] px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-brand font-mono text-center"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg bg-blue-500/10 border border-blue-500/20 p-2.5 text-[11px] text-blue-700 dark:text-blue-300 flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-blue-500 shrink-0" />
+                    <span>
+                      <strong>Modo Simulación:</strong> El pago se aprobará en línea instantáneamente y tu pedido pasará directamente a <strong>CONFIRMADO</strong> en el panel de Chopper.
+                    </span>
+                  </div>
+                </div>
+              )}
 
               {/* Opción 3: Efectivo en mostrador (Orden de Compra y reserva) */}
               <label

@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 800" width="100%" height="100%">
+  <defs>
+    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0284c7" />
+      <stop offset="100%" stop-color="#0369a1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Fondo del comprobante -->
+  <rect width="600" height="800" rx="16" fill="#ffffff" />
+  <rect width="600" height="800" rx="16" fill="none" stroke="#cbd5e1" stroke-width="2" />
+  
+  <!-- Encabezado Banco -->
+  <rect width="600" height="130" rx="16" fill="url(#headerGrad)" />
+  <rect y="110" width="600" height="20" fill="url(#headerGrad)" />
+  
+  <!-- Logo / Banco -->
+  <text x="40" y="55" font-family="system-ui, -apple-system, sans-serif" font-size="22" font-weight="900" fill="#ffffff" letter-spacing="1">BANCO MACRO</text>
+  <text x="40" y="80" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="500" fill="#e0f2fe">Comprobante de Transferencia Inmediata</text>
+  <circle cx="530" cy="65" r="28" fill="#ffffff" fill-opacity="0.2" />
+  <path d="M520 65 L527 72 L542 57" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+  
+  <!-- Monto Principal -->
+  <rect x="40" y="160" width="520" height="100" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5" />
+  <text x="60" y="195" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="600" fill="#64748b">IMPORTE TRANSFERIDO</text>
+  <text x="60" y="235" font-family="system-ui, -apple-system, sans-serif" font-size="34" font-weight="900" fill="#0f172a">$ 27.000,00</text>
+  <text x="440" y="230" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="700" fill="#16a34a">ACREDITADO</text>
+  
+  <!-- Detalles de la operación -->
+  <g transform="translate(40, 290)">
+    <!-- Destinatario -->
+    <text x="0" y="0" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#94a3b8" letter-spacing="0.5">DESTINATARIO</text>
+    <text x="0" y="22" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="800" fill="#1e293b">CHOPPER REPUESTOS POSADAS</text>
+    <text x="0" y="42" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="500" fill="#475569">CUIT: 30-71829384-5 · Cuenta Corriente Especial</text>
+    <text x="0" y="62" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-family="monospace" fill="#0284c7">CBU: 2850001240090412890123</text>
+    <text x="0" y="82" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="600" fill="#334155">Alias: CHOPPER.REPUESTOS.POS</text>
+    
+    <line x1="0" y1="105" x2="520" y2="105" stroke="#e2e8f0" stroke-width="1" />
+    
+    <!-- Originante -->
+    <text x="0" y="135" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#94a3b8" letter-spacing="0.5">ORIGINANTE / CLIENTE</text>
+    <text x="0" y="157" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="700" fill="#1e293b">Joaquín Maidana</text>
+    <text x="0" y="177" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="500" fill="#475569">DNI: 36.889.123 · Caja de Ahorro</text>
+    
+    <line x1="0" y1="200" x2="520" y2="200" stroke="#e2e8f0" stroke-width="1" />
+    
+    <!-- Datos de la transacción -->
+    <text x="0" y="230" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#94a3b8" letter-spacing="0.5">DETALLES DE LA OPERACIÓN</text>
+    <text x="0" y="255" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="600" fill="#475569">Fecha y Hora:</text>
+    <text x="180" y="255" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="700" fill="#0f172a">27/09/2026 - 22:30:15 hs</text>
+    
+    <text x="0" y="280" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="600" fill="#475569">Número de Control:</text>
+    <text x="180" y="280" font-family="monospace" font-size="13" font-weight="700" fill="#0f172a">TRX-20260927-849204128</text>
+    
+    <text x="0" y="305" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="600" fill="#475569">Motivo:</text>
+    <text x="180" y="305" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="700" fill="#0f172a">Compra de Repuestos Chopper #ORD-1058</text>
+    
+    <text x="0" y="330" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="600" fill="#475569">Canal de Operación:</text>
+    <text x="180" y="330" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="500" fill="#0f172a">App Móvil Banca Personal</text>
+    
+    <line x1="0" y1="360" x2="520" y2="360" stroke="#e2e8f0" stroke-width="1" />
+  </g>
+  
+  <!-- Footer de Seguridad -->
+  <rect x="40" y="690" width="520" height="70" rx="8" fill="#f1f5f9" />
+  <text x="60" y="720" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#475569">🔒 SEGURIDAD BANCARIA HOMOLOGADA</text>
+  <text x="60" y="740" font-family="system-ui, -apple-system, sans-serif" font-size="10" font-weight="500" fill="#64748b">Comprobante emitido automáticamente por la Red Interbancaria BCRA. Válido como constancia de acreditación.</text>
+</svg>

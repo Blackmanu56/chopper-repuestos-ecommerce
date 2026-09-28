@@ -74,8 +74,8 @@ html.light .text-slate-300:not(button, button *, .keep-white, .keep-white *, [cl
 }
 
 /* Evitar que text-white y dark:text-white vuelvan blanco el texto en modo claro fuera de botones de color */
-html.light .text-white:not(.keep-white, .keep-white *, button, button *, [class*="bg-brand"], [class*="bg-brand"] *, [class*="bg-emerald"], [class*="bg-emerald"] *, [class*="bg-blue"], [class*="bg-blue"] *, [class*="bg-amber"], [class*="bg-amber"] *, [class*="bg-red"], [class*="bg-red"] *, [class*="bg-slate-900"], [class*="bg-slate-900"] *),
-html.light [class*="dark:text-white"]:not(.keep-white, .keep-white *, button, button *, [class*="bg-brand"], [class*="bg-brand"] *, [class*="bg-emerald"], [class*="bg-emerald"] *, [class*="bg-blue"], [class*="bg-blue"] *, [class*="bg-amber"], [class*="bg-amber"] *, [class*="bg-red"], [class*="bg-red"] *, [class*="bg-slate-900"], [class*="bg-slate-900"] *) {
+html.light .text-white:not(.keep-white, .keep-white *, button, button *, label, label *, [class*="bg-brand"], [class*="bg-brand"] *, [class*="bg-emerald"], [class*="bg-emerald"] *, [class*="bg-blue"], [class*="bg-blue"] *, [class*="bg-amber"], [class*="bg-amber"] *, [class*="bg-red"], [class*="bg-red"] *, [class*="bg-[#dc2626]"], [class*="bg-[#dc2626]"] *, [class*="bg-[#16a34a]"], [class*="bg-[#16a34a]"] *, [class*="bg-[#3b82f6]"], [class*="bg-[#3b82f6]"] *, [class*="bg-slate-900"], [class*="bg-slate-900"] *),
+html.light [class*="dark:text-white"]:not(.keep-white, .keep-white *, button, button *, label, label *, [class*="bg-brand"], [class*="bg-brand"] *, [class*="bg-emerald"], [class*="bg-emerald"] *, [class*="bg-blue"], [class*="bg-blue"] *, [class*="bg-amber"], [class*="bg-amber"] *, [class*="bg-red"], [class*="bg-red"] *, [class*="bg-[#dc2626]"], [class*="bg-[#dc2626]"] *, [class*="bg-[#16a34a]"], [class*="bg-[#16a34a]"] *, [class*="bg-[#3b82f6]"], [class*="bg-[#3b82f6]"] *, [class*="bg-slate-900"], [class*="bg-slate-900"] *) {
   color: #0f172a !important;
 }
 
@@ -244,4 +244,550 @@ html:not(.light) footer {
 .scrollbar-none {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* ==========================================================================
+   PANEL DE CONTROL - SOPORTE COMPLETO MODO CLARO (LIGHT THEME)
+   Aplica a todos los 9 módulos: Pedidos Online, Catálogo y marcas,
+   Marcas, Combos y kits, Etiquetas de oferta, Identidad,
+   Entrega de pedido, Preparación de pedidos y Auditoría.
+   ========================================================================== */
+html.light .panel-root {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+/* Sidebar en modo claro */
+html.light .panel-root aside[class*="bg-[#16171c]"],
+html.light aside[class*="bg-[#16171c]"] {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+html.light aside nav button:not([class*="bg-[#1a1b20]"]) {
+  color: #475569 !important;
+}
+
+html.light aside nav button:not([class*="bg-[#1a1b20]"]):hover {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+html.light aside nav button[class*="bg-[#1a1b20]"] {
+  background-color: #fee2e2 !important;
+  color: #dc2626 !important;
+  border-left: 3px solid #dc2626 !important;
+  font-weight: 700 !important;
+}
+
+html.light .panel-root aside [class*="bg-[#141519]"] {
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* Enlaces estilo botón en sidebar ("Ver tienda", etc.) */
+html.light .panel-root a[class*="bg-[#1a1b20]"],
+html.light .panel-root a[class*="bg-[#16171c]"],
+html.light .panel-root a[class*="bg-[#141519]"],
+html.light .panel-root a[class*="bg-[#0f1012]"] {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  border-width: 1px !important;
+  color: #334155 !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+}
+html.light .panel-root a[class*="bg-[#1a1b20]"]:hover,
+html.light .panel-root a[class*="bg-[#16171c]"]:hover,
+html.light .panel-root a[class*="bg-[#141519]"]:hover,
+html.light .panel-root a[class*="bg-[#0f1012]"]:hover {
+  background-color: #f8fafc !important;
+  border-color: #dc2626 !important;
+  color: #dc2626 !important;
+}
+
+/* Contenedores y tarjetas principales */
+html.light .panel-root div[class*="bg-[#16171c]"]:not(.keep-dark),
+html.light .panel-root section[class*="bg-[#16171c]"],
+html.light .panel-root div[class*="bg-[#1a1b20]"]:not(
+  button[class*="bg-red"],
+  button[class*="bg-emerald"],
+  button[class*="bg-amber"],
+  button[class*="bg-blue"],
+  button[class*="bg-purple"],
+  .keep-dark
+) {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  color: #0f172a !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05) !important;
+}
+
+/* Contenedores anidados secundarios (grises suaves) */
+html.light .panel-root div[class*="bg-[#141519]"]:not(.keep-dark),
+html.light .panel-root div[class*="bg-[#0f1012]"]:not(input, select, textarea, .keep-dark) {
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+/* Bordes en general */
+html.light .panel-root [class*="border-[#26272e]"],
+html.light .panel-root [class*="border-[#35363d]"] {
+  border-color: #e2e8f0 !important;
+}
+
+/* TEXTOS: Corregir textos blancos que quedan invisibles en modo claro */
+html.light .panel-root .text-white:not(
+  button[class*="bg-red"] *,
+  button[class*="bg-emerald"] *,
+  button[class*="bg-amber"] *,
+  button[class*="bg-blue"] *,
+  button[class*="bg-purple"] *,
+  button[class*="bg-[#dc2626]"] *,
+  button[class*="bg-[#16a34a]"] *,
+  button[class*="bg-[#3b82f6]"] *,
+  button[class*="bg-[#a855f7]"] *,
+  button[class*="bg-red"],
+  button[class*="bg-emerald"],
+  button[class*="bg-[#dc2626]"],
+  button[class*="bg-[#16a34a]"],
+  button[class*="bg-[#3b82f6]"],
+  button[class*="bg-[#a855f7]"],
+  label[class*="bg-red"] *,
+  label[class*="bg-red"],
+  label[class*="bg-[#dc2626]"] *,
+  label[class*="bg-[#dc2626]"],
+  span[class*="bg-[#dc2626]"] *,
+  span[class*="bg-[#dc2626]"],
+  span[class*="bg-red-600"] *,
+  span[class*="bg-red-600"],
+  div[class*="bg-red-600"] *,
+  div[class*="bg-red-600"],
+  [class*="bg-[#dc2626]"] *,
+  [class*="bg-[#dc2626]"],
+  [class*="bg-red-600"] *,
+  [class*="bg-red-600"],
+  [class*="bg-red-700"] *,
+  [class*="bg-red-700"],
+  [class*="bg-[#16a34a]"] *,
+  [class*="bg-[#16a34a]"],
+  [class*="bg-[#3b82f6]"] *,
+  [class*="bg-[#3b82f6]"],
+  a[class*="bg-emerald"] *,
+  a[class*="bg-emerald"],
+  .keep-white,
+  .keep-white *
+),
+html.light .fixed.inset-0 .text-white:not(
+  button[class*="bg-red"] *,
+  button[class*="bg-emerald"] *,
+  button[class*="bg-amber"] *,
+  button[class*="bg-blue"] *,
+  button[class*="bg-purple"] *,
+  button[class*="bg-[#dc2626]"] *,
+  button[class*="bg-[#16a34a]"] *,
+  button[class*="bg-[#3b82f6]"] *,
+  button[class*="bg-[#a855f7]"] *,
+  button[class*="bg-amber-600"] *,
+  button[class*="bg-red"],
+  button[class*="bg-emerald"],
+  button[class*="bg-[#dc2626]"],
+  button[class*="bg-[#16a34a]"],
+  button[class*="bg-[#3b82f6]"],
+  button[class*="bg-[#a855f7]"],
+  button[class*="bg-amber-600"],
+  label[class*="bg-red"] *,
+  label[class*="bg-red"],
+  label[class*="bg-[#dc2626]"] *,
+  label[class*="bg-[#dc2626]"],
+  span[class*="bg-[#dc2626]"] *,
+  span[class*="bg-[#dc2626]"],
+  span[class*="bg-red-600"] *,
+  span[class*="bg-red-600"],
+  [class*="bg-[#dc2626]"] *,
+  [class*="bg-[#dc2626]"],
+  [class*="bg-red-600"] *,
+  [class*="bg-red-600"],
+  [class*="bg-red-700"] *,
+  [class*="bg-red-700"],
+  [class*="bg-[#16a34a]"] *,
+  [class*="bg-[#16a34a]"],
+  [class*="bg-[#3b82f6]"] *,
+  [class*="bg-[#3b82f6]"],
+  a[class*="bg-emerald"] *,
+  a[class*="bg-emerald"],
+  .keep-white,
+  .keep-white *
+) {
+  color: #0f172a !important;
+}
+
+/* TEXTO E ÍCONOS BLANCOS OBLIGATORIOS EN BOTONES/BADGES/LABELS ROJOS O DE COLOR VIVO */
+html.light .panel-root [class*="bg-[#dc2626]"],
+html.light .panel-root [class*="bg-[#dc2626]"] *,
+html.light .panel-root [class*="bg-red-600"],
+html.light .panel-root [class*="bg-red-600"] *,
+html.light .panel-root [class*="bg-red-700"],
+html.light .panel-root [class*="bg-red-700"] *,
+html.light .panel-root label[class*="bg-red"],
+html.light .panel-root label[class*="bg-red"] *,
+html.light .panel-root [class*="bg-[#16a34a]"],
+html.light .panel-root [class*="bg-[#16a34a]"] *,
+html.light .panel-root [class*="bg-emerald-600"],
+html.light .panel-root [class*="bg-emerald-600"] *,
+html.light .panel-root [class*="bg-sky-600"],
+html.light .panel-root [class*="bg-sky-600"] *,
+html.light .panel-root [class*="bg-[#3b82f6]"],
+html.light .panel-root [class*="bg-[#3b82f6]"] *,
+html.light .fixed.inset-0 [class*="bg-[#dc2626]"],
+html.light .fixed.inset-0 [class*="bg-[#dc2626]"] *,
+html.light .fixed.inset-0 [class*="bg-red-600"],
+html.light .fixed.inset-0 [class*="bg-red-600"] *,
+html.light .fixed.inset-0 label[class*="bg-red"],
+html.light .fixed.inset-0 label[class*="bg-red"] * {
+  color: #ffffff !important;
+}
+
+html.light .panel-root [class*="bg-[#dc2626]"] svg,
+html.light .panel-root [class*="bg-red-600"] svg,
+html.light .panel-root [class*="bg-red-700"] svg,
+html.light .panel-root label[class*="bg-red"] svg,
+html.light .fixed.inset-0 [class*="bg-[#dc2626]"] svg,
+html.light .fixed.inset-0 [class*="bg-red-600"] svg,
+html.light .fixed.inset-0 label[class*="bg-red"] svg {
+  color: #ffffff !important;
+  stroke: #ffffff !important;
+}
+
+/* Textos de escala de grises con alto contraste */
+html.light .panel-root [class*="text-[#e7e7ea]"],
+html.light .panel-root [class*="text-[#b8b9c0]"],
+html.light .panel-root [class*="text-[#d7d8dd]"],
+html.light .fixed.inset-0 [class*="text-[#e7e7ea]"],
+html.light .fixed.inset-0 [class*="text-[#b8b9c0]"],
+html.light .fixed.inset-0 [class*="text-[#d7d8dd]"] {
+  color: #1e293b !important;
+}
+
+html.light .panel-root [class*="text-[#9a9ba3]"],
+html.light .panel-root [class*="text-[#8e8f96]"],
+html.light .panel-root [class*="text-[#6b6c75]"],
+html.light .fixed.inset-0 [class*="text-[#9a9ba3]"],
+html.light .fixed.inset-0 [class*="text-[#8e8f96]"],
+html.light .fixed.inset-0 [class*="text-[#6b6c75]"] {
+  color: #64748b !important;
+}
+
+/* Colores de acento ajustados para fondo claro */
+html.light .panel-root .text-amber-400 {
+  color: #d97706 !important;
+}
+html.light .panel-root .text-sky-400 {
+  color: #0284c7 !important;
+}
+html.light .panel-root .text-emerald-400 {
+  color: #16a34a !important;
+}
+
+/* Banner de Auditoría e Identidad en modo claro */
+html.light .panel-root [class*="from-red-950"] {
+  background: linear-gradient(to right, #fef2f2, #ffffff, #ffffff) !important;
+  border-color: #fecaca !important;
+}
+html.light .panel-root [class*="from-red-950"] span[class*="text-red-400"] {
+  color: #b91c1c !important;
+}
+html.light .panel-root [class*="from-red-950"] h2 {
+  color: #0f172a !important;
+}
+html.light .panel-root [class*="from-red-950"] p {
+  color: #475569 !important;
+}
+html.light .panel-root [class*="from-red-950"] [class*="bg-[#141519]"] {
+  background-color: #ffffff !important;
+  border-color: #fecaca !important;
+  color: #b91c1c !important;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   TODOS LOS BOTONES SECUNDARIOS / OPERATIVOS DEL PANEL EN MODO CLARO
+   Cubre: "Actualizar", "Refrescar logs", "Ver detalle",
+   "Ver detalle completo y comprobante", "Con Comprobante",
+   "Editar", "Editar nombre", "Limpiar", "Ocultar", etc.
+   ══════════════════════════════════════════════════════════════ */
+html.light .panel-root button[class*="bg-[#16171c]"],
+html.light .panel-root button[class*="bg-[#1a1b20]"]:not(
+  button[class*="bg-red"],
+  button[class*="bg-emerald"],
+  button[class*="bg-amber"],
+  button[class*="bg-blue"],
+  button[class*="bg-purple"],
+  button[class*="bg-[#dc2626]"],
+  button[class*="bg-[#16a34a]"]
+),
+html.light .panel-root button[class*="bg-[#141519]"],
+html.light .panel-root button[class*="bg-[#0f1012]"]:not([class*="bg-sky-600"], [class*="bg-red"]),
+html.light .panel-root button[class*="bg-[#26272e]"],
+html.light .panel-root button[class*="bg-zinc-800"],
+html.light .fixed.inset-0 button[class*="bg-[#16171c]"],
+html.light .fixed.inset-0 button[class*="bg-[#1a1b20]"]:not(
+  button[class*="bg-red"],
+  button[class*="bg-emerald"],
+  button[class*="bg-amber"],
+  button[class*="bg-blue"],
+  button[class*="bg-purple"],
+  button[class*="bg-[#dc2626]"],
+  button[class*="bg-[#16a34a]"]
+),
+html.light .fixed.inset-0 button[class*="bg-[#141519]"],
+html.light .fixed.inset-0 button[class*="bg-[#0f1012]"]:not([class*="bg-sky-600"], [class*="bg-red"]),
+html.light .fixed.inset-0 button[class*="bg-[#26272e]"],
+html.light .fixed.inset-0 button[class*="bg-zinc-800"] {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  border-width: 1px !important;
+  color: #0f172a !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) !important;
+}
+
+html.light .panel-root button[class*="bg-[#16171c]"]:hover,
+html.light .panel-root button[class*="bg-[#1a1b20]"]:hover:not(
+  button[class*="bg-red"],
+  button[class*="bg-emerald"],
+  button[class*="bg-amber"],
+  button[class*="bg-blue"],
+  button[class*="bg-purple"],
+  button[class*="bg-[#dc2626]"],
+  button[class*="bg-[#16a34a]"]
+),
+html.light .panel-root button[class*="bg-[#141519]"]:hover,
+html.light .panel-root button[class*="bg-[#0f1012]"]:hover:not([class*="bg-sky-600"], [class*="bg-red"]),
+html.light .panel-root button[class*="bg-[#26272e]"]:hover,
+html.light .panel-root button[class*="bg-zinc-800"]:hover,
+html.light .fixed.inset-0 button[class*="bg-[#16171c]"]:hover,
+html.light .fixed.inset-0 button[class*="bg-[#1a1b20]"]:hover:not(
+  button[class*="bg-red"],
+  button[class*="bg-emerald"],
+  button[class*="bg-amber"],
+  button[class*="bg-blue"],
+  button[class*="bg-purple"],
+  button[class*="bg-[#dc2626]"],
+  button[class*="bg-[#16a34a]"]
+),
+html.light .fixed.inset-0 button[class*="bg-[#141519]"]:hover,
+html.light .fixed.inset-0 button[class*="bg-[#0f1012]"]:hover:not([class*="bg-sky-600"], [class*="bg-red"]),
+html.light .fixed.inset-0 button[class*="bg-[#26272e]"]:hover,
+html.light .fixed.inset-0 button[class*="bg-zinc-800"]:hover {
+  background-color: #f1f5f9 !important;
+  border-color: #94a3b8 !important;
+  color: #0f172a !important;
+}
+
+/* Botones transparentes con borde ("Ocultar", "Pausar", "Cancelar", etc.) */
+html.light .panel-root button[class*="bg-transparent"][class*="border-[#35363d]"],
+html.light .fixed.inset-0 button[class*="bg-transparent"][class*="border-[#35363d]"] {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #475569 !important;
+}
+html.light .panel-root button[class*="bg-transparent"][class*="border-[#35363d]"]:hover,
+html.light .fixed.inset-0 button[class*="bg-transparent"][class*="border-[#35363d]"]:hover {
+  background-color: #f8fafc !important;
+  border-color: #94a3b8 !important;
+  color: #0f172a !important;
+}
+
+/* Botón "Con Comprobante" cuando no está activo: texto cian/azul visible */
+html.light .panel-root button[class*="text-sky-400"] {
+  color: #0284c7 !important;
+}
+
+/* Íconos dentro de botones secundarios */
+html.light .panel-root button[class*="bg-[#26272e]"] svg,
+html.light .fixed.inset-0 button[class*="bg-[#26272e]"] svg {
+  color: #0284c7 !important;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   BADGES Y PILLS EN MODO CLARO
+   Cubre: [CASTROL], [HONDA], [MOTUL], [Pedidos Online],
+   [Oferta Relámpago] pausada, [Pausada], [Comprobante],
+   pills de repuestos ("1x Filtro de aceite..."), etc.
+   ══════════════════════════════════════════════════════════════ */
+/* Badges rojos translúcidos (Marcas en tarjetas y módulo en auditoría) */
+html.light .panel-root span[class*="bg-red-950"],
+html.light .panel-root div[class*="bg-red-950"]:not([class*="from-red-950"]),
+html.light .fixed.inset-0 span[class*="bg-red-950"] {
+  background-color: #fee2e2 !important;
+  border-color: #fca5a5 !important;
+  color: #b91c1c !important;
+}
+
+/* Badges pausados / inactivos / grises (Oferta Relámpago pausada, Pausada, Ocultas) */
+html.light .panel-root span[class*="bg-[#3a3b42]"],
+html.light .panel-root span[class*="bg-zinc-800"],
+html.light .fixed.inset-0 span[class*="bg-[#3a3b42]"],
+html.light .fixed.inset-0 span[class*="bg-zinc-800"] {
+  background-color: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+  border-width: 1px !important;
+  color: #475569 !important;
+}
+
+/* Badges cian/azul y violeta (Comprobante y Preparando en pedidos) */
+html.light .panel-root span[class*="bg-sky-950"],
+html.light .panel-root span[class*="bg-blue-950"],
+html.light .fixed.inset-0 span[class*="bg-sky-950"],
+html.light .fixed.inset-0 span[class*="bg-blue-950"] {
+  background-color: #e0f2fe !important;
+  border-color: #7dd3fc !important;
+  color: #0369a1 !important;
+}
+
+html.light .panel-root span[class*="bg-indigo-950"],
+html.light .fixed.inset-0 span[class*="bg-indigo-950"] {
+  background-color: #e0e7ff !important;
+  border-color: #a5b4fc !important;
+  color: #4338ca !important;
+}
+
+/* Pills de repuestos dentro de pedidos ("1x Filtro de aceite...") */
+html.light .panel-root span[class*="bg-[#1a1b20]"],
+html.light .panel-root span[class*="bg-[#141519]"],
+html.light .fixed.inset-0 span[class*="bg-[#1a1b20]"],
+html.light .fixed.inset-0 span[class*="bg-[#141519]"] {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  border-width: 1px !important;
+  color: #0f172a !important;
+}
+
+/* Banners informativos verdes y amarillos en modal */
+html.light .panel-root div[class*="bg-emerald-950"],
+html.light .fixed.inset-0 div[class*="bg-emerald-950"] {
+  background-color: #f0fdf4 !important;
+  border-color: #86efac !important;
+  color: #15803d !important;
+}
+
+html.light .panel-root div[class*="bg-amber-950"],
+html.light .fixed.inset-0 div[class*="bg-amber-950"] {
+  background-color: #fffbeb !important;
+  border-color: #fde68a !important;
+  color: #b45309 !important;
+}
+
+/* Tarjeta de producto seleccionada en catálogo */
+html.light .panel-root [class*="bg-[#21171a]"] {
+  background-color: #fef2f2 !important;
+  border-color: #f87171 !important;
+}
+
+/* Checkboxes en el panel */
+html.light .panel-root input[type="checkbox"],
+html.light .fixed.inset-0 input[type="checkbox"] {
+  background-color: #ffffff !important;
+  border-color: #94a3b8 !important;
+  accent-color: #dc2626 !important;
+}
+
+/* Labels de subida de fotos / dropzone */
+html.light .panel-root label[class*="bg-[#141519]"],
+html.light .fixed.inset-0 label[class*="bg-[#141519]"] {
+  background-color: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+  color: #1e293b !important;
+}
+html.light .panel-root label[class*="bg-[#141519]"]:hover,
+html.light .fixed.inset-0 label[class*="bg-[#141519]"]:hover {
+  background-color: #f1f5f9 !important;
+  border-color: #dc2626 !important;
+  color: #dc2626 !important;
+}
+
+/* Modales y popups en el panel */
+html.light .fixed.inset-0 {
+  background-color: rgba(15, 23, 42, 0.6) !important;
+  backdrop-filter: blur(4px) !important;
+}
+
+html.light .fixed.inset-0 [class*="bg-[#16171c]"],
+html.light .fixed.inset-0 [class*="bg-[#1a1b20]"] {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25) !important;
+}
+
+html.light .fixed.inset-0 [class*="bg-[#141519]"] {
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+/* Inputs, selects y textareas del panel */
+html.light .panel-root input,
+html.light .panel-root select,
+html.light .panel-root textarea,
+html.light .fixed.inset-0 input,
+html.light .fixed.inset-0 select,
+html.light .fixed.inset-0 textarea {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+html.light .panel-root input::placeholder,
+html.light .panel-root textarea::placeholder,
+html.light .fixed.inset-0 input::placeholder,
+html.light .fixed.inset-0 textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* Controles segmentados / Filtros */
+html.light .panel-root div[class*="bg-[#0f1012]"] button[class*="bg-[#26272e]"],
+html.light .panel-root div[class*="bg-[#0f1012]"] button[class*="bg-[#1a1b20]"] {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08) !important;
+}
+
+html.light .panel-root span[class*="bg-[#1f2026]"] {
+  background-color: #e2e8f0 !important;
+  color: #475569 !important;
+}
+
+/* Tablas en el panel */
+html.light .panel-root thead[class*="bg-[#0f1012]"],
+html.light .fixed.inset-0 thead[class*="bg-[#0f1012]"] {
+  background-color: #f1f5f9 !important;
+  color: #475569 !important;
+  border-color: #e2e8f0 !important;
+}
+
+html.light .panel-root tbody[class*="divide-[#26272e]"] > tr,
+html.light .fixed.inset-0 tbody[class*="divide-[#26272e]"] > tr {
+  border-color: #e2e8f0 !important;
+}
+
+html.light .panel-root tbody[class*="divide-[#26272e]"] > tr:hover,
+html.light .fixed.inset-0 tbody[class*="divide-[#26272e]"] > tr:hover {
+  background-color: #f8fafc !important;
+}
+
+/* KPI cards hover & focus */
+html.light .panel-root .grid[class*="lg:grid-cols"] > div[class*="bg-[#16171c]"],
+html.light .panel-root .grid[class*="sm:grid-cols"] > div[class*="bg-[#16171c]"] {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+/* Badges y chips en modo claro */
+html.light div[class*="bg-[#141519]"] span[class*="font-mono"],
+html.light span[class*="font-mono"] {
+  background-color: #f1f5f9 !important;
+  color: #475569 !important;
+  border-color: #e2e8f0 !important;
 }

@@ -1,25 +1,51 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import { Flame } from "lucide-react";
+import { getMarcasPublicasAction } from "@/actions/commercial";
+
+const DEFAULT_MARCAS = [
+  { name: "HONDA", logo: "/marcas/honda.svg", origen: "Japón" },
+  { name: "YAMAHA", logo: "/marcas/yamaha.svg", origen: "Japón" },
+  { name: "MOTUL", logo: "/marcas/motul.svg", origen: "Francia" },
+  { name: "CASTROL", logo: "/marcas/castrol.svg", origen: "Reino Unido" },
+  { name: "PIRELLI", logo: "/marcas/pirelli.svg", origen: "Italia" },
+  { name: "DID", logo: "/marcas/did.svg", origen: "Japón" },
+  { name: "NGK", logo: "/marcas/ngk.svg", origen: "Japón" },
+  { name: "BOSCH", logo: "/marcas/bosch.svg", origen: "Alemania" },
+  { name: "BREMBO", logo: "/marcas/brembo.svg", origen: "Italia" },
+  { name: "BAJAJ", logo: "/marcas/bajaj.svg", origen: "India" },
+  { name: "MOTOMEL", logo: "/marcas/motomel.svg", origen: "Argentina" },
+  { name: "GILERA", logo: "/marcas/gilera.svg", origen: "Argentina" },
+];
 
 export default function MarcasCarrusel() {
-  const marcas = [
-    { name: "HONDA", logo: "/marcas/honda.svg", origen: "Japón", border: "border-red-500/30" },
-    { name: "YAMAHA", logo: "/marcas/yamaha.svg", origen: "Japón", border: "border-blue-500/30" },
-    { name: "MOTUL", logo: "/marcas/motul.svg", origen: "Francia", border: "border-red-500/40" },
-    { name: "CASTROL", logo: "/marcas/castrol.svg", origen: "Reino Unido", border: "border-emerald-500/30" },
-    { name: "PIRELLI", logo: "/marcas/pirelli.svg", origen: "Italia", border: "border-amber-500/30" },
-    { name: "DID", logo: "/marcas/did.svg", origen: "Japón", border: "border-amber-400/40" },
-    { name: "NGK", logo: "/marcas/ngk.svg", origen: "Japón", border: "border-red-500/30" },
-    { name: "BOSCH", logo: "/marcas/bosch.svg", origen: "Alemania", border: "border-blue-500/30" },
-    { name: "BREMBO", logo: "/marcas/brembo.svg", origen: "Italia", border: "border-red-500/30" },
-    { name: "BAJAJ", logo: "/marcas/bajaj.svg", origen: "India", border: "border-blue-500/30" },
-    { name: "MOTOMEL", logo: "/marcas/motomel.svg", origen: "Argentina", border: "border-sky-500/30" },
-    { name: "GILERA", logo: "/marcas/gilera.svg", origen: "Argentina", border: "border-red-500/30" },
-  ];
+  const [marcas, setMarcas] = useState(DEFAULT_MARCAS);
+
+  useEffect(() => {
+    let isMounted = true;
+    getMarcasPublicasAction().then((res) => {
+      if (isMounted && res.success && res.marcas.length > 0) {
+        const dynamic = res.marcas.map((m) => {
+          const slug = m.nombre
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/\s+/g, "");
+          return {
+            name: m.nombre.toUpperCase(),
+            logo: m.imagen || `/marcas/${slug}.svg`,
+            origen: "Oficial",
+          };
+        });
+        setMarcas(dynamic);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const marcasLoop = [...marcas, ...marcas];
 
@@ -47,12 +73,10 @@ export default function MarcasCarrusel() {
               title={`Filtrar repuestos oficiales de ${m.name}`}
             >
               <div className="relative h-10 w-32 flex items-center justify-center">
-                <Image
+                <img
                   src={m.logo}
                   alt={`Logo oficial de ${m.name}`}
-                  width={140}
-                  height={42}
-                  className="max-h-9 w-auto object-contain transition-transform group-hover:scale-105"
+                  className="max-h-9 max-w-full w-auto object-contain transition-transform group-hover:scale-105"
                 />
               </div>
               <span className="text-[9px] text-slate-500 dark:text-slate-400 font-semibold tracking-wider mt-1 uppercase">

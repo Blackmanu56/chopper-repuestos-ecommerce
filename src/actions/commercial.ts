@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { COMBOS_DATA } from "@/data/combos";
 
@@ -180,6 +181,8 @@ export async function upsertCommercialProductAction(
     recomendado?: boolean;
     badgePromo?: string | null;
     ordenOferta?: number;
+    imagenes?: string[];
+    precioVenta?: number;
   }
 ): Promise<{ success: boolean; error?: string; product?: CommercialProductItem }> {
   try {
@@ -214,7 +217,30 @@ export async function upsertCommercialProductAction(
       }
     }
 
-    // Upsert exclusivamente en productos_ecommerce (cero impacto en precioVenta o cantidad física de SGI)
+    // Actualizar imagen o precioVenta en producto si fueron provistos
+    let currentProduct = productBase;
+    if (
+      (data.imagenes !== undefined && Array.isArray(data.imagenes)) ||
+      (data.precioVenta !== undefined && data.precioVenta > 0)
+    ) {
+      const updateData: any = {};
+      if (data.imagenes !== undefined && Array.isArray(data.imagenes)) {
+        updateData.imagen = data.imagenes.filter(Boolean).join(",") || null;
+      }
+      if (data.precioVenta !== undefined && data.precioVenta > 0) {
+        updateData.precioVenta = data.precioVenta;
+      }
+      currentProduct = await prisma.producto.update({
+        where: { id: productoId },
+        data: updateData,
+        include: {
+          categoria: { select: { id: true, nombre: true } },
+          marcaRelacionada: { select: { id: true, nombre: true } },
+        },
+      });
+    }
+
+    // Upsert exclusivamente en productos_ecommerce (cero impacto en precioVenta o cantidad física de SGI si no se envió explícito)
     const updatedEcom = await prisma.productoEcommerce.upsert({
       where: { productoId },
       create: {
@@ -241,25 +267,25 @@ export async function upsertCommercialProductAction(
     });
 
     let descuentoPorcentaje = 0;
-    if (updatedEcom.enOferta && updatedEcom.precioOferta && productBase.precioVenta > 0) {
+    if (updatedEcom.enOferta && updatedEcom.precioOferta && currentProduct.precioVenta > 0) {
       descuentoPorcentaje = Math.max(
         0,
-        Math.round(((productBase.precioVenta - updatedEcom.precioOferta) / productBase.precioVenta) * 100)
+        Math.round(((currentProduct.precioVenta - updatedEcom.precioOferta) / currentProduct.precioVenta) * 100)
       );
     }
 
     const result: CommercialProductItem = {
-      id: productBase.id,
-      nombre: productBase.nombre,
-      codigo: productBase.codigo,
-      marca: productBase.marca || productBase.marcaRelacionada?.nombre || "Genérico",
-      categoriaId: productBase.categoriaId,
-      categoriaNombre: productBase.categoria.nombre,
-      precioVenta: productBase.precioVenta,
-      precioCompra: productBase.precioCompra,
-      cantidad: productBase.cantidad,
-      imagen: productBase.imagen,
-      activo: productBase.activo,
+      id: currentProduct.id,
+      nombre: currentProduct.nombre,
+      codigo: currentProduct.codigo,
+      marca: currentProduct.marca || currentProduct.marcaRelacionada?.nombre || "Genérico",
+      categoriaId: currentProduct.categoriaId,
+      categoriaNombre: currentProduct.categoria.nombre,
+      precioVenta: currentProduct.precioVenta,
+      precioCompra: currentProduct.precioCompra,
+      cantidad: currentProduct.cantidad,
+      imagen: currentProduct.imagen,
+      activo: currentProduct.activo,
       publicadoOnline: updatedEcom.publicadoOnline,
       enOferta: updatedEcom.enOferta,
       precioOferta: updatedEcom.precioOferta,
@@ -275,6 +301,266 @@ export async function upsertCommercialProductAction(
   } catch (error) {
     console.error("Error en upsertCommercialProductAction:", error);
     return { success: false, error: "Ocurrió un error al guardar la configuración comercial." };
+  }
+}
+
+// ══════════════════ CATEGORÍAS & MARCAS ADMIN ══════════════════
+
+export interface MarcaAdminItem {
+  id: number;
+  nombre: string;
+  activo: boolean;
+  imagen?: string | null;
+  productCount: number;
+}
+
+export async function getCategoriasAdminAction(): Promise<{
+  success: boolean;
+  categorias: { id: number; nombre: string; productCount: number }[];
+  error?: string;
+}> {
+  try {
+    const cats = await prisma.categoria.findMany({
+      where: { activo: true },
+      orderBy: { nombre: "asc" },
+      include: {
+        _count: {
+          select: { productos: { where: { activo: true } } },
+        },
+      },
+    });
+    return {
+      success: true,
+      categorias: cats.map((c) => ({
+        id: c.id,
+        nombre: c.nombre,
+        productCount: c._count.productos,
+      })),
+    };
+  } catch (e) {
+    console.error("Error al obtener categorias admin:", e);
+    return { success: false, categorias: [], error: "No se pudieron obtener las categorías." };
+  }
+}
+
+export async function crearCategoriaAction(
+  userId: number,
+  nombre: string
+): Promise<{ success: boolean; categoria?: { id: number; nombre: string; productCount: number }; error?: string }> {
+  const auth = await verifyCommercialStaff(userId);
+  if (!auth.authorized) return { success: false, error: auth.error };
+
+  const clean = nombre.trim();
+  if (!clean) return { success: false, error: "El nombre de la categoría es obligatorio." };
+
+  try {
+    const existing = await prisma.categoria.findFirst({
+      where: { nombre: { equals: clean, mode: "insensitive" } },
+    });
+    if (existing) {
+      return { success: false, error: "Ya existe una categoría con ese nombre." };
+    }
+    const cat = await prisma.categoria.create({
+      data: { nombre: clean, activo: true },
+    });
+    return { success: true, categoria: { id: cat.id, nombre: cat.nombre, productCount: 0 } };
+  } catch (e) {
+    console.error("Error al crear categoría:", e);
+    return { success: false, error: "No se pudo crear la categoría." };
+  }
+}
+
+export async function getMarcasAdminAction(): Promise<{
+  success: boolean;
+  marcas: MarcaAdminItem[];
+  error?: string;
+}> {
+  try {
+    const marcas = await prisma.marca.findMany({
+      orderBy: { nombre: "asc" },
+      include: {
+        _count: {
+          select: { productos: { where: { activo: true } } },
+        },
+      },
+    });
+
+    return {
+      success: true,
+      marcas: marcas.map((m) => ({
+        id: m.id,
+        nombre: m.nombre,
+        activo: m.activo,
+        imagen: m.imagen,
+        productCount: m._count.productos,
+      })),
+    };
+  } catch (e) {
+    console.error("Error al obtener marcas:", e);
+    return { success: false, marcas: [], error: "No se pudieron obtener las marcas." };
+  }
+}
+
+export async function getMarcasPublicasAction(): Promise<{
+  success: boolean;
+  marcas: Array<{ id: number; nombre: string; imagen: string | null }>;
+}> {
+  try {
+    const marcas = await prisma.marca.findMany({
+      where: { activo: true },
+      orderBy: { nombre: "asc" },
+      select: { id: true, nombre: true, imagen: true },
+    });
+    return { success: true, marcas };
+  } catch (e) {
+    console.error("Error al obtener marcas públicas:", e);
+    return { success: false, marcas: [] };
+  }
+}
+
+export async function crearMarcaAction(
+  userId: number,
+  nombre: string,
+  imagen?: string | null
+): Promise<{ success: boolean; marca?: MarcaAdminItem; error?: string }> {
+  const auth = await verifyCommercialStaff(userId);
+  if (!auth.authorized) return { success: false, error: auth.error };
+
+  const clean = nombre.trim();
+  if (!clean) return { success: false, error: "El nombre de la marca es obligatorio." };
+
+  try {
+    const existing = await prisma.marca.findFirst({
+      where: { nombre: { equals: clean, mode: "insensitive" } },
+    });
+    if (existing) {
+      return { success: false, error: "Ya existe una marca con ese nombre." };
+    }
+    const marca = await prisma.marca.create({
+      data: { nombre: clean, activo: true, imagen: imagen || null },
+    });
+    return {
+      success: true,
+      marca: { id: marca.id, nombre: marca.nombre, activo: marca.activo, imagen: marca.imagen, productCount: 0 },
+    };
+  } catch (e) {
+    console.error("Error al crear marca:", e);
+    return { success: false, error: "No se pudo crear la marca." };
+  }
+}
+
+export async function actualizarLogoMarcaAction(
+  userId: number,
+  marcaId: number,
+  imagen: string
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await verifyCommercialStaff(userId);
+  if (!auth.authorized) return { success: false, error: auth.error };
+
+  try {
+    await prisma.marca.update({
+      where: { id: marcaId },
+      data: { imagen },
+    });
+    try {
+      revalidatePath("/panel");
+      revalidatePath("/");
+      revalidatePath("/ofertas");
+    } catch {}
+    return { success: true };
+  } catch (e) {
+    console.error("Error al actualizar logo de marca:", e);
+    return { success: false, error: "No se pudo actualizar el logo de la marca." };
+  }
+}
+
+export async function editarMarcaCompletaAction(
+  userId: number,
+  marcaId: number,
+  nuevoNombre: string,
+  nuevaImagen?: string | null
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await verifyCommercialStaff(userId);
+  if (!auth.authorized) return { success: false, error: auth.error };
+
+  const clean = nuevoNombre.trim();
+  if (!clean) return { success: false, error: "El nombre de la marca no puede estar vacío." };
+
+  try {
+    const existing = await prisma.marca.findFirst({
+      where: {
+        id: { not: marcaId },
+        nombre: { equals: clean, mode: "insensitive" },
+      },
+    });
+    if (existing) {
+      return { success: false, error: "Ya existe otra marca con ese nombre." };
+    }
+
+    const updateData: { nombre: string; imagen?: string | null } = { nombre: clean };
+    if (nuevaImagen !== undefined) {
+      updateData.imagen = nuevaImagen;
+    }
+
+    await prisma.marca.update({
+      where: { id: marcaId },
+      data: updateData,
+    });
+
+    try {
+      revalidatePath("/panel");
+      revalidatePath("/");
+      revalidatePath("/ofertas");
+    } catch {}
+
+    return { success: true };
+  } catch (e) {
+    console.error("Error al editar marca:", e);
+    return { success: false, error: "No se pudo actualizar la marca." };
+  }
+}
+
+export async function toggleMarcaAction(
+  userId: number,
+  id: number,
+  activo: boolean
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await verifyCommercialStaff(userId);
+  if (!auth.authorized) return { success: false, error: auth.error };
+
+  try {
+    await prisma.marca.update({
+      where: { id },
+      data: { activo },
+    });
+    return { success: true };
+  } catch (e) {
+    console.error("Error al actualizar marca:", e);
+    return { success: false, error: "No se pudo actualizar el estado de la marca." };
+  }
+}
+
+export async function toggleMultiplesMarcasAction(
+  userId: number,
+  ids: number[],
+  activo: boolean
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await verifyCommercialStaff(userId);
+  if (!auth.authorized) return { success: false, error: auth.error };
+
+  if (!ids || ids.length === 0) {
+    return { success: false, error: "No seleccionaste ninguna marca." };
+  }
+
+  try {
+    await prisma.marca.updateMany({
+      where: { id: { in: ids } },
+      data: { activo },
+    });
+    return { success: true };
+  } catch (e) {
+    console.error("Error al actualizar marcas en lote:", e);
+    return { success: false, error: "No se pudieron actualizar las marcas seleccionadas." };
   }
 }
 
@@ -446,5 +732,99 @@ export async function validarPreciosServerAction(
       warnings: [],
       error: "Error interno al verificar los precios de la orden.",
     };
+  }
+}
+
+/**
+ * Aplica oferta a múltiples productos en lote (descuento %, etiqueta promocional y publicación)
+ */
+export async function aplicarOfertaLoteAction(
+  userId: number,
+  productoIds: number[],
+  descuentoPct: number,
+  badgePromo: string
+): Promise<{ success: boolean; error?: string; count?: number }> {
+  try {
+    const auth = await verifyCommercialStaff(userId);
+    if (!auth.authorized) {
+      return { success: false, error: auth.error };
+    }
+    if (!productoIds.length) {
+      return { success: false, error: "No se seleccionaron productos." };
+    }
+
+    const productos = await prisma.producto.findMany({
+      where: { id: { in: productoIds } },
+      select: { id: true, precioVenta: true },
+    });
+
+    for (const prod of productos) {
+      const precioOferta = Math.round(prod.precioVenta * (1 - Math.max(1, Math.min(90, descuentoPct)) / 100));
+      await prisma.productoEcommerce.upsert({
+        where: { productoId: prod.id },
+        create: {
+          productoId: prod.id,
+          enOferta: true,
+          precioOferta,
+          badgePromo: badgePromo || "Mes de la Primavera",
+          publicadoOnline: true,
+        },
+        update: {
+          enOferta: true,
+          precioOferta,
+          badgePromo: badgePromo || "Mes de la Primavera",
+          publicadoOnline: true,
+        },
+      });
+    }
+
+    try {
+      revalidatePath("/panel");
+      revalidatePath("/ofertas");
+      revalidatePath("/");
+    } catch {}
+
+    return { success: true, count: productos.length };
+  } catch (e) {
+    console.error("Error al aplicar oferta en lote:", e);
+    return { success: false, error: "Error al aplicar ofertas en lote." };
+  }
+}
+
+/**
+ * Quita la oferta a múltiples productos en lote
+ */
+export async function quitarOfertaLoteAction(
+  userId: number,
+  productoIds: number[]
+): Promise<{ success: boolean; error?: string; count?: number }> {
+  try {
+    const auth = await verifyCommercialStaff(userId);
+    if (!auth.authorized) {
+      return { success: false, error: auth.error };
+    }
+    if (!productoIds.length) {
+      return { success: false, error: "No se seleccionaron productos." };
+    }
+
+    await prisma.productoEcommerce.updateMany({
+      where: { productoId: { in: productoIds } },
+      data: {
+        enOferta: false,
+        precioOferta: null,
+        badgePromo: null,
+      },
+    });
+
+    try {
+      revalidatePath("/panel");
+      revalidatePath("/ofertas");
+      revalidatePath("/");
+    } catch {}
+
+    return { success: true, count: productoIds.length };
+  } catch (e) {
+    console.error("Error al quitar oferta en lote:", e);
+    return { success: false, error: "Error al quitar ofertas en lote." };
   }
 }

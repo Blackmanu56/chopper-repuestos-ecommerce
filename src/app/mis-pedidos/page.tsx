@@ -47,12 +47,14 @@ export default function MisPedidosPage() {
   const [dbPedidos, setDbPedidos] = useState<PedidoDTO[]>([]);
 
   useEffect(() => {
-    const dniQuery = user?.dni || (urlNum ? "" : "34567890");
-    getMisPedidosClienteAction(dniQuery, urlNum).then((res) => {
-      if (res.success && res.pedidos) {
-        setDbPedidos(res.pedidos);
-      }
-    });
+    const dniQuery = user?.dni || "";
+    if (dniQuery || urlNum) {
+      getMisPedidosClienteAction(dniQuery, urlNum).then((res) => {
+        if (res.success && res.pedidos) {
+          setDbPedidos(res.pedidos);
+        }
+      });
+    }
   }, [user, urlNum]);
 
   const showToast = (msg: string) => {
@@ -93,116 +95,27 @@ export default function MisPedidosPage() {
     preparadorNombre: db.preparadorNombre,
   } as any));
 
-  // Pedidos de demostración acordes al modelo operativo de Chopper Posadas
   const displayPedidos: Pedido[] =
     mappedDbPedidos.length > 0
       ? mappedDbPedidos
-      : pedidos.length > 0
-      ? pedidos
-      : [
-          {
-            numero: 1043,
-            fecha: "26 sep 2026, 17:30 hs",
-            nombre: "Carlos Motero",
-            dni: "34.567.890",
-            tel: "376 524-3554",
-            email: "cliente@gmail.com",
-            pago: "EFECTIVO_LOCAL",
-            modalidadEntrega: "RETIRO_LOCAL",
-            codigoTicket: "OC-1043",
-            estado: "PREPARANDO",
-            items: [
-              {
-                id: 1,
-                nombre: "Aceite Motul 5100 15W-50 4T 1L",
-                marca: "MOTUL",
-                precio: 16800,
-                cantidad: 2,
-              },
-              {
-                id: 2,
-                nombre: "Cadena DID 520 Reforzada Dorada 118L",
-                marca: "DID",
-                precio: 48500,
-                cantidad: 1,
-              },
-              {
-                id: 3,
-                nombre: "Pastillas de Freno Brenta Cerámica Delanteras",
-                marca: "BREMBO",
-                precio: 18900,
-                cantidad: 1,
-              },
-            ],
-            total: 101000,
-          },
-          {
-            numero: 1028,
-            fecha: "26 sep 2026, 11:15 hs",
-            nombre: "Carlos Motero",
-            dni: "34.567.890",
-            tel: "376 524-3554",
-            email: "cliente@gmail.com",
-            pago: "TRANSFERENCIA",
-            modalidadEntrega: "MOTOMANDADO",
-            costoEnvio: 2500,
-            estado: "CONFIRMADO",
-            items: [
-              {
-                id: 4,
-                nombre: "Cubierta Delantera Pirelli Diablo Rosso IV 110/70-17",
-                marca: "PIRELLI",
-                precio: 98000,
-                cantidad: 1,
-              },
-              {
-                id: 5,
-                nombre: "Bujía NGK CR9E Japón Iridium",
-                marca: "NGK",
-                precio: 14500,
-                cantidad: 2,
-              },
-            ],
-            total: 129500,
-          },
-          {
-            numero: 1001,
-            fecha: "20 sep 2026, 14:22 hs",
-            nombre: "Juan García",
-            dni: "31.254.770",
-            tel: "376 524-3554",
-            email: "juan.garcia@gmail.com",
-            pago: "TRANSFERENCIA",
-            modalidadEntrega: "RETIRO_LOCAL",
-            codigoTicket: "TK-1001",
-            estado: "RETIRADO",
-            items: [
-              {
-                id: 1,
-                nombre: "Kit de transmisión para Honda CG 150",
-                marca: "Honda",
-                precio: 15000,
-                cantidad: 1,
-              },
-              {
-                id: 2,
-                nombre: "Pastillas de freno delantero Rouser NS200",
-                marca: "Bajaj",
-                precio: 7500,
-                cantidad: 2,
-              },
-            ],
-            total: 30000,
-          },
-        ];
+      : pedidos;
 
-  // Pedidos visibles para la sesión actual
+  // En "Mis Pedidos" el usuario solo ve SUS propios pedidos personales
   const userVisiblePedidos = displayPedidos.filter((p) => {
-    if (!user) return false;
-    if (user.rol !== "CLIENTE") return true; // Personal administrativo y de ventas ve todas las órdenes
+    if (!user) return true; // Si no hay sesión, muestra los pedidos buscados por DNI / ticket
+    if (user.rol !== "CLIENTE") {
+      // El staff solo ve sus compras personales si las tuviera con su propio correo/DNI
+      const userEmail = (user.correo || "").toLowerCase();
+      const userDni = (user.dni || "").trim();
+      const orderEmail = (p.email || "").toLowerCase();
+      const orderDni = (p.dni || "").trim();
+      return (Boolean(userEmail) && orderEmail === userEmail) || (Boolean(userDni) && orderDni === userDni);
+    }
     const userEmail = (user.correo || "").toLowerCase();
+    const userDni = (user.dni || "").trim();
     const orderEmail = (p.email || "").toLowerCase();
-    return orderEmail === userEmail || orderEmail === "cliente@gmail.com";
+    const orderDni = (p.dni || "").trim();
+    return orderEmail === userEmail || (Boolean(userDni) && orderDni === userDni);
   });
 
   // Filtering logic
