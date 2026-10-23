@@ -44,5 +44,9 @@ next-env.d.ts
 # prisma generated
 /src/generated/prisma
 
+# customer uploads / comprobantes
+/public/uploads/comprobantes/*
+!/public/uploads/comprobantes/.gitkeep
+
 # scratch
 /scratch

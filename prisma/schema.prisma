@@ -621,6 +621,7 @@ model ProductoEcommerce {
   destacado       Boolean  @default(false)
   recomendado     Boolean  @default(false)
   badgePromo      String?  @map("badge_promo")
+  descripcion     String?
   ordenOferta     Int      @default(0) @map("orden_oferta")
   actualizadoEn   DateTime @updatedAt @map("actualizado_en")
 
@@ -685,6 +686,8 @@ model PedidoEcommerce {
   costoEnvio          Float                    @default(0.0) @map("costo_envio")
   metodoPago          String                   @map("metodo_pago")
   estado              String                   @default("PENDIENTE")
+  estadoPago          String                   @default("PENDIENTE") @map("estado_pago")
+  fechaPago           DateTime?                @map("fecha_pago")
   comprobanteUrl      String?                  @map("comprobante_url")
   preparadorUsuarioId Int?                     @map("preparador_usuario_id")
   preparadorNombre    String?                  @map("preparador_nombre")
@@ -704,19 +707,21 @@ model PedidoEcommerce {
 }
 
 model DetallePedidoEcommerce {
-  id             Int             @id @default(autoincrement())
-  pedidoId       Int             @map("pedido_id")
-  productoId     Int?            @map("producto_id")
-  comboId        Int?            @map("combo_id")
-  nombre         String
-  marca          String?
-  cantidad       Int
-  precioUnitario Float           @map("precio_unitario")
-  subtotal       Float
+  id                Int             @id @default(autoincrement())
+  pedidoId          Int             @map("pedido_id")
+  productoId        Int?            @map("producto_id")
+  comboId           Int?            @map("combo_id")
+  nombre            String
+  marca             String?
+  cantidad          Int
+  cantidadPreparada Int             @default(0) @map("cantidad_preparada")
+  preparado         Boolean         @default(false)
+  precioUnitario    Float           @map("precio_unitario")
+  subtotal          Float
 
-  pedido         PedidoEcommerce @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
-  producto       Producto?       @relation(fields: [productoId], references: [id], onDelete: SetNull)
-  combo          ComboEcommerce? @relation(fields: [comboId], references: [id], onDelete: SetNull)
+  pedido            PedidoEcommerce @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
+  producto          Producto?       @relation(fields: [productoId], references: [id], onDelete: SetNull)
+  combo             ComboEcommerce? @relation(fields: [comboId], references: [id], onDelete: SetNull)
 
   @@map("detalle_pedidos_ecommerce")
 }
