@@ -31,6 +31,7 @@ import {
   Check,
   RefreshCw,
   Plus,
+  List,
   Layers,
   Store,
   Phone,
@@ -56,7 +57,19 @@ import {
   Filter,
   RotateCcw,
   XCircle,
+  Download,
+  AlertTriangle,
+  Award,
+  Sparkles,
+  Boxes,
+  Coins,
+  Bell,
 } from "lucide-react";
+import { NotificationBell } from "@/components/panel/NotificationBell";
+import { PedidosTableroView } from "@/components/panel/PedidosTableroView";
+import { FinanzasOnlineView } from "@/components/panel/FinanzasOnlineView";
+import { useConfig } from "@/context/ConfigContext";
+import { EMOJIS_DISPONIBLES, formatBadgeWithEmoji } from "@/lib/etiquetas";
 import {
   getCommercialProductsAction,
   upsertCommercialProductAction,
@@ -79,6 +92,9 @@ import {
   subirComprobantePedidoAction,
   rechazarComprobantePedidoAction,
   getStaffPreparadoresAction,
+  registrarCobroEfectivoAction,
+  obtenerInfoComprobanteAction,
+  InfoComprobanteDTO,
   PedidoDTO,
 } from "@/actions/pedidos";
 import {
@@ -99,6 +115,12 @@ import {
   toggleEtiquetaOfertaAction,
   getAuditoriaLogsAction,
   registrarAuditoriaAction,
+  getBannersHomeAction,
+  crearBannerHomeAction,
+  editarBannerHomeAction,
+  toggleBannerHomeAction,
+  eliminarBannerHomeAction,
+  BannerHome,
   TiendaConfig,
   EtiquetaOferta,
   AuditoriaLog,
@@ -116,7 +138,8 @@ type ViewType =
   | "identidad"
   | "auditoria"
   | "entrega"
-  | "preparacion";
+  | "preparacion"
+  | "finanzas";
 
 function parseImages(imgStr: string | null | undefined): string[] {
   if (!imgStr) return [];
@@ -162,14 +185,24 @@ function EstadoChip({ estado }: { estado: string }) {
 export default function PanelPage() {
   const searchParams = useSearchParams();
   const tabParam = (searchParams.get("tab") as ViewType) || "pedidos";
-  const { user, openLogin, loginClient } = useAuth();
+  const { user, isStaff, isHydrating, openLogin, loginClient } = useAuth();
+  const { updateConfig: updateContextConfig } = useConfig();
   const router = useRouter();
+
+  useEffect(() => {
+    if (!isHydrating && (!user || !isStaff)) {
+      window.location.href = "/?sessionExpired=true";
+    }
+  }, [isHydrating, user, isStaff]);
 
   const formatPrice = (n: number) => "$" + Number(n || 0).toLocaleString("es-AR");
 
   // Estado del Prototipo
   const [role, setRole] = useState<RoleType>("admin");
-  const [activeView, setActiveView] = useState<ViewType>(tabParam);
+  const [activeView, setActiveView] = useState<ViewType>(tabParam === "estado_pedidos" ? "pedidos" : tabParam);
+  const [modoVisualizacionPedidos, setModoVisualizacionPedidos] = useState<"listado" | "tablero">(
+    tabParam === "estado_pedidos" ? "tablero" : "listado"
+  );
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Datos principales
@@ -184,6 +217,9 @@ export default function PanelPage() {
   const [filtroEmpleadoPedido, setFiltroEmpleadoPedido] = useState<string>("TODOS");
   const [busquedaPedido, setBusquedaPedido] = useState("");
   const [comprobanteModalUrl, setComprobanteModalUrl] = useState<string | null>(null);
+  const [comprobanteModalPedido, setComprobanteModalPedido] = useState<PedidoDTO | null>(null);
+  const [comprobanteInfo, setComprobanteInfo] = useState<InfoComprobanteDTO | null>(null);
+  const [loadingComprobanteInfo, setLoadingComprobanteInfo] = useState<boolean>(false);
   const [selectedPedido, setSelectedPedido] = useState<PedidoDTO | null>(null);
   const [filtroSoloComprobante, setFiltroSoloComprobante] = useState<boolean>(false);
   const [checkedStockItems, setCheckedStockItems] = useState<Record<string, boolean>>({});
@@ -245,13 +281,16 @@ export default function PanelPage() {
   const [comboImages, setComboImages] = useState<string[]>([]);
   const [comboItems, setComboItems] = useState<{ productoId: number; cantidad: number }[]>([]);
   const [comboItemSearch, setComboItemSearch] = useState("");
+  const [comboFormErrors, setComboFormErrors] = useState<Record<string, string>>({});
 
   // Etiquetas de Oferta
   const [etiquetas, setEtiquetas] = useState<EtiquetaOferta[]>([]);
   const [nuevaEtiquetaNombre, setNuevaEtiquetaNombre] = useState("");
+  const [nuevaEtiquetaEmoji, setNuevaEtiquetaEmoji] = useState<string>("🔥");
   const [showCrearEtiquetaModal, setShowCrearEtiquetaModal] = useState(false);
   const [editingEtiqueta, setEditingEtiqueta] = useState<EtiquetaOferta | null>(null);
   const [editingEtiquetaNombre, setEditingEtiquetaNombre] = useState("");
+  const [editingEtiquetaEmoji, setEditingEtiquetaEmoji] = useState<string | null>(null);
   const [busquedaEtiqueta, setBusquedaEtiqueta] = useState("");
   const [filtroEtiquetaEstado, setFiltroEtiquetaEstado] = useState<"TODAS" | "ACTIVAS" | "PAUSADAS">("TODAS");
 
@@ -270,7 +309,24 @@ export default function PanelPage() {
     mostrar_banner_promocion: true,
     mostrar_ahorro: true,
     ocultar_ahorro_cero: true,
+    cuotas_habilitadas: false,
+    cuotas_cantidad: 3,
+    cuotas_sin_interes: true,
+    cuotas_recargo_porcentaje: 0,
   });
+
+  // Banners del Inicio (Hero y Temporada)
+  const [bannersHome, setBannersHome] = useState<BannerHome[]>([]);
+  const [showBannerModal, setShowBannerModal] = useState(false);
+  const [editingBanner, setEditingBanner] = useState<BannerHome | null>(null);
+  const [bannerTitulo, setBannerTitulo] = useState("");
+  const [bannerDescripcion, setBannerDescripcion] = useState("");
+  const [bannerEnlace, setBannerEnlace] = useState("/ofertas");
+  const [bannerBadge, setBannerBadge] = useState("CHOPPER REPUESTOS · POSADAS, MISIONES");
+  const [bannerImagenUrl, setBannerImagenUrl] = useState("");
+  const [bannerActivo, setBannerActivo] = useState(true);
+  const [bannerOrden, setBannerOrden] = useState(1);
+  const [uploadingBannerImage, setUploadingBannerImage] = useState(false);
 
   // Auditoría
   const [auditoriaLogs, setAuditoriaLogs] = useState<AuditoriaLog[]>([]);
@@ -290,21 +346,41 @@ export default function PanelPage() {
   const [checkedEntregaItems, setCheckedEntregaItems] = useState<Record<string, boolean>>({});
   const [pagoEfectivoCobrado, setPagoEfectivoCobrado] = useState(false);
   const [choferMotoIdentificado, setChoferMotoIdentificado] = useState(false);
+  const [isSubmittingCobro, setIsSubmittingCobro] = useState(false);
+  const [cobroError, setCobroError] = useState<string | null>(null);
+  const [cobroSuccess, setCobroSuccess] = useState<string | null>(null);
+  const [tokenVerificacionActivo, setTokenVerificacionActivo] = useState<string | null>(null);
+  const [isSubmittingEntrega, setIsSubmittingEntrega] = useState(false);
 
   // Vista Estado de Pedidos (Flujo Kanban)
   const [busquedaEstadoPedidos, setBusquedaEstadoPedidos] = useState("");
 
-  // Sincronizar vista según rol
+  // Helper para verificar vistas permitidas por rol
+  const isViewAllowedForRole = (r: RoleType, v: ViewType): boolean => {
+    if (r === "admin") return true;
+    if (r === "venta") return v === "pedidos" || v === "entrega" || v === "finanzas" || v === "estado_pedidos";
+    if (r === "stock") return v === "preparacion";
+    return false;
+  };
+
+  // Sincronizar vista según rol (sin reinicios forzados si la vista actual está permitida)
   const handleSetRole = (newRole: RoleType) => {
     setRole(newRole);
-    if (newRole === "venta") {
-      setActiveView("entrega");
-    } else if (newRole === "stock") {
-      setActiveView("preparacion");
-    } else {
-      setActiveView("pedidos");
+    if (!isViewAllowedForRole(newRole, activeView)) {
+      if (newRole === "stock") {
+        setActiveView("preparacion");
+      } else {
+        setActiveView("pedidos");
+      }
     }
   };
+
+  useEffect(() => {
+    if (activeView === "estado_pedidos") {
+      setActiveView("pedidos");
+      setModoVisualizacionPedidos("tablero");
+    }
+  }, [activeView]);
 
   // Carga inicial de datos
   const loadAllData = async () => {
@@ -320,6 +396,7 @@ export default function PanelPage() {
         resConfig,
         resAudit,
         resStaff,
+        resBanners,
       ] = await Promise.all([
         user?.id ? getPedidosEcommerceAction(user.id) : { success: false, pedidos: [] },
         getCommercialProductsAction(),
@@ -330,6 +407,7 @@ export default function PanelPage() {
         getConfiguracionAction(),
         getAuditoriaLogsAction(),
         user?.id ? getStaffPreparadoresAction(user.id) : { success: false, staff: [] },
+        getBannersHomeAction(),
       ]);
 
       if (resPedidos.success && resPedidos.pedidos) setPedidos(resPedidos.pedidos);
@@ -340,6 +418,7 @@ export default function PanelPage() {
       setEtiquetas(resEtiquetas);
       setConfig(resConfig);
       setAuditoriaLogs(resAudit);
+      if (resBanners) setBannersHome(resBanners);
       if (resStaff.success && resStaff.staff) {
         setStaffPreparadores(resStaff.staff);
         if (!selectedPreparadorId && resStaff.staff.length > 0) {
@@ -370,16 +449,14 @@ export default function PanelPage() {
     if (user?.rol) {
       if (user.rol === "ENCARGADO_VENTAS") {
         setRole("venta");
-        if (activeView !== "pedidos" && activeView !== "entrega" && activeView !== "estado_pedidos") {
+        if (!isViewAllowedForRole("venta", activeView)) {
           setActiveView("pedidos");
         }
       } else if (user.rol === "ENCARGADO_STOCK") {
         setRole("stock");
-        if (activeView !== "preparacion") {
+        if (!isViewAllowedForRole("stock", activeView)) {
           setActiveView("preparacion");
         }
-      } else if (user.rol === "ADMINISTRADOR") {
-        setRole("admin");
       }
     }
   }, [user?.rol, activeView]);
@@ -460,6 +537,42 @@ export default function PanelPage() {
     }
   };
 
+  const handleOpenComprobante = async (url: string | null, pedido?: PedidoDTO | null) => {
+    if (!url) return;
+    setComprobanteModalUrl(url);
+    setComprobanteModalPedido(pedido || null);
+    setLoadingComprobanteInfo(true);
+    setComprobanteInfo(null);
+    try {
+      const res = await obtenerInfoComprobanteAction(url, pedido?.numero);
+      if (res.success && res.info) {
+        setComprobanteInfo(res.info);
+      } else {
+        const isPdf = url.toLowerCase().endsWith(".pdf");
+        setComprobanteInfo({
+          existe: false,
+          url,
+          nombreArchivo: url.split("/").pop() || "comprobante",
+          esPdf: isPdf,
+          esImagen: !isPdf,
+          error: res.error || "No se pudo verificar el archivo.",
+        });
+      }
+    } catch {
+      const isPdf = url.toLowerCase().endsWith(".pdf");
+      setComprobanteInfo({
+        existe: false,
+        url,
+        nombreArchivo: url.split("/").pop() || "comprobante",
+        esPdf: isPdf,
+        esImagen: !isPdf,
+        error: "Error de comunicación al consultar el archivo.",
+      });
+    } finally {
+      setLoadingComprobanteInfo(false);
+    }
+  };
+
   const getWhatsAppLink = (telefono: string | null | undefined, nombre: string, numero: number) => {
     if (!telefono) return null;
     let clean = telefono.replace(/\D/g, "");
@@ -477,7 +590,11 @@ export default function PanelPage() {
         return false;
       }
       // Filtro de estado
-      if (filtroEstadoPedido !== "TODOS" && p.estado !== filtroEstadoPedido) {
+      if (filtroEstadoPedido === "LISTO_ENTREGA") {
+        if (p.estado !== "LISTO_ENTREGA" && p.estado !== "LISTO_PARA_RETIRAR") {
+          return false;
+        }
+      } else if (filtroEstadoPedido !== "TODOS" && p.estado !== filtroEstadoPedido) {
         return false;
       }
       // Filtro de modalidad
@@ -936,6 +1053,7 @@ export default function PanelPage() {
     setComboPrecio(0);
     setComboImages([]);
     setComboItems([]);
+    setComboFormErrors({});
     setShowComboModal(true);
   };
 
@@ -948,6 +1066,7 @@ export default function PanelPage() {
     setComboPrecio(c.precio);
     setComboImages(parseImages(c.imagen));
     setComboItems(c.items.map((it) => ({ productoId: it.productoId, cantidad: it.cantidad })));
+    setComboFormErrors({});
     setShowComboModal(true);
   };
 
@@ -983,19 +1102,46 @@ export default function PanelPage() {
     return Math.round((comboAhorroCalculado / comboPrecioRegularCalculado) * 100);
   }, [comboAhorroCalculado, comboPrecioRegularCalculado]);
 
+  const comboStockCalculado = useMemo(() => {
+    if (comboItems.length === 0) return 0;
+    const stocksPosibles = comboItems.map((it) => {
+      const p = products.find((prod) => prod.id === it.productoId);
+      const stock = p?.cantidad ?? 0;
+      return it.cantidad > 0 ? Math.floor(stock / it.cantidad) : 0;
+    });
+    return Math.min(...stocksPosibles);
+  }, [comboItems, products]);
+
   const handleSaveCombo = async () => {
-    if (!user?.id || !comboNombre.trim()) {
-      showFeedback("error", "Ingresá un nombre para el combo.");
+    if (!user?.id) {
+      showFeedback("error", "Sesión inválida o expirada.");
       return;
     }
-    if (comboPrecio <= 0) {
-      showFeedback("error", "El precio del combo debe ser mayor a 0.");
-      return;
+
+    const errors: Record<string, string> = {};
+    if (!comboNombre.trim()) {
+      errors.nombre = "Ingresá un nombre para el combo.";
+    }
+    if (typeof comboPrecio !== "number" || isNaN(comboPrecio) || comboPrecio <= 0) {
+      errors.precio = "El precio del combo debe ser mayor a 0.";
     }
     if (comboItems.length === 0) {
-      showFeedback("error", "Agregá al menos un repuesto al combo.");
+      errors.items = "Agregá al menos un repuesto al combo.";
+    } else {
+      const hasInvalidQty = comboItems.some(
+        (it) => !Number.isInteger(it.cantidad) || it.cantidad < 1
+      );
+      if (hasInvalidQty) {
+        errors.items = "Cada repuesto seleccionado debe tener una cantidad entera mayor o igual a 1.";
+      }
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setComboFormErrors(errors);
+      showFeedback("error", "Por favor revisá los campos del combo antes de guardar.");
       return;
     }
+    setComboFormErrors({});
 
     setSaving(true);
     try {
@@ -1010,6 +1156,8 @@ export default function PanelPage() {
         precioRegular: comboPrecioRegularCalculado,
         imagen: comboImages.filter(Boolean).join(",") || mainImage,
         items: comboItems,
+        especificaciones: editingCombo?.especificaciones,
+        motosCompatibles: editingCombo?.motosCompatibles,
       });
 
       if (res.success) {
@@ -1039,6 +1187,8 @@ export default function PanelPage() {
       if (res.success) {
         setCombos((prev) => prev.map((c) => (c.id === comboId ? { ...c, activo: !estadoActual } : c)));
         showFeedback("success", `Combo ${!estadoActual ? "activado" : "pausado"}.`);
+      } else {
+        showFeedback("error", res.error || "No se pudo actualizar el estado del combo.");
       }
     } catch (e) {
       showFeedback("error", "No se pudo actualizar el combo.");
@@ -1065,10 +1215,11 @@ export default function PanelPage() {
     if (!user?.id || !nuevaEtiquetaNombre.trim()) return;
     setSaving(true);
     try {
-      const res = await crearEtiquetaOfertaAction(user.id, nuevaEtiquetaNombre.trim());
+      const res = await crearEtiquetaOfertaAction(user.id, nuevaEtiquetaNombre.trim(), nuevaEtiquetaEmoji);
       if (res.success && res.etiquetas) {
         setEtiquetas(res.etiquetas);
         setNuevaEtiquetaNombre("");
+        setNuevaEtiquetaEmoji("🔥");
         setShowCrearEtiquetaModal(false);
         showFeedback("success", `Etiqueta "${nuevaEtiquetaNombre}" creada con éxito.`);
       } else {
@@ -1098,10 +1249,16 @@ export default function PanelPage() {
     if (!user?.id || !editingEtiqueta || !editingEtiquetaNombre.trim()) return;
     setSaving(true);
     try {
-      const res = await editarEtiquetaOfertaAction(user.id, editingEtiqueta.id, editingEtiquetaNombre.trim());
+      const res = await editarEtiquetaOfertaAction(
+        user.id,
+        editingEtiqueta.id,
+        editingEtiquetaNombre.trim(),
+        editingEtiquetaEmoji
+      );
       if (res.success && res.etiquetas) {
         setEtiquetas(res.etiquetas);
         setEditingEtiqueta(null);
+        setEditingEtiquetaEmoji(null);
         showFeedback("success", `Etiqueta actualizada a "${editingEtiquetaNombre}".`);
       } else {
         showFeedback("error", res.error || "No se pudo actualizar la etiqueta.");
@@ -1135,6 +1292,7 @@ export default function PanelPage() {
       const res = await updateConfiguracionAction(user.id, config);
       if (res.success && res.config) {
         setConfig(res.config);
+        updateContextConfig(res.config);
         showFeedback("success", "Identidad y configuración de la tienda guardada.");
         await registrarAuditoriaAction(
           user.nombreCompleto || "Administrador",
@@ -1161,6 +1319,7 @@ export default function PanelPage() {
       const res = await uploadLogoAction(user.id, formData);
       if (res.success && res.logoUrl) {
         setConfig((prev) => ({ ...prev, logo_url: res.logoUrl! }));
+        updateContextConfig({ logo_url: res.logoUrl });
         showFeedback("success", "Logo institucional actualizado con éxito.");
       } else {
         showFeedback("error", res.error || "No se pudo subir el logo.");
@@ -1172,36 +1331,281 @@ export default function PanelPage() {
     }
   };
 
+  // Manejadores de Banners del Inicio (Hero y Temporada)
+  const handleOpenCrearBanner = () => {
+    setEditingBanner(null);
+    setBannerTitulo("");
+    setBannerDescripcion("");
+    setBannerEnlace("/ofertas");
+    setBannerBadge("CHOPPER REPUESTOS · POSADAS, MISIONES");
+    setBannerImagenUrl("");
+    setBannerActivo(true);
+    setBannerOrden(bannersHome.length + 1);
+    setShowBannerModal(true);
+  };
+
+  const handleOpenEditarBanner = (banner: BannerHome) => {
+    setEditingBanner(banner);
+    setBannerTitulo(banner.titulo);
+    setBannerDescripcion(banner.descripcion);
+    setBannerEnlace(banner.enlace || "/ofertas");
+    setBannerBadge(banner.badge || "");
+    setBannerImagenUrl(banner.imagenUrl || "");
+    setBannerActivo(banner.activo);
+    setBannerOrden(banner.orden || 1);
+    setShowBannerModal(true);
+  };
+
+  const handleGuardarBanner = async () => {
+    if (!user?.id) return;
+    if (!bannerTitulo.trim()) {
+      showFeedback("error", "Ingresá un título para el banner.");
+      return;
+    }
+    setSaving(true);
+    try {
+      if (editingBanner) {
+        const res = await editarBannerHomeAction(user.id, editingBanner.id, {
+          titulo: bannerTitulo,
+          descripcion: bannerDescripcion,
+          enlace: bannerEnlace,
+          badge: bannerBadge,
+          imagenUrl: bannerImagenUrl,
+          activo: bannerActivo,
+          orden: bannerOrden,
+        });
+        if (res.success && res.banners) {
+          setBannersHome(res.banners);
+          setShowBannerModal(false);
+          showFeedback("success", "Banner actualizado con éxito.");
+          await registrarAuditoriaAction(
+            user.nombreCompleto || "Administrador",
+            `Editó banner de inicio "${bannerTitulo}"`,
+            "Identidad",
+            `Estado: ${bannerActivo ? "Activo" : "Pausado"}`
+          );
+        } else {
+          showFeedback("error", res.error || "No se pudo actualizar el banner.");
+        }
+      } else {
+        const res = await crearBannerHomeAction(user.id, {
+          titulo: bannerTitulo,
+          descripcion: bannerDescripcion,
+          enlace: bannerEnlace,
+          badge: bannerBadge,
+          imagenUrl: bannerImagenUrl,
+          activo: bannerActivo,
+          orden: bannerOrden,
+        });
+        if (res.success && res.banners) {
+          setBannersHome(res.banners);
+          setShowBannerModal(false);
+          showFeedback("success", "Banner creado con éxito.");
+          await registrarAuditoriaAction(
+            user.nombreCompleto || "Administrador",
+            `Creó nuevo banner "${bannerTitulo}"`,
+            "Identidad",
+            `Estado: ${bannerActivo ? "Activo" : "Pausado"}`
+          );
+        } else {
+          showFeedback("error", res.error || "No se pudo crear el banner.");
+        }
+      }
+    } catch {
+      showFeedback("error", "Error al procesar el banner.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleToggleBanner = async (id: string, activo: boolean) => {
+    if (!user?.id) return;
+    try {
+      const res = await toggleBannerHomeAction(user.id, id, activo);
+      if (res.success && res.banners) {
+        setBannersHome(res.banners);
+        showFeedback("success", activo ? "Banner activado en la tienda." : "Banner pausado.");
+      } else {
+        showFeedback("error", res.error || "No se pudo cambiar el estado del banner.");
+      }
+    } catch {
+      showFeedback("error", "Error al alternar estado del banner.");
+    }
+  };
+
+  const handleEliminarBanner = async (id: string) => {
+    if (!user?.id) return;
+    if (!confirm("¿Seguro que deseás eliminar este banner del inicio?")) return;
+    try {
+      const res = await eliminarBannerHomeAction(user.id, id);
+      if (res.success && res.banners) {
+        setBannersHome(res.banners);
+        showFeedback("success", "Banner eliminado.");
+        await registrarAuditoriaAction(
+          user.nombreCompleto || "Administrador",
+          `Eliminó banner del inicio ID: ${id}`,
+          "Identidad"
+        );
+      } else {
+        showFeedback("error", res.error || "No se pudo eliminar el banner.");
+      }
+    } catch {
+      showFeedback("error", "Error al eliminar el banner.");
+    }
+  };
+
+  const handleUploadBannerImage = async (file: File) => {
+    if (!user?.id) return;
+    setUploadingBannerImage(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await uploadMediaAction(user.id, formData, "banners");
+      if (res.success && res.url) {
+        setBannerImagenUrl(res.url);
+        showFeedback("success", "Imagen de banner cargada con éxito.");
+      } else {
+        showFeedback("error", res.error || "No se pudo subir la imagen.");
+      }
+    } catch {
+      showFeedback("error", "Error al procesar la imagen del banner.");
+    } finally {
+      setUploadingBannerImage(false);
+    }
+  };
+
   // ════════════════════════════════════════════════════════════
   // MANEJADORES DE ENTREGA (Ventas)
   // ════════════════════════════════════════════════════════════
   const handleOpenEntregaModal = (p: PedidoDTO) => {
     setSelectedEntregaPedido(p);
-    setCodigoRetiroVerificado("");
+    setCodigoRetiroVerificado(p.dniCliente || "");
     const initialChecked: Record<string, boolean> = {};
     p.items?.forEach((it) => {
       initialChecked[String(it.id)] = false;
     });
     setCheckedEntregaItems(initialChecked);
-    setPagoEfectivoCobrado(p.metodoPago !== "EFECTIVO_LOCAL");
+    setPagoEfectivoCobrado(p.estadoPago === "PAGADO");
     setChoferMotoIdentificado(false);
+    setCobroError(null);
+    setCobroSuccess(null);
+    setTokenVerificacionActivo(null);
+  };
+
+  const handleRegistrarCobroMostradorModal = async () => {
+    if (!selectedEntregaPedido || !user?.id) return;
+    if (isSubmittingCobro) return;
+
+    if (selectedEntregaPedido.estadoPago === "PAGADO") {
+      setCobroError("Este pedido ya figura como pagado.");
+      return;
+    }
+
+    const dniIngresado = (codigoRetiroVerificado || "").trim();
+    if (!dniIngresado) {
+      setCobroError("Ingresá el DNI del cliente en el Paso 1 para verificar su identidad antes de registrar el cobro.");
+      return;
+    }
+
+    setIsSubmittingCobro(true);
+    setCobroError(null);
+    setCobroSuccess(null);
+
+    try {
+      const res = await registrarCobroEfectivoAction(
+        user.id,
+        selectedEntregaPedido.id,
+        `Cobro en mostrador DNI ${dniIngresado}`,
+        tokenVerificacionActivo || undefined,
+        dniIngresado
+      );
+
+      if (res.success && res.pedido) {
+        setCobroSuccess(`Cobro de ${formatPrice(selectedEntregaPedido.total)} registrado con éxito en mostrador.`);
+        if (res.tokenVerificacion) {
+          setTokenVerificacionActivo(res.tokenVerificacion);
+        }
+        setSelectedEntregaPedido(res.pedido);
+        setPagoEfectivoCobrado(true);
+        showFeedback("success", `Cobro de ${formatPrice(selectedEntregaPedido.total)} registrado para #ORD-${selectedEntregaPedido.numero}`);
+        await registrarAuditoriaAction(
+          user.nombreCompleto || "Personal de Ventas",
+          `Registró cobro en mostrador de orden #${selectedEntregaPedido.numero} por ${formatPrice(selectedEntregaPedido.total)}`,
+          "Entregas",
+          `DNI presentado: ${dniIngresado}`
+        );
+        loadAllData();
+      } else {
+        setCobroError(res.error || "No se pudo registrar el cobro en mostrador.");
+      }
+    } catch (e: any) {
+      setCobroError("Error de comunicación al procesar el cobro.");
+    } finally {
+      setIsSubmittingCobro(false);
+    }
   };
 
   const handleConfirmarEntregaModal = async () => {
     if (!selectedEntregaPedido || !user?.id) return;
+    if (isSubmittingEntrega) return;
 
-    // Guard: no se puede entregar si el pedido todavía está siendo preparado por Stock
-    if (selectedEntregaPedido.estado === "PREPARANDO" || selectedEntregaPedido.estado === "PENDIENTE" || selectedEntregaPedido.estado === "CONFIRMADO") {
+    // Guard 1: no se puede entregar si todavía está preparándose
+    if (
+      selectedEntregaPedido.estado === "PREPARANDO" ||
+      selectedEntregaPedido.estado === "PENDIENTE" ||
+      selectedEntregaPedido.estado === "CONFIRMADO"
+    ) {
       showFeedback("error", "El pedido todavía no fue marcado como listo por Stock. Esperá a que Stock complete la preparación.");
       return;
     }
 
+    // Guard 2: si es cobro en mostrador y no está pagado, exigir cobro previo
+    if (selectedEntregaPedido.metodoPago === "EFECTIVO_LOCAL" && selectedEntregaPedido.estadoPago !== "PAGADO") {
+      setCobroError("No podés entregar el pedido sin registrar primero el cobro en mostrador.");
+      return;
+    }
+
+    // Guard 3: validar DNI presentado para retiro en mostrador
     const isRetiro = selectedEntregaPedido.modalidadEntrega === "RETIRO_LOCAL";
-    const notasEntrega = isRetiro
-      ? `Entregado en mostrador por ${user.nombreCompleto || "Carlos López"} · Código/DNI retiro: ${codigoRetiroVerificado || "Verificado"}`
-      : `Despachado en Motomandado/Moto Uber por ${user.nombreCompleto || "Carlos López"} a ${selectedEntregaPedido.direccionEnvio || "Posadas"}`;
-    await handleCambiarEstadoPedido(selectedEntregaPedido.id, "ENTREGADO", notasEntrega);
-    setSelectedEntregaPedido(null);
+    const dniIngresado = (codigoRetiroVerificado || "").trim();
+    if (isRetiro && !dniIngresado) {
+      setCobroError("Ingresá el DNI del cliente que retira para confirmar la entrega.");
+      return;
+    }
+
+    setIsSubmittingEntrega(true);
+    setCobroError(null);
+    try {
+      const notasEntrega = isRetiro
+        ? `Entregado en mostrador por ${user.nombreCompleto || "Carlos López"} · DNI retiro: ${dniIngresado}`
+        : `Despachado en Motomandado/Moto Uber por ${user.nombreCompleto || "Carlos López"} a ${selectedEntregaPedido.direccionEnvio || "Posadas"}`;
+
+      const res = await actualizarEstadoPedidoAction(
+        user.id,
+        selectedEntregaPedido.id,
+        "ENTREGADO",
+        notasEntrega,
+        tokenVerificacionActivo || (dniIngresado ? `DNI: ${dniIngresado}` : undefined)
+      );
+
+      if (res.success) {
+        showFeedback("success", `Orden #ORD-${selectedEntregaPedido.numero} entregada con éxito.`);
+        await registrarAuditoriaAction(
+          user.nombreCompleto || "Personal de Ventas",
+          `Entregó orden #${selectedEntregaPedido.numero} en mostrador`,
+          "Entregas",
+          notasEntrega
+        );
+        setSelectedEntregaPedido(null);
+        loadAllData();
+      } else {
+        setCobroError(res.error || "No se pudo confirmar la entrega.");
+      }
+    } catch (e) {
+      setCobroError("Error de conexión al confirmar entrega.");
+    } finally {
+      setIsSubmittingEntrega(false);
+    }
   };
 
   // ════════════════════════════════════════════════════════════
@@ -1346,6 +1750,32 @@ export default function PanelPage() {
     }
   }, [user, router]);
 
+  const handleSelectPedidoFromNotification = (pedidoId: number, moduloDestino?: string) => {
+    if (moduloDestino === "preparacion" || role === "stock") {
+      setActiveView("preparacion");
+    } else if (moduloDestino === "entrega") {
+      setActiveView("entrega");
+    } else {
+      setActiveView("pedidos");
+    }
+    const pedido = pedidos.find((p: PedidoDTO) => p.id === pedidoId || p.numero === pedidoId);
+    if (pedido) {
+      setSelectedPedido(pedido);
+    }
+  };
+
+  const handleNavigateSectionFromNotification = (
+    modulo: "pedidos" | "preparacion" | "entrega",
+    filtroEstado?: string
+  ) => {
+    setActiveView(modulo);
+    if (modulo === "pedidos") {
+      if (filtroEstado) setFiltroEstadoPedido(filtroEstado);
+    } else if (modulo === "entrega") {
+      if (filtroEstado) setFiltroEstadoEntrega(filtroEstado as any);
+    }
+  };
+
   if (!user) {
     return null;
   }
@@ -1385,184 +1815,262 @@ export default function PanelPage() {
           </button>
         </div>
 
+        {/* Tarjeta de Usuario / Sesión activa */}
+        <div className="p-3 mx-3 mt-3 mb-1 bg-[#121316] border border-[#26272e] rounded-xl space-y-2 shadow-xs">
+          <div className="flex items-center justify-between px-0.5">
+            <p className="text-xs font-bold text-white truncate" title={user.nombreCompleto}>
+              {user.nombreCompleto || "Usuario Staff"}
+            </p>
+            <span className="text-[10px] font-semibold text-[#8e8f96]">
+              {user.rol === "ADMINISTRADOR"
+                ? "Admin"
+                : user.rol === "ENCARGADO_VENTAS"
+                ? "Ventas"
+                : user.rol === "ENCARGADO_STOCK"
+                ? "Stock"
+                : user.rol}
+            </span>
+          </div>
+
+          {/* Switcher de Vista Operativa para Administrador */}
+          {user.rol === "ADMINISTRADOR" && (
+            <div className="pt-2 border-t border-[#26272e]">
+              <div className="flex items-center justify-between mb-1.5 px-0.5">
+                <span className="text-[10px] text-[#6b6c75] font-semibold uppercase tracking-wider">
+                  Vista operativa:
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-1 bg-[#0f1012] p-0.5 rounded-lg border border-[#26272e]">
+                <button
+                  type="button"
+                  onClick={() => handleSetRole("admin")}
+                  className={`text-[10px] font-bold py-1 rounded transition-colors ${
+                    role === "admin"
+                      ? "bg-red-600 text-white shadow-xs"
+                      : "text-[#8e8f96] hover:text-white"
+                  }`}
+                  title="Menú completo de Administrador"
+                >
+                  Admin
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSetRole("venta")}
+                  className={`text-[10px] font-bold py-1 rounded transition-colors ${
+                    role === "venta"
+                      ? "bg-emerald-600 text-white shadow-xs"
+                      : "text-[#8e8f96] hover:text-white"
+                  }`}
+                  title="Navegación de Ventas"
+                >
+                  Ventas
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSetRole("stock")}
+                  className={`text-[10px] font-bold py-1 rounded transition-colors ${
+                    role === "stock"
+                      ? "bg-sky-600 text-white shadow-xs"
+                      : "text-[#8e8f96] hover:text-white"
+                  }`}
+                  title="Navegación de Stock"
+                >
+                  Stock
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Navegación por vistas */}
-        <nav className="p-3 flex-1 overflow-y-auto space-y-1">
-          {/* Vistas de Administrador */}
-          {role === "admin" && (
-            <>
+        <nav className="p-3 flex-1 overflow-y-auto space-y-4">
+          {/* ══════════════════════════════════════════════════════════ */}
+          {/* GRUPO 1: GESTIÓN DE PEDIDOS                                */}
+          {/* ══════════════════════════════════════════════════════════ */}
+          <div className="space-y-1">
+            <div className="px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-[#6b6c75]">
+              Gestión de Pedidos
+            </div>
+
+            {/* 1. Pedidos (Admin y Ventas) */}
+            {(role === "admin" || role === "venta") && (
               <button
                 onClick={() => setActiveView("pedidos")}
-                className={`w-full text-left text-[13px] px-3.5 py-2.5 rounded-lg transition-colors focus:outline-none flex items-center justify-between ${
+                className={`w-full text-left text-[13px] px-3 py-2 rounded-lg transition-colors focus:outline-none flex items-center justify-between ${
                   activeView === "pedidos"
-                    ? "bg-[#1a1b20] text-white font-semibold border-l-2 border-[#dc2626]"
-                    : "text-[#9a9ba3] hover:bg-[#1c1d22] hover:text-white"
+                    ? "bg-[#1f2026] text-white font-semibold border-l-2 border-[#dc2626]"
+                    : "text-[#9a9ba3] hover:bg-[#1a1b20] hover:text-white"
                 }`}
               >
-                <span>Pedidos Online</span>
+                <div className="flex items-center gap-2.5 truncate">
+                  <ShoppingBag className={`w-4 h-4 flex-shrink-0 ${activeView === "pedidos" ? "text-red-500" : "text-zinc-400"}`} />
+                  <span className="truncate">Pedidos</span>
+                </div>
                 {countPendientes > 0 && (
-                  <span className="bg-amber-500/20 text-amber-400 text-[10px] font-bold px-2 py-0.5 rounded-full border border-amber-500/30">
+                  <span className="bg-amber-500/20 text-amber-400 text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-amber-500/30">
                     {countPendientes}
                   </span>
                 )}
               </button>
+            )}
 
+            {/* 2. Preparación de pedidos (Admin y Stock) */}
+            {(role === "admin" || role === "stock") && (
               <button
-                onClick={() => setActiveView("estado_pedidos")}
-                className={`w-full text-left text-[13px] px-3.5 py-2.5 rounded-lg transition-colors focus:outline-none flex items-center justify-between ${
-                  activeView === "estado_pedidos"
-                    ? "bg-[#1a1b20] text-white font-semibold border-l-2 border-[#dc2626]"
-                    : "text-[#9a9ba3] hover:bg-[#1c1d22] hover:text-white"
+                onClick={() => setActiveView("preparacion")}
+                className={`w-full text-left text-[13px] px-3 py-2 rounded-lg transition-colors focus:outline-none flex items-center justify-between ${
+                  activeView === "preparacion"
+                    ? "bg-[#1f2026] text-white font-semibold border-l-2 border-[#dc2626]"
+                    : "text-[#9a9ba3] hover:bg-[#1a1b20] hover:text-white"
                 }`}
               >
-                <span>Estado de pedidos</span>
-                <span className="text-[10px] bg-red-600/20 text-red-400 border border-red-500/30 px-1.5 py-0.5 rounded font-bold">
-                  Flujo
+                <div className="flex items-center gap-2.5 truncate">
+                  <Package className={`w-4 h-4 flex-shrink-0 ${activeView === "preparacion" ? "text-red-500" : "text-sky-400"}`} />
+                  <span className="truncate">Preparación de pedidos</span>
+                </div>
+                {kanbanPendientes.length > 0 && (
+                  <span className="bg-sky-500/20 text-sky-400 text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-sky-500/30">
+                    {kanbanPendientes.length}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {/* 3. Entrega de pedidos (Admin y Ventas) */}
+            {(role === "admin" || role === "venta") && (
+              <button
+                onClick={() => setActiveView("entrega")}
+                className={`w-full text-left text-[13px] px-3 py-2 rounded-lg transition-colors focus:outline-none flex items-center justify-between ${
+                  activeView === "entrega"
+                    ? "bg-[#1f2026] text-white font-semibold border-l-2 border-[#dc2626]"
+                    : "text-[#9a9ba3] hover:bg-[#1a1b20] hover:text-white"
+                }`}
+              >
+                <div className="flex items-center gap-2.5 truncate">
+                  <Truck className={`w-4 h-4 flex-shrink-0 ${activeView === "entrega" ? "text-red-500" : "text-emerald-400"}`} />
+                  <span className="truncate">Entrega de pedidos</span>
+                </div>
+                {countListos > 0 && (
+                  <span className="bg-purple-500/20 text-purple-400 text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-purple-500/30">
+                    {countListos}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {/* 4. Finanzas Online (Admin y Ventas) */}
+            {(role === "admin" || role === "venta") && (
+              <button
+                onClick={() => setActiveView("finanzas")}
+                className={`w-full text-left text-[13px] px-3 py-2 rounded-lg transition-colors focus:outline-none flex items-center justify-between ${
+                  activeView === "finanzas"
+                    ? "bg-[#1f2026] text-white font-semibold border-l-2 border-[#dc2626]"
+                    : "text-[#9a9ba3] hover:bg-[#1a1b20] hover:text-white"
+                }`}
+              >
+                <div className="flex items-center gap-2.5 truncate">
+                  <CreditCard className={`w-4 h-4 flex-shrink-0 ${activeView === "finanzas" ? "text-red-500" : "text-emerald-400"}`} />
+                  <span className="truncate">Finanzas Online</span>
+                </div>
+                <span className="bg-emerald-500/20 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-500/30">
+                  Caja 24/7
                 </span>
               </button>
+            )}
+          </div>
+
+          {/* ══════════════════════════════════════════════════════════ */}
+          {/* GRUPO 2: CATÁLOGO COMERCIAL (Exclusivo Administrador)      */}
+          {/* ══════════════════════════════════════════════════════════ */}
+          {role === "admin" && (
+            <div className="space-y-1 pt-2 border-t border-[#26272e]">
+              <div className="px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-[#6b6c75]">
+                Catálogo Comercial
+              </div>
 
               <button
                 onClick={() => setActiveView("catalogo")}
-                className={`w-full text-left text-[13px] px-3.5 py-2.5 rounded-lg transition-colors focus:outline-none ${
+                className={`w-full text-left text-[13px] px-3 py-2 rounded-lg transition-colors focus:outline-none flex items-center gap-2.5 ${
                   activeView === "catalogo"
-                    ? "bg-[#1a1b20] text-white font-semibold border-l-2 border-[#dc2626]"
-                    : "text-[#9a9ba3] hover:bg-[#1c1d22] hover:text-white"
+                    ? "bg-[#1f2026] text-white font-semibold border-l-2 border-[#dc2626]"
+                    : "text-[#9a9ba3] hover:bg-[#1a1b20] hover:text-white"
                 }`}
               >
-                Catálogo y Ofertas
-              </button>
-
-              <button
-                onClick={() => setActiveView("marcas")}
-                className={`w-full text-left text-[13px] px-3.5 py-2.5 rounded-lg transition-colors focus:outline-none ${
-                  activeView === "marcas"
-                    ? "bg-[#1a1b20] text-white font-semibold border-l-2 border-[#dc2626]"
-                    : "text-[#9a9ba3] hover:bg-[#1c1d22] hover:text-white"
-                }`}
-              >
-                Marcas
+                <Flame className={`w-4 h-4 flex-shrink-0 ${activeView === "catalogo" ? "text-red-500" : "text-orange-400"}`} />
+                <span className="truncate">Catálogo y Ofertas</span>
               </button>
 
               <button
                 onClick={() => setActiveView("combos")}
-                className={`w-full text-left text-[13px] px-3.5 py-2.5 rounded-lg transition-colors focus:outline-none ${
+                className={`w-full text-left text-[13px] px-3 py-2 rounded-lg transition-colors focus:outline-none flex items-center gap-2.5 ${
                   activeView === "combos"
-                    ? "bg-[#1a1b20] text-white font-semibold border-l-2 border-[#dc2626]"
-                    : "text-[#9a9ba3] hover:bg-[#1c1d22] hover:text-white"
+                    ? "bg-[#1f2026] text-white font-semibold border-l-2 border-[#dc2626]"
+                    : "text-[#9a9ba3] hover:bg-[#1a1b20] hover:text-white"
                 }`}
               >
-                Combos y kits
+                <Layers className={`w-4 h-4 flex-shrink-0 ${activeView === "combos" ? "text-red-500" : "text-purple-400"}`} />
+                <span className="truncate">Combos y kits</span>
+              </button>
+
+              <button
+                onClick={() => setActiveView("marcas")}
+                className={`w-full text-left text-[13px] px-3 py-2 rounded-lg transition-colors focus:outline-none flex items-center gap-2.5 ${
+                  activeView === "marcas"
+                    ? "bg-[#1f2026] text-white font-semibold border-l-2 border-[#dc2626]"
+                    : "text-[#9a9ba3] hover:bg-[#1a1b20] hover:text-white"
+                }`}
+              >
+                <Star className={`w-4 h-4 flex-shrink-0 ${activeView === "marcas" ? "text-red-500" : "text-amber-400"}`} />
+                <span className="truncate">Marcas</span>
               </button>
 
               <button
                 onClick={() => setActiveView("etiquetas")}
-                className={`w-full text-left text-[13px] px-3.5 py-2.5 rounded-lg transition-colors focus:outline-none ${
+                className={`w-full text-left text-[13px] px-3 py-2 rounded-lg transition-colors focus:outline-none flex items-center gap-2.5 ${
                   activeView === "etiquetas"
-                    ? "bg-[#1a1b20] text-white font-semibold border-l-2 border-[#dc2626]"
-                    : "text-[#9a9ba3] hover:bg-[#1c1d22] hover:text-white"
+                    ? "bg-[#1f2026] text-white font-semibold border-l-2 border-[#dc2626]"
+                    : "text-[#9a9ba3] hover:bg-[#1a1b20] hover:text-white"
                 }`}
               >
-                Etiquetas de oferta
+                <Tag className={`w-4 h-4 flex-shrink-0 ${activeView === "etiquetas" ? "text-red-500" : "text-red-400"}`} />
+                <span className="truncate">Etiquetas de oferta</span>
               </button>
+            </div>
+          )}
+
+          {/* ══════════════════════════════════════════════════════════ */}
+          {/* GRUPO 3: SISTEMA Y TIENDA (Exclusivo Administrador)        */}
+          {/* ══════════════════════════════════════════════════════════ */}
+          {role === "admin" && (
+            <div className="space-y-1 pt-2 border-t border-[#26272e]">
+              <div className="px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-[#6b6c75]">
+                Sistema y Tienda
+              </div>
 
               <button
                 onClick={() => setActiveView("identidad")}
-                className={`w-full text-left text-[13px] px-3.5 py-2.5 rounded-lg transition-colors focus:outline-none ${
+                className={`w-full text-left text-[13px] px-3 py-2 rounded-lg transition-colors focus:outline-none flex items-center gap-2.5 ${
                   activeView === "identidad"
-                    ? "bg-[#1a1b20] text-white font-semibold border-l-2 border-[#dc2626]"
-                    : "text-[#9a9ba3] hover:bg-[#1c1d22] hover:text-white"
+                    ? "bg-[#1f2026] text-white font-semibold border-l-2 border-[#dc2626]"
+                    : "text-[#9a9ba3] hover:bg-[#1a1b20] hover:text-white"
                 }`}
               >
-                Identidad
-              </button>
-
-              <button
-                onClick={() => setActiveView("entrega")}
-                className={`w-full text-left text-[13px] px-3.5 py-2.5 rounded-lg transition-colors focus:outline-none ${
-                  activeView === "entrega"
-                    ? "bg-[#1a1b20] text-white font-semibold border-l-2 border-[#dc2626]"
-                    : "text-[#9a9ba3] hover:bg-[#1c1d22] hover:text-white"
-                }`}
-              >
-                Entrega de pedido
-              </button>
-
-              <button
-                onClick={() => setActiveView("preparacion")}
-                className={`w-full text-left text-[13px] px-3.5 py-2.5 rounded-lg transition-colors focus:outline-none ${
-                  activeView === "preparacion"
-                    ? "bg-[#1a1b20] text-white font-semibold border-l-2 border-[#dc2626]"
-                    : "text-[#9a9ba3] hover:bg-[#1c1d22] hover:text-white"
-                }`}
-              >
-                Preparación de pedidos
+                <Settings className={`w-4 h-4 flex-shrink-0 ${activeView === "identidad" ? "text-red-500" : "text-zinc-400"}`} />
+                <span className="truncate">Identidad</span>
               </button>
 
               <button
                 onClick={() => setActiveView("auditoria")}
-                className={`w-full text-left text-[13px] px-3.5 py-2.5 rounded-lg transition-colors focus:outline-none ${
+                className={`w-full text-left text-[13px] px-3 py-2 rounded-lg transition-colors focus:outline-none flex items-center gap-2.5 ${
                   activeView === "auditoria"
-                    ? "bg-[#1a1b20] text-white font-semibold border-l-2 border-[#dc2626]"
-                    : "text-[#9a9ba3] hover:bg-[#1c1d22] hover:text-white"
+                    ? "bg-[#1f2026] text-white font-semibold border-l-2 border-[#dc2626]"
+                    : "text-[#9a9ba3] hover:bg-[#1a1b20] hover:text-white"
                 }`}
               >
-                Auditoría
+                <History className={`w-4 h-4 flex-shrink-0 ${activeView === "auditoria" ? "text-red-500" : "text-zinc-400"}`} />
+                <span className="truncate">Auditoría</span>
               </button>
-            </>
-          )}
-
-          {/* Vistas de Empleado de Venta */}
-          {role === "venta" && (
-            <>
-              <button
-                onClick={() => setActiveView("pedidos")}
-                className={`w-full text-left text-[13px] px-3.5 py-2.5 rounded-lg transition-colors focus:outline-none ${
-                  activeView === "pedidos"
-                    ? "bg-[#1a1b20] text-white font-semibold border-l-2 border-[#dc2626]"
-                    : "text-[#9a9ba3] hover:bg-[#1c1d22] hover:text-white"
-                }`}
-              >
-                Pedidos Online
-              </button>
-              <button
-                onClick={() => setActiveView("estado_pedidos")}
-                className={`w-full text-left text-[13px] px-3.5 py-2.5 rounded-lg transition-colors focus:outline-none flex items-center justify-between ${
-                  activeView === "estado_pedidos"
-                    ? "bg-[#1a1b20] text-white font-semibold border-l-2 border-[#dc2626]"
-                    : "text-[#9a9ba3] hover:bg-[#1c1d22] hover:text-white"
-                }`}
-              >
-                <span>Estado de pedidos</span>
-                <span className="text-[10px] bg-red-600/20 text-red-400 border border-red-500/30 px-1.5 py-0.5 rounded font-bold">
-                  Flujo
-                </span>
-              </button>
-              <button
-                onClick={() => setActiveView("entrega")}
-                className={`w-full text-left text-[13px] px-3.5 py-2.5 rounded-lg transition-colors focus:outline-none ${
-                  activeView === "entrega"
-                    ? "bg-[#1a1b20] text-white font-semibold border-l-2 border-[#dc2626]"
-                    : "text-[#9a9ba3] hover:bg-[#1c1d22] hover:text-white"
-                }`}
-              >
-                Entrega de pedido
-              </button>
-            </>
-          )}
-
-          {/* Vistas de Empleado de Stock */}
-          {role === "stock" && (
-            <>
-              <button
-                onClick={() => setActiveView("preparacion")}
-                className={`w-full text-left text-[13px] px-3.5 py-2.5 rounded-lg transition-colors focus:outline-none ${
-                  activeView === "preparacion"
-                    ? "bg-[#1a1b20] text-white font-semibold border-l-2 border-[#dc2626]"
-                    : "text-[#9a9ba3] hover:bg-[#1c1d22] hover:text-white"
-                }`}
-              >
-                Preparación de pedidos
-              </button>
-            </>
+            </div>
           )}
         </nav>
 
@@ -1594,20 +2102,99 @@ export default function PanelPage() {
             <Menu className="w-5 h-5" />
           </button>
           <span className="font-bold text-sm tracking-wide">CHOPPER REPUESTOS</span>
-          <div className="w-8"></div>
+          <NotificationBell
+            user={user}
+            role={role}
+            onSelectPedido={handleSelectPedidoFromNotification}
+            onNavigateSection={handleNavigateSectionFromNotification}
+          />
+        </div>
+
+        {/* Barra superior de escritorio */}
+        <div className="hidden lg:flex items-center justify-between pb-4 mb-6 border-b border-[#26272e]">
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-[#9a9ba3]">
+              Panel Staff · <span className="font-semibold text-white">{user?.nombreCompleto || user?.correo}</span>
+            </span>
+            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-[#1b1c22] border border-[#30313b] text-[#c5c6cf]">
+              {user?.rol ? user.rol.replace(/_/g, " ") : role.toUpperCase()}
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <NotificationBell
+              user={user}
+              role={role}
+              onSelectPedido={handleSelectPedidoFromNotification}
+              onNavigateSection={handleNavigateSectionFromNotification}
+            />
+          </div>
         </div>
 
         {/* ════════════════════════════════════════════════════════════ */}
-        {/* VISTA 1: PEDIDOS ONLINE */}
+        {/* VISTA 1: PEDIDOS (UNIFICADA: LISTADO Y TABLERO)              */}
         {/* ════════════════════════════════════════════════════════════ */}
         {activeView === "pedidos" && (
-          <section>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-6">
+          <section className="space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
               <div>
-                <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Panel de Control</h1>
-                <p className="text-xs sm:text-[13px] text-[#9a9ba3] mt-0.5">
-                  Pedidos online — retiro en local y envío por Motomandado.
+                <div className="flex flex-wrap items-center gap-3">
+                  <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Pedidos</h1>
+
+                  {/* Selector Listado | Tablero */}
+                  <div className="inline-flex items-center bg-[#0f1012] p-1 rounded-xl border border-[#26272e]">
+                    <button
+                      type="button"
+                      onClick={() => setModoVisualizacionPedidos("listado")}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                        modoVisualizacionPedidos === "listado"
+                          ? "bg-red-600 text-white shadow-sm"
+                          : "text-[#9a9ba3] hover:text-white hover:bg-[#1a1b20]"
+                      }`}
+                    >
+                      <List className="w-3.5 h-3.5" />
+                      <span>Listado</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setModoVisualizacionPedidos("tablero")}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                        modoVisualizacionPedidos === "tablero"
+                          ? "bg-red-600 text-white shadow-sm"
+                          : "text-[#9a9ba3] hover:text-white hover:bg-[#1a1b20]"
+                      }`}
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>Tablero</span>
+                    </button>
+                  </div>
+                </div>
+
+                <p className="text-xs sm:text-[13px] text-[#9a9ba3] mt-1">
+                  Gestión centralizada de pedidos web · Vista de listado operativo y tablero Kanban de seguimiento de estados.
                 </p>
+
+                <div className="flex flex-wrap items-center gap-2 mt-2.5">
+                  {role !== "venta" && (
+                    <button
+                      type="button"
+                      onClick={() => setActiveView("preparacion")}
+                      className="px-2.5 py-1 text-xs bg-[#16171c] hover:bg-[#22232a] text-sky-400 border border-sky-500/30 rounded-lg flex items-center gap-1.5 transition-colors font-semibold"
+                    >
+                      <Package className="w-3.5 h-3.5" />
+                      <span>Ir a Preparación (Stock)</span>
+                    </button>
+                  )}
+                  {role !== "stock" && (
+                    <button
+                      type="button"
+                      onClick={() => setActiveView("entrega")}
+                      className="px-2.5 py-1 text-xs bg-[#16171c] hover:bg-[#22232a] text-emerald-400 border border-emerald-500/30 rounded-lg flex items-center gap-1.5 transition-colors font-semibold"
+                    >
+                      <Truck className="w-3.5 h-3.5" />
+                      <span>Ir a Entregas</span>
+                    </button>
+                  )}
+                </div>
               </div>
               <button
                 onClick={loadAllData}
@@ -1805,8 +2392,10 @@ export default function PanelPage() {
               </div>
             </div>
 
-            {/* Listado de Pedidos */}
-            <div className="space-y-3">
+            {/* Selector de modo: Listado vs Tablero */}
+            {modoVisualizacionPedidos === "listado" ? (
+              /* ─── VISTA LISTADO DE PEDIDOS ─── */
+              <div className="space-y-3">
               {pedidosFiltrados.length === 0 ? (
                 <div className="bg-[#16171c] border border-[#26272e] rounded-xl p-8 text-center text-[#9a9ba3]">
                   No se encontraron pedidos con los filtros aplicados.
@@ -2008,6 +2597,18 @@ export default function PanelPage() {
                 ))
               )}
             </div>
+            ) : (
+              <PedidosTableroView
+                pedidos={pedidosFiltrados}
+                role={role}
+                staffPreparadores={staffPreparadores}
+                saving={saving}
+                formatPrice={formatPrice}
+                onSelectPedido={setSelectedPedido}
+                onSelectEntregaPedido={handleOpenEntregaModal}
+                onChangeEstadoPedido={handleCambiarEstadoPedido}
+              />
+            )}
           </section>
         )}
 
@@ -2247,7 +2848,7 @@ export default function PanelPage() {
                           .filter((e) => e.activa)
                           .map((et) => (
                             <option key={et.id} value={et.nombre}>
-                              {et.nombre}
+                              {formatBadgeWithEmoji(et.nombre, et.emoji)}
                             </option>
                           ))}
                         {!etiquetas.some((e) => e.nombre === bulkBadgePromo) && (
@@ -2443,7 +3044,7 @@ export default function PanelPage() {
                               .filter((e) => e.activa)
                               .map((et) => (
                                 <option key={et.id} value={et.nombre}>
-                                  {et.nombre}
+                                  {formatBadgeWithEmoji(et.nombre, et.emoji)}
                                 </option>
                               ))}
                           </select>
@@ -2539,197 +3140,6 @@ export default function PanelPage() {
                     >
                       Agregar
                     </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Modal de Verificación y Entrega de Pedido */}
-            {selectedEntregaPedido && (
-              <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-                <div className="bg-[#16171c] border border-[#26272e] rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
-                  {/* Cabecera */}
-                  <div className="flex items-center justify-between border-b border-[#26272e] pb-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg font-bold text-white">#ORD-{selectedEntregaPedido.numero}</span>
-                        <EstadoChip estado={selectedEntregaPedido.estado} />
-                      </div>
-                      <span className="text-xs text-[#9a9ba3] mt-0.5 block">
-                        {selectedEntregaPedido.modalidadEntrega === "RETIRO_LOCAL"
-                          ? "🏪 Retiro en mostrador · Av. Roque Sáenz Peña 1500"
-                          : "🛵 Despacho Moto Uber / Motomandado en el día"}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedEntregaPedido(null)}
-                      className="p-1 rounded-lg text-[#9a9ba3] hover:text-white hover:bg-[#26272e] transition-colors"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-
-                  {/* Datos del Cliente y Ubicación */}
-                  <div className="bg-[#141519] border border-[#26272e] rounded-xl p-3.5 space-y-2 text-xs">
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <span className="text-[#6b6c75] text-[10px] uppercase font-bold tracking-wider">Cliente:</span>
-                        <div className="text-white font-bold">{selectedEntregaPedido.nombreCliente}</div>
-                        <div className="text-[#9a9ba3]">DNI {selectedEntregaPedido.dniCliente}</div>
-                      </div>
-                      <div>
-                        <span className="text-[#6b6c75] text-[10px] uppercase font-bold tracking-wider">Teléfono:</span>
-                        <div className="text-white font-medium">{selectedEntregaPedido.telefonoCliente || "No informado"}</div>
-                        <div className="text-emerald-400 font-bold">{selectedEntregaPedido.metodoPago.replace(/_/g, " ")}</div>
-                      </div>
-                    </div>
-
-                    {selectedEntregaPedido.modalidadEntrega === "MOTOMANDADO" && selectedEntregaPedido.direccionEnvio && (
-                      <div className="pt-2 border-t border-[#26272e] flex items-center justify-between">
-                        <div className="flex items-center gap-1.5 text-white">
-                          <MapPin className="w-3.5 h-3.5 text-red-500 shrink-0" />
-                          <span>{selectedEntregaPedido.direccionEnvio} (Posadas)</span>
-                        </div>
-                        <a
-                          href={`https://maps.google.com/?q=${encodeURIComponent(selectedEntregaPedido.direccionEnvio + ", Posadas, Misiones")}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-[11px] text-red-400 underline hover:text-red-300 font-semibold"
-                        >
-                          Ver mapa
-                        </a>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Paso 1: Validación de Identidad / Código de Retiro */}
-                  {selectedEntregaPedido.estado !== "ENTREGADO" && (
-                    <div className="space-y-2 bg-[#1a1b20] border border-[#26272e] rounded-xl p-3.5 text-xs">
-                      <span className="font-bold text-white flex items-center gap-1.5">
-                        <UserCheck className="w-4 h-4 text-sky-400" />
-                        {selectedEntregaPedido.modalidadEntrega === "RETIRO_LOCAL"
-                          ? "1. Validación de cliente en mostrador"
-                          : "1. Identificación del conductor / Moto Uber"}
-                      </span>
-                      {selectedEntregaPedido.modalidadEntrega === "RETIRO_LOCAL" ? (
-                        <div>
-                          <label className="text-[11px] text-[#9a9ba3] block mb-1">
-                            Pedir código de retiro, DNI o número de orden al cliente:
-                          </label>
-                          <input
-                            type="text"
-                            placeholder="Ej: DNI 38999888 o código de compra..."
-                            value={codigoRetiroVerificado}
-                            onChange={(e) => setCodigoRetiroVerificado(e.target.value)}
-                            className="w-full bg-[#0f1012] border border-[#35363d] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-red-600 placeholder:text-[#6b6c75]"
-                          />
-                        </div>
-                      ) : (
-                        <label className="flex items-center gap-2 cursor-pointer font-medium text-white pt-1">
-                          <input
-                            type="checkbox"
-                            checked={choferMotoIdentificado}
-                            onChange={(e) => setChoferMotoIdentificado(e.target.checked)}
-                            className="rounded bg-[#0f1012] border-[#35363d] text-red-600 focus:ring-0"
-                          />
-                          <span>Repartidor / Conductor de Moto Uber identificado y listo para viaje</span>
-                        </label>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Paso 2: Lista de Repuestos con Checklist de Verificación */}
-                  <div className="space-y-2 bg-[#1a1b20] border border-[#26272e] rounded-xl p-3.5 text-xs">
-                    <div className="flex items-center justify-between pb-1.5 border-b border-[#26272e]">
-                      <span className="font-bold text-white flex items-center gap-1.5">
-                        <Package className="w-4 h-4 text-emerald-400" />
-                        2. Control de repuestos en el paquete ({selectedEntregaPedido.items?.length || 0})
-                      </span>
-                      <span className="text-[10px] text-[#6b6c75]">
-                        Tildar cada producto al revisar
-                      </span>
-                    </div>
-
-                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                      {selectedEntregaPedido.items?.map((it) => {
-                        const isChecked = !!checkedEntregaItems[String(it.id)];
-                        return (
-                          <label
-                            key={it.id}
-                            className={`flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition-colors ${
-                              isChecked
-                                ? "bg-emerald-950/20 border-emerald-500/40 text-white"
-                                : "bg-[#141519] border-[#26272e] text-[#d7d8dd] hover:border-[#35363d]"
-                            }`}
-                          >
-                            <div className="flex items-center gap-2.5">
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={(e) =>
-                                  setCheckedEntregaItems((prev) => ({
-                                    ...prev,
-                                    [String(it.id)]: e.target.checked,
-                                  }))
-                                }
-                                className="rounded bg-[#0f1012] border-[#35363d] text-emerald-500 focus:ring-0 cursor-pointer"
-                              />
-                              <div>
-                                <span className="font-semibold text-xs block">{it.cantidad}x {it.nombre}</span>
-                                {it.marca && <span className="text-[10px] text-[#8e8f96]">Marca: {it.marca}</span>}
-                              </div>
-                            </div>
-                            <span className="font-bold text-xs text-white">{formatPrice(it.subtotal)}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Paso 3: Confirmación de Pago */}
-                  <div className="bg-[#141519] border border-[#26272e] rounded-xl p-3 text-xs flex items-center justify-between">
-                    <div>
-                      <span className="text-[#6b6c75] text-[10px] uppercase font-bold block">Total de la orden:</span>
-                      <span className="text-base font-bold text-emerald-400">{formatPrice(selectedEntregaPedido.total)}</span>
-                    </div>
-                    {selectedEntregaPedido.metodoPago === "EFECTIVO_LOCAL" ? (
-                      <label className="flex items-center gap-2 cursor-pointer font-bold text-amber-400">
-                        <input
-                          type="checkbox"
-                          checked={pagoEfectivoCobrado}
-                          onChange={(e) => setPagoEfectivoCobrado(e.target.checked)}
-                          className="rounded bg-[#0f1012] border-[#35363d] text-amber-500 focus:ring-0"
-                        />
-                        <span>Efectivo cobrado en caja</span>
-                      </label>
-                    ) : (
-                      <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1">
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Pago online / transferencia registrado
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Botones del Modal */}
-                  <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-[#26272e]">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedEntregaPedido(null)}
-                      className="px-4 py-2 bg-transparent hover:bg-[#26272e] text-[#9a9ba3] hover:text-white rounded-xl text-xs font-semibold transition-colors"
-                    >
-                      Cerrar
-                    </button>
-                    {selectedEntregaPedido.estado !== "ENTREGADO" && (
-                      <button
-                        type="button"
-                        onClick={handleConfirmarEntregaModal}
-                        disabled={saving}
-                        className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-2 shadow-lg shadow-green-900/20"
-                      >
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span>Confirmar Entrega y Despacho</span>
-                      </button>
-                    )}
                   </div>
                 </div>
               </div>
@@ -3344,7 +3754,7 @@ export default function PanelPage() {
 
                       <div className="pt-2 border-t border-[#26272e] flex items-center justify-between">
                         <div>
-                          <div className="text-[11px] text-[#6b6c75] line-through">{formatPrice(c.precioRegular)}</div>
+                          <div className="text-[11px] text-[#6b6c75] line-through">{formatPrice(c.precioRegular || 0)}</div>
                           <div className="text-sm font-bold text-emerald-400">{formatPrice(c.precio)}</div>
                         </div>
 
@@ -3407,20 +3817,49 @@ export default function PanelPage() {
                         type="text"
                         placeholder="Ej: Combo Cadena y Piñón Honda CG"
                         value={comboNombre}
-                        onChange={(e) => setComboNombre(e.target.value)}
-                        className="bg-[#0f1012] border border-[#35363d] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-red-600"
+                        onChange={(e) => {
+                          setComboNombre(e.target.value);
+                          if (comboFormErrors.nombre) {
+                            setComboFormErrors((prev) => {
+                              const next = { ...prev };
+                              delete next.nombre;
+                              return next;
+                            });
+                          }
+                        }}
+                        className={`bg-[#0f1012] border rounded-lg px-3 py-2 text-sm text-white focus:outline-none ${
+                          comboFormErrors.nombre
+                            ? "border-red-500 focus:border-red-500"
+                            : "border-[#35363d] focus:border-red-600"
+                        }`}
                       />
+                      {comboFormErrors.nombre && (
+                        <span className="text-[11px] text-red-400 font-medium">
+                          {comboFormErrors.nombre}
+                        </span>
+                      )}
                     </label>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <label className="flex flex-col gap-1.5 text-xs text-[#b8b9c0]">
                         Etiqueta de promoción
-                        <input
-                          type="text"
+                        <select
                           value={comboBadge}
                           onChange={(e) => setComboBadge(e.target.value)}
                           className="bg-[#0f1012] border border-[#35363d] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-red-600"
-                        />
+                        >
+                          <option value="">Sin etiqueta</option>
+                          {etiquetas
+                            .filter((e) => e.activa)
+                            .map((e) => (
+                              <option key={e.id} value={e.nombre}>
+                                {formatBadgeWithEmoji(e.nombre, e.emoji)}
+                              </option>
+                            ))}
+                          {comboBadge && !etiquetas.some((e) => e.nombre === comboBadge) && (
+                            <option value={comboBadge}>{comboBadge}</option>
+                          )}
+                        </select>
                       </label>
 
                       <label className="flex flex-col gap-1.5 text-xs text-[#b8b9c0]">
@@ -3428,9 +3867,27 @@ export default function PanelPage() {
                         <input
                           type="number"
                           value={comboPrecio}
-                          onChange={(e) => setComboPrecio(Math.max(0, Number(e.target.value)))}
-                          className="bg-[#0f1012] border border-[#35363d] rounded-lg px-3 py-2 text-sm font-bold text-emerald-400 focus:outline-none focus:border-red-600"
+                          onChange={(e) => {
+                            setComboPrecio(Math.max(0, Number(e.target.value)));
+                            if (comboFormErrors.precio) {
+                              setComboFormErrors((prev) => {
+                                const next = { ...prev };
+                                delete next.precio;
+                                return next;
+                              });
+                            }
+                          }}
+                          className={`bg-[#0f1012] border rounded-lg px-3 py-2 text-sm font-bold text-emerald-400 focus:outline-none ${
+                            comboFormErrors.precio
+                              ? "border-red-500 focus:border-red-500"
+                              : "border-[#35363d] focus:border-red-600"
+                          }`}
                         />
+                        {comboFormErrors.precio && (
+                          <span className="text-[11px] text-red-400 font-medium">
+                            {comboFormErrors.precio}
+                          </span>
+                        )}
                       </label>
                     </div>
 
@@ -3445,6 +3902,58 @@ export default function PanelPage() {
                       </div>
                     </div>
 
+                    {/* Disponibilidad proporcional calculada según stock real */}
+                    <div
+                      className={`rounded-xl p-3 border text-xs flex items-center justify-between gap-3 ${
+                        comboItems.length === 0
+                          ? "bg-[#141519] border-[#26272e] text-[#9a9ba3]"
+                          : comboStockCalculado > 0
+                          ? "bg-emerald-950/20 border-emerald-800/40 text-emerald-300"
+                          : "bg-amber-950/20 border-amber-800/40 text-amber-300"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Package
+                          className={`w-4 h-4 flex-shrink-0 ${
+                            comboItems.length === 0
+                              ? "text-[#6b6c75]"
+                              : comboStockCalculado > 0
+                              ? "text-emerald-400"
+                              : "text-amber-400"
+                          }`}
+                        />
+                        <div>
+                          <div className="font-bold">
+                            {comboItems.length === 0
+                              ? "Disponibilidad del combo: pendiente (sin repuestos)"
+                              : comboStockCalculado > 0
+                              ? `Disponibilidad calculada: ${comboStockCalculado} unidad${
+                                  comboStockCalculado === 1 ? "" : "es"
+                                } para la venta`
+                              : "Disponibilidad calculada: 0 unidades (sin stock)"}
+                          </div>
+                          <p className="text-[11px] text-[#9a9ba3] mt-0.5">
+                            {comboItems.length === 0
+                              ? "Sumá repuestos para calcular el stock conjunto del combo."
+                              : comboStockCalculado > 0
+                              ? "Calculado automáticamente a partir del repuesto con menor stock disponible proporcional."
+                              : "Uno o más componentes no tienen stock. Podés guardar la configuración del combo, pero figurará sin stock en la tienda hasta que ingrese mercadería."}
+                          </p>
+                        </div>
+                      </div>
+                      {comboItems.length > 0 && (
+                        <div
+                          className={`px-2.5 py-1 rounded-lg font-bold text-xs whitespace-nowrap ${
+                            comboStockCalculado > 0
+                              ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                              : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                          }`}
+                        >
+                          {comboStockCalculado} disp.
+                        </div>
+                      )}
+                    </div>
+
                     {/* 1. LISTA DE REPUESTOS SELECCIONADOS EN EL COMBO */}
                     <div className="space-y-2.5 bg-[#141519] border border-[#26272e] rounded-xl p-3.5">
                       <div className="flex items-center justify-between text-xs">
@@ -3457,6 +3966,13 @@ export default function PanelPage() {
                         </span>
                       </div>
 
+                      {comboFormErrors.items && (
+                        <div className="p-2.5 rounded-lg bg-red-950/30 border border-red-800/40 text-red-400 text-xs font-medium flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                          <span>{comboFormErrors.items}</span>
+                        </div>
+                      )}
+
                       {comboItems.length === 0 ? (
                         <div className="py-4 text-center text-xs text-[#9a9ba3] italic border border-dashed border-[#26272e] rounded-lg">
                           Aún no incluiste repuestos. Buscá abajo en el catálogo para sumarlos.
@@ -3467,27 +3983,58 @@ export default function PanelPage() {
                             const prod = products.find((p) => p.id === it.productoId);
                             const unitPrice = prod?.precioVenta || 0;
                             const subtotal = unitPrice * it.cantidad;
+                            const stockProd = prod?.cantidad ?? 0;
+                            const sinStock = stockProd === 0;
+                            const superaStock = !sinStock && it.cantidad > stockProd;
+
                             return (
                               <div
                                 key={it.productoId}
-                                className="bg-[#1a1b20] border border-[#35363d] rounded-lg p-2.5 flex items-center justify-between gap-3 text-xs"
+                                className={`border rounded-lg p-2.5 flex items-center justify-between gap-3 text-xs transition-colors ${
+                                  sinStock
+                                    ? "bg-red-950/20 border-red-800/40"
+                                    : superaStock
+                                    ? "bg-amber-950/20 border-amber-800/40"
+                                    : "bg-[#1a1b20] border-[#35363d]"
+                                }`}
                               >
                                 <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-1.5">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
                                     <span className="text-[10px] text-red-400 font-bold bg-red-950/40 px-1.5 py-0.5 rounded border border-red-800/40">
                                       {prod?.marca || "Repuesto"}
                                     </span>
                                     <span className="font-semibold text-white truncate">
                                       {prod?.nombre || `Producto #${it.productoId}`}
                                     </span>
+                                    {sinStock && (
+                                      <span className="text-[10px] text-red-400 bg-red-950/60 px-1.5 py-0.5 rounded border border-red-800/60 font-semibold flex items-center gap-1">
+                                        ⚠️ Sin stock disponible (0 unid.)
+                                      </span>
+                                    )}
+                                    {superaStock && (
+                                      <span className="text-[10px] text-amber-400 bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-800/60 font-semibold flex items-center gap-1">
+                                        ⚠️ Supera stock físico ({stockProd} disp.)
+                                      </span>
+                                    )}
                                   </div>
-                                  <div className="text-[11px] text-[#9a9ba3] mt-0.5">
-                                    Unitario: {formatPrice(unitPrice)} · Subtotal: <b className="text-emerald-400">{formatPrice(subtotal)}</b>
+                                  <div className="text-[11px] text-[#9a9ba3] mt-1 flex items-center gap-2 flex-wrap">
+                                    <span>Unitario: {formatPrice(unitPrice)}</span>
+                                    <span>·</span>
+                                    <span>
+                                      Stock en local:{" "}
+                                      <b className={stockProd > 0 ? "text-slate-200" : "text-red-400"}>
+                                        {stockProd} unid.
+                                      </b>
+                                    </span>
+                                    <span>·</span>
+                                    <span>
+                                      Subtotal: <b className="text-emerald-400">{formatPrice(subtotal)}</b>
+                                    </span>
                                   </div>
                                 </div>
 
                                 <div className="flex items-center gap-2">
-                                  {/* Stepper Cantidad */}
+                                  {/* Stepper Cantidad con input numérico directo */}
                                   <div className="flex items-center bg-[#0f1012] border border-[#35363d] rounded-lg overflow-hidden">
                                     <button
                                       type="button"
@@ -3501,7 +4048,9 @@ export default function PanelPage() {
                                             )
                                           );
                                         } else {
-                                          setComboItems(comboItems.filter((x) => x.productoId !== it.productoId));
+                                          setComboItems(
+                                            comboItems.filter((x) => x.productoId !== it.productoId)
+                                          );
                                         }
                                       }}
                                       className="px-2 py-1 hover:bg-[#26272e] text-[#9a9ba3] hover:text-white transition-colors"
@@ -3509,9 +4058,24 @@ export default function PanelPage() {
                                     >
                                       <Minus className="w-3 h-3" />
                                     </button>
-                                    <span className="px-2.5 py-1 text-xs font-bold text-white min-w-[28px] text-center">
-                                      {it.cantidad}
-                                    </span>
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      step="1"
+                                      value={it.cantidad}
+                                      onChange={(e) => {
+                                        const val = parseInt(e.target.value, 10);
+                                        const cleanVal = isNaN(val) ? 1 : Math.max(1, Math.floor(val));
+                                        setComboItems(
+                                          comboItems.map((x) =>
+                                            x.productoId === it.productoId
+                                              ? { ...x, cantidad: cleanVal }
+                                              : x
+                                          )
+                                        );
+                                      }}
+                                      className="w-10 bg-transparent text-xs font-bold text-white text-center focus:outline-none py-1"
+                                    />
                                     <button
                                       type="button"
                                       onClick={() => {
@@ -3533,7 +4097,9 @@ export default function PanelPage() {
                                   <button
                                     type="button"
                                     onClick={() =>
-                                      setComboItems(comboItems.filter((x) => x.productoId !== it.productoId))
+                                      setComboItems(
+                                        comboItems.filter((x) => x.productoId !== it.productoId)
+                                      )
                                     }
                                     className="p-1.5 rounded-lg bg-transparent hover:bg-red-950/50 text-[#6b6c75] hover:text-red-400 transition-colors"
                                     title="Quitar del combo"
@@ -3577,7 +4143,11 @@ export default function PanelPage() {
                           )
                           .slice(0, 20)
                           .map((prod) => {
-                            const isSelected = comboItems.some((it) => it.productoId === prod.id);
+                            const includedItem = comboItems.find((it) => it.productoId === prod.id);
+                            const isSelected = Boolean(includedItem);
+                            const stockProd = prod.cantidad ?? 0;
+                            const sinStock = stockProd === 0;
+
                             return (
                               <div
                                 key={prod.id}
@@ -3589,9 +4159,18 @@ export default function PanelPage() {
                               >
                                 <div className="flex items-center gap-2 flex-1 min-w-0">
                                   <span className="text-[10px] text-red-400 font-bold bg-red-950/40 px-1 py-0.5 rounded">
-                                    {prod.marca}
+                                    {prod.marca || "Repuesto"}
                                   </span>
                                   <span className="truncate text-white">{prod.nombre}</span>
+                                  {sinStock ? (
+                                    <span className="text-[10px] text-red-400 bg-red-950/40 px-1.5 py-0.5 rounded border border-red-800/40 whitespace-nowrap">
+                                      Sin stock (0)
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-[#8e8f99] bg-[#0f1012] px-1.5 py-0.5 rounded whitespace-nowrap">
+                                      Stock: {stockProd}
+                                    </span>
+                                  )}
                                 </div>
 
                                 <div className="flex items-center gap-2 ml-2">
@@ -3599,15 +4178,72 @@ export default function PanelPage() {
                                     {formatPrice(prod.precioVenta)}
                                   </span>
                                   {isSelected ? (
-                                    <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[10px] font-bold border border-emerald-500/30 flex items-center gap-1">
-                                      <Check className="w-3 h-3" /> Incluido
-                                    </span>
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[10px] font-bold border border-emerald-500/30 flex items-center gap-1">
+                                        <Check className="w-3 h-3" /> Incluido
+                                      </span>
+                                      <div className="flex items-center bg-[#0f1012] border border-[#35363d] rounded overflow-hidden">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            if (includedItem && includedItem.cantidad > 1) {
+                                              setComboItems(
+                                                comboItems.map((x) =>
+                                                  x.productoId === prod.id
+                                                    ? { ...x, cantidad: x.cantidad - 1 }
+                                                    : x
+                                                )
+                                              );
+                                            } else {
+                                              setComboItems(
+                                                comboItems.filter((x) => x.productoId !== prod.id)
+                                              );
+                                            }
+                                          }}
+                                          className="px-1.5 py-0.5 hover:bg-[#26272e] text-[#9a9ba3] hover:text-white"
+                                          title="Reducir cantidad"
+                                        >
+                                          <Minus className="w-2.5 h-2.5" />
+                                        </button>
+                                        <span className="px-1.5 py-0.5 text-[11px] font-bold text-white min-w-[20px] text-center">
+                                          {includedItem?.cantidad || 1}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setComboItems(
+                                              comboItems.map((x) =>
+                                                x.productoId === prod.id
+                                                  ? { ...x, cantidad: x.cantidad + 1 }
+                                                  : x
+                                              )
+                                            );
+                                          }}
+                                          className="px-1.5 py-0.5 hover:bg-[#26272e] text-[#9a9ba3] hover:text-white"
+                                          title="Aumentar cantidad"
+                                        >
+                                          <Plus className="w-2.5 h-2.5" />
+                                        </button>
+                                      </div>
+                                    </div>
                                   ) : (
                                     <button
                                       type="button"
-                                      onClick={() =>
-                                        setComboItems([...comboItems, { productoId: prod.id, cantidad: 1 }])
-                                      }
+                                      onClick={() => {
+                                        if (!comboItems.some((x) => x.productoId === prod.id)) {
+                                          setComboItems([
+                                            ...comboItems,
+                                            { productoId: prod.id, cantidad: 1 },
+                                          ]);
+                                          if (comboFormErrors.items) {
+                                            setComboFormErrors((prev) => {
+                                              const c = { ...prev };
+                                              delete c.items;
+                                              return c;
+                                            });
+                                          }
+                                        }
+                                      }}
                                       className="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-[11px] font-bold transition-colors flex items-center gap-1"
                                     >
                                       <Plus className="w-3 h-3" /> Agregar
@@ -3755,6 +4391,49 @@ export default function PanelPage() {
                       />
                     </div>
 
+                    {/* Selector de ícono o emoji */}
+                    <div>
+                      <label className="block text-[#b8b9c0] font-semibold mb-1.5">
+                        Ícono o emoji decorativo:
+                      </label>
+                      <div className="flex flex-wrap gap-1.5 p-2 bg-[#0f1012] border border-[#35363d] rounded-xl items-center">
+                        <button
+                          type="button"
+                          onClick={() => setNuevaEtiquetaEmoji("")}
+                          className={`px-2 py-1 rounded-lg text-xs font-medium transition-colors ${
+                            !nuevaEtiquetaEmoji
+                              ? "bg-[#26272e] text-white border border-[#45464f]"
+                              : "text-[#6b6c75] hover:text-white"
+                          }`}
+                        >
+                          Ninguno
+                        </button>
+                        {EMOJIS_DISPONIBLES.map((item) => (
+                          <button
+                            key={item.emoji}
+                            type="button"
+                            title={item.label}
+                            onClick={() => setNuevaEtiquetaEmoji(item.emoji)}
+                            className={`w-7 h-7 flex items-center justify-center rounded-lg text-sm transition-transform ${
+                              nuevaEtiquetaEmoji === item.emoji
+                                ? "bg-emerald-500/20 border border-emerald-500 text-white scale-110"
+                                : "hover:bg-[#1a1b20] hover:scale-105"
+                            }`}
+                          >
+                            {item.emoji}
+                          </button>
+                        ))}
+                      </div>
+                      {nuevaEtiquetaNombre.trim() && (
+                        <div className="mt-2 flex items-center gap-2">
+                          <span className="text-[11px] text-[#6b6c75]">Vista previa:</span>
+                          <span className="bg-[#dc2626] text-white text-xs font-bold px-3 py-1 rounded-full shadow">
+                            {formatBadgeWithEmoji(nuevaEtiquetaNombre, nuevaEtiquetaEmoji)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
                     {/* Sugerencias rápidas */}
                     <div>
                       <span className="text-[11px] text-[#6b6c75] font-semibold block mb-1.5">
@@ -3847,6 +4526,49 @@ export default function PanelPage() {
                         }}
                         className="w-full bg-[#0f1012] border border-[#35363d] rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500 placeholder:text-[#6b6c75]"
                       />
+                    </div>
+
+                    {/* Selector de ícono o emoji */}
+                    <div>
+                      <label className="block text-[#b8b9c0] font-semibold mb-1.5">
+                        Ícono o emoji decorativo:
+                      </label>
+                      <div className="flex flex-wrap gap-1.5 p-2 bg-[#0f1012] border border-[#35363d] rounded-xl items-center">
+                        <button
+                          type="button"
+                          onClick={() => setEditingEtiquetaEmoji("")}
+                          className={`px-2 py-1 rounded-lg text-xs font-medium transition-colors ${
+                            !editingEtiquetaEmoji
+                              ? "bg-[#26272e] text-white border border-[#45464f]"
+                              : "text-[#6b6c75] hover:text-white"
+                          }`}
+                        >
+                          Ninguno
+                        </button>
+                        {EMOJIS_DISPONIBLES.map((item) => (
+                          <button
+                            key={item.emoji}
+                            type="button"
+                            title={item.label}
+                            onClick={() => setEditingEtiquetaEmoji(item.emoji)}
+                            className={`w-7 h-7 flex items-center justify-center rounded-lg text-sm transition-transform ${
+                              editingEtiquetaEmoji === item.emoji
+                                ? "bg-amber-500/20 border border-amber-500 text-white scale-110"
+                                : "hover:bg-[#1a1b20] hover:scale-105"
+                            }`}
+                          >
+                            {item.emoji}
+                          </button>
+                        ))}
+                      </div>
+                      {editingEtiquetaNombre.trim() && (
+                        <div className="mt-2 flex items-center gap-2">
+                          <span className="text-[11px] text-[#6b6c75]">Vista previa:</span>
+                          <span className="bg-[#dc2626] text-white text-xs font-bold px-3 py-1 rounded-full shadow">
+                            {formatBadgeWithEmoji(editingEtiquetaNombre, editingEtiquetaEmoji)}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -3944,7 +4666,7 @@ export default function PanelPage() {
                             }`}
                             title={e.nombre}
                           >
-                            {e.nombre}
+                            {formatBadgeWithEmoji(e.nombre, e.emoji)}
                           </span>
                           <span
                             className={`text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${
@@ -3975,11 +4697,12 @@ export default function PanelPage() {
                           onClick={() => {
                             setEditingEtiqueta(e);
                             setEditingEtiquetaNombre(e.nombre);
+                            setEditingEtiquetaEmoji(e.emoji || "");
                           }}
                           className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-[#141519] border border-[#35363d] text-[#e7e7ea] hover:bg-[#26272e] hover:border-amber-500 transition-colors flex items-center gap-1"
                         >
                           <Edit className="w-3 h-3 text-amber-400" />
-                          <span>Editar nombre</span>
+                          <span>Editar etiqueta</span>
                         </button>
                         <button
                           onClick={() => handleToggleEtiqueta(e.id, e.activa)}
@@ -4087,8 +4810,30 @@ export default function PanelPage() {
                     <li>Resolución mínima recomendada: <strong className="text-white">400 × 120 px</strong>.</li>
                     <li>Permite contrastar limpiamente sobre el fondo oscuro de la tienda.</li>
                   </ul>
-                  <div className="pt-2 border-t border-[#26272e] text-[10px] text-[#6b6c75] font-mono break-all">
-                    Ruta actual: {config.logo_url}
+                  <div className="pt-2 border-t border-[#26272e] space-y-2">
+                    <label className="block text-[11px] text-[#b8b9c0] font-semibold">
+                      O ingresar URL manual de la imagen:
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={config.logo_url}
+                        onChange={(e) => setConfig({ ...config, logo_url: e.target.value })}
+                        placeholder="/logo-nav.png"
+                        className="flex-1 bg-[#0f1012] border border-[#35363d] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-red-600 font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setConfig({ ...config, logo_url: "/logo-nav.png" })}
+                        className="px-2.5 py-1.5 bg-[#1a1b20] hover:bg-[#26272e] border border-[#35363d] text-[#b8b9c0] hover:text-white rounded-lg text-[10px] font-semibold transition-colors"
+                        title="Restaurar logo predeterminado"
+                      >
+                        Default
+                      </button>
+                    </div>
+                    <div className="text-[10px] text-[#6b6c75] font-mono break-all">
+                      Ruta actual: {config.logo_url}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -4273,6 +5018,336 @@ export default function PanelPage() {
                 </div>
               </div>
             </div>
+
+            {/* 3. GESTIÓN DE BANNERS DEL INICIO (HERO Y TEMPORADA) */}
+            <div className="bg-[#16171c] border border-[#26272e] rounded-2xl p-6 sm:p-8 space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-[#26272e]">
+                <div>
+                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                    <ImageIcon className="w-5 h-5 text-red-500" />
+                    Banners del Inicio y Temporada
+                  </h2>
+                  <p className="text-xs text-[#9a9ba3] mt-0.5">
+                    Administrá los banners principales de la página principal, promociones de temporada, imágenes de fondo y enlaces directos a ofertas.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleOpenCrearBanner}
+                  className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-all shadow flex items-center gap-2 self-start sm:self-center"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Crear nuevo banner</span>
+                </button>
+              </div>
+
+              {bannersHome.length === 0 ? (
+                <div className="text-center py-10 bg-[#121316] rounded-xl border border-dashed border-[#26272e] p-6 space-y-3">
+                  <ImageIcon className="w-10 h-10 text-[#6b6c75] mx-auto" />
+                  <p className="text-xs text-[#9a9ba3]">No hay banners configurados en la tienda.</p>
+                  <button
+                    type="button"
+                    onClick={handleOpenCrearBanner}
+                    className="px-3 py-1.5 bg-red-600/20 text-red-400 border border-red-500/30 rounded-lg text-xs font-semibold hover:bg-red-600/30 transition-colors"
+                  >
+                    Crear el primer banner
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-4">
+                  {bannersHome.map((b, idx) => (
+                    <div
+                      key={b.id || idx}
+                      className="bg-[#121316] border border-[#26272e] hover:border-[#35363d] rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-colors"
+                    >
+                      <div className="space-y-2 flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#1a1b20] border border-[#26272e] text-[#8e8f96]">
+                            #{b.orden || idx + 1}
+                          </span>
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              b.activo
+                                ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
+                                : "bg-zinc-800 text-zinc-400 border-zinc-700"
+                            }`}
+                          >
+                            {b.activo ? "Activo en tienda" : "Pausado"}
+                          </span>
+                          {b.badge && (
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
+                              {b.badge}
+                            </span>
+                          )}
+                          {b.imagenUrl && (
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center gap-1">
+                              <ImageIcon className="w-3 h-3" /> Con imagen
+                            </span>
+                          )}
+                        </div>
+
+                        <h3 className="text-sm font-bold text-white truncate">{b.titulo}</h3>
+                        <p className="text-xs text-[#9a9ba3] line-clamp-2 leading-relaxed">
+                          {b.descripcion}
+                        </p>
+
+                        <div className="flex flex-wrap items-center gap-4 text-[11px] text-[#8e8f96]">
+                          {b.enlace && (
+                            <div className="flex items-center gap-1.5 text-blue-400 font-mono">
+                              <ExternalLink className="w-3 h-3" />
+                              <span>Enlace: {b.enlace}</span>
+                            </div>
+                          )}
+                          {b.imagenUrl && (
+                            <div className="flex items-center gap-1.5 text-purple-400 font-mono truncate max-w-xs">
+                              <span>Foto: {b.imagenUrl}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleBanner(b.id, !b.activo)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                            b.activo
+                              ? "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                              : "bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/30"
+                          }`}
+                          title={b.activo ? "Pausar banner" : "Activar banner"}
+                        >
+                          {b.activo ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          <span>{b.activo ? "Pausar" : "Activar"}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditarBanner(b)}
+                          className="p-2 bg-[#1a1b20] hover:bg-[#26272e] border border-[#26272e] text-slate-300 hover:text-white rounded-lg text-xs transition-colors"
+                          title="Editar banner"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleEliminarBanner(b.id)}
+                          className="p-2 bg-red-950/20 hover:bg-red-950/40 border border-red-900/30 text-red-400 hover:text-red-300 rounded-lg text-xs transition-colors"
+                          title="Eliminar banner"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Modal para Crear / Editar Banner del Inicio */}
+            {showBannerModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in overflow-y-auto">
+                <div className="w-full max-w-lg bg-[#141519] border border-[#26272e] rounded-2xl shadow-2xl overflow-hidden space-y-4 p-6 my-8">
+                  <div className="flex items-start justify-between pb-3 border-b border-[#26272e]">
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-2 rounded-xl bg-red-500/10 text-red-500 border border-red-500/20">
+                        <ImageIcon className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold text-white">
+                          {editingBanner ? "Editar Banner del Inicio" : "Crear Nuevo Banner del Inicio"}
+                        </h3>
+                        <p className="text-[11px] text-[#9a9ba3]">
+                          Configurá los textos, subtítulo, imagen y enlace para la página principal.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowBannerModal(false)}
+                      className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-[#1f2026] transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-3.5 text-xs">
+                    <div>
+                      <label className="block text-[#b8b9c0] font-semibold mb-1">
+                        Título principal del banner:
+                      </label>
+                      <input
+                        type="text"
+                        value={bannerTitulo}
+                        onChange={(e) => setBannerTitulo(e.target.value)}
+                        placeholder="Ej: Hacé tu pedido y retiralo en el local"
+                        className="w-full bg-[#0f1012] border border-[#35363d] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-red-600 text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[#b8b9c0] font-semibold mb-1">
+                        Etiqueta / Subtítulo superior (Badge):
+                      </label>
+                      <input
+                        type="text"
+                        value={bannerBadge}
+                        onChange={(e) => setBannerBadge(e.target.value)}
+                        placeholder="Ej: CHOPPER REPUESTOS · POSADAS o Promoción de Temporada"
+                        className="w-full bg-[#0f1012] border border-[#35363d] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-red-600 text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[#b8b9c0] font-semibold mb-1">
+                        Descripción / Texto secundario:
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={bannerDescripcion}
+                        onChange={(e) => setBannerDescripcion(e.target.value)}
+                        placeholder="Ej: Buscá tu repuesto, armá el pedido online y pasá a retirarlo por nuestro local..."
+                        className="w-full bg-[#0f1012] border border-[#35363d] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-red-600 text-xs resize-none"
+                      />
+                    </div>
+
+                    {/* Imagen de fondo del Banner */}
+                    <div className="space-y-1.5 p-3 rounded-xl border border-[#26272e] bg-[#0f1012]">
+                      <label className="block text-[#b8b9c0] font-semibold">
+                        Imagen de fondo del banner (opcional):
+                      </label>
+                      <p className="text-[10px] text-[#8e8f96] leading-relaxed">
+                        Podés subir un archivo o ingresar su URL. Si la dejás vacía, se usará el degradado temático original adaptativo.
+                      </p>
+                      <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                        <input
+                          type="text"
+                          value={bannerImagenUrl}
+                          onChange={(e) => setBannerImagenUrl(e.target.value)}
+                          placeholder="/uploads/banners/... o ruta directa"
+                          className="flex-1 bg-[#16171c] border border-[#35363d] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-red-600 text-xs font-mono"
+                        />
+                        <label className="px-3 py-2 bg-[#22232a] hover:bg-[#2c2d36] text-white border border-[#35363d] rounded-xl text-xs font-semibold cursor-pointer flex items-center justify-center gap-1.5 shrink-0 transition-colors">
+                          <Upload className="w-3.5 h-3.5 text-red-500" />
+                          <span>{uploadingBannerImage ? "Subiendo..." : "Subir archivo"}</span>
+                          <input
+                            type="file"
+                            accept="image/*,.svg"
+                            className="hidden"
+                            disabled={uploadingBannerImage}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handleUploadBannerImage(file);
+                            }}
+                          />
+                        </label>
+                        {bannerImagenUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setBannerImagenUrl("")}
+                            className="px-2.5 py-2 bg-red-950/20 hover:bg-red-950/40 text-red-400 border border-red-900/30 rounded-xl text-xs font-semibold transition-colors"
+                            title="Quitar imagen (usar degradado)"
+                          >
+                            Quitar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[#b8b9c0] font-semibold mb-1">
+                          Enlace de destino (opcional):
+                        </label>
+                        <input
+                          type="text"
+                          value={bannerEnlace}
+                          onChange={(e) => setBannerEnlace(e.target.value)}
+                          placeholder="/ofertas"
+                          className="w-full bg-[#0f1012] border border-[#35363d] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-red-600 text-xs font-mono"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[#b8b9c0] font-semibold mb-1">
+                          Orden de prioridad:
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={99}
+                          value={bannerOrden}
+                          onChange={(e) => setBannerOrden(parseInt(e.target.value, 10) || 1)}
+                          className="w-full bg-[#0f1012] border border-[#35363d] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-red-600 text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="pt-2">
+                      <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={bannerActivo}
+                          onChange={(e) => setBannerActivo(e.target.checked)}
+                          className="rounded bg-[#0f1012] border-[#35363d] text-red-600 focus:ring-0 cursor-pointer"
+                        />
+                        <span className="text-white font-medium">Banner activo (visible en la página de inicio)</span>
+                      </label>
+                    </div>
+
+                    {/* Previsualización rápida */}
+                    <div className="pt-2 border-t border-[#26272e] space-y-1">
+                      <span className="text-[10px] text-[#6b6c75] font-semibold uppercase tracking-wider block">
+                        Previsualización aproximada:
+                      </span>
+                      <div className="relative overflow-hidden p-3.5 rounded-xl border border-red-500/20 bg-gradient-to-r from-red-950/30 to-[#16171c] space-y-1.5">
+                        {bannerImagenUrl && (
+                          <div
+                            className="absolute inset-0 bg-cover bg-center opacity-20 pointer-events-none"
+                            style={{ backgroundImage: `url(${bannerImagenUrl})` }}
+                          />
+                        )}
+                        <div className="relative z-10 space-y-1">
+                          {bannerBadge && (
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-red-400 block">
+                              {bannerBadge}
+                            </span>
+                          )}
+                          <h4 className="text-xs font-bold text-white leading-tight">
+                            {bannerTitulo || "Título de ejemplo"}
+                          </h4>
+                          <p className="text-[11px] text-[#9a9ba3] line-clamp-2">
+                            {bannerDescripcion || "Descripción de ejemplo del banner..."}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#26272e]">
+                    <button
+                      type="button"
+                      onClick={() => setShowBannerModal(false)}
+                      disabled={saving}
+                      className="px-4 py-2 bg-transparent border border-[#35363d] text-[#b8b9c0] hover:text-white rounded-xl text-xs font-semibold transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleGuardarBanner}
+                      disabled={saving}
+                      className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-all shadow flex items-center gap-1.5"
+                    >
+                      {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                      <span>{editingBanner ? "Guardar cambios" : "Crear banner"}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
         )}
 
@@ -4527,14 +5602,6 @@ export default function PanelPage() {
                   Módulo de Ventas · Registrá quién entrega en mostrador o despacha al Moto Uber / Motomandado.
                 </p>
               </div>
-
-              <div className="flex items-center gap-2 bg-[#16171c] border border-[#26272e] px-3.5 py-1.5 rounded-xl text-xs">
-                <UserCheck className="w-4 h-4 text-emerald-400" />
-                <div>
-                  <span className="text-[#6b6c75] text-[10px] block">Vendedor de turno:</span>
-                  <span className="text-white font-semibold">{user.nombreCompleto || "Carlos López"}</span>
-                </div>
-              </div>
             </div>
 
             {/* Barra de Filtros y Modalidad */}
@@ -4658,9 +5725,24 @@ export default function PanelPage() {
                             <div className="text-[#9a9ba3]">DNI {p.dniCliente}</div>
                           </div>
                           <div className="flex flex-col justify-between items-start sm:items-end gap-1.5">
-                            <span className="text-[10px] uppercase tracking-wider text-[#6b6c75] font-semibold">Total a cobrar/cobrado</span>
+                            <span className="text-[10px] uppercase tracking-wider text-[#6b6c75] font-semibold">
+                              Total {p.estadoPago === "PAGADO" ? "cobrado" : "a cobrar"}
+                            </span>
                             <div className="text-emerald-400 font-bold text-base">{formatPrice(p.total)}</div>
-                            <div className="text-[11px] text-[#9a9ba3]">{p.metodoPago.replace(/_/g, " ")}</div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[11px] text-[#9a9ba3]">
+                                {p.metodoPago === "EFECTIVO_LOCAL" ? "Efectivo en mostrador" : p.metodoPago.replace(/_/g, " ")}
+                              </span>
+                              {p.estadoPago === "PAGADO" ? (
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[10px] font-bold border border-emerald-500/30 flex items-center gap-1">
+                                  <Check size={10} /> PAGADO
+                                </span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 text-[10px] font-bold border border-amber-500/30 flex items-center gap-1">
+                                  <Clock size={10} /> PENDIENTE
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
 
@@ -4727,50 +5809,55 @@ export default function PanelPage() {
                         )}
                       </div>
 
-                      {/* Botón de Confirmación con Registro del Vendedor */}
+                      {/* Botones Operativos con Apertura de Modal */}
                       <div className="pt-2 border-t border-[#26272e] flex flex-col gap-2">
                         {p.modalidadEntrega === "RETIRO_LOCAL" ? (
-                          <button
-                            onClick={() =>
-                              handleCambiarEstadoPedido(
-                                p.id,
-                                "ENTREGADO",
-                                `Entregado en mostrador por: ${user.nombreCompleto || "Carlos López"}`
-                              )
-                            }
-                            disabled={saving || p.estado === "ENTREGADO"}
-                            className={`w-full py-2.5 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2 ${
-                              p.estado === "ENTREGADO"
-                                ? "bg-zinc-800 text-[#6b6c75] cursor-not-allowed"
-                                : "bg-[#16a34a] hover:bg-green-700 text-white shadow-lg shadow-green-900/20"
-                            }`}
-                          >
-                            <CheckCircle2 className="w-4 h-4" />
-                            {p.estado === "ENTREGADO"
-                              ? "Orden entregada en mostrador"
-                              : `Confirmar entrega en mostrador (por ${user.nombreCompleto || "Carlos López"})`}
-                          </button>
+                          p.estado === "ENTREGADO" ? (
+                            <button
+                              disabled
+                              className="w-full py-2.5 rounded-lg text-xs font-bold bg-zinc-800 text-[#6b6c75] cursor-not-allowed flex items-center justify-center gap-2"
+                            >
+                              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                              <span>Orden entregada en mostrador</span>
+                            </button>
+                          ) : p.metodoPago === "EFECTIVO_LOCAL" && p.estadoPago !== "PAGADO" ? (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEntregaModal(p)}
+                              className="w-full py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/20 active:scale-[0.99] cursor-pointer"
+                            >
+                              <CreditCard className="w-4 h-4" />
+                              <span>Registrar cobro en mostrador ({formatPrice(p.total)})</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEntregaModal(p)}
+                              className="w-full py-2.5 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2 bg-[#16a34a] hover:bg-green-700 text-white shadow-lg shadow-green-900/20 cursor-pointer"
+                            >
+                              <Store className="w-4 h-4" />
+                              <span>Completar entrega en mostrador (por {user.nombreCompleto || "Carlos López"})</span>
+                            </button>
+                          )
                         ) : (
-                          <button
-                            onClick={() =>
-                              handleCambiarEstadoPedido(
-                                p.id,
-                                "ENTREGADO",
-                                `Despachado a Moto Uber / Motomandado por: ${user.nombreCompleto || "Carlos López"}`
-                              )
-                            }
-                            disabled={saving || p.estado === "ENTREGADO"}
-                            className={`w-full py-2.5 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2 ${
-                              p.estado === "ENTREGADO"
-                                ? "bg-zinc-800 text-[#6b6c75] cursor-not-allowed"
-                                : "bg-[#16a34a] hover:bg-green-700 text-white shadow-lg shadow-green-900/20"
-                            }`}
-                          >
-                            <Bike className="w-4 h-4" />
-                            {p.estado === "ENTREGADO"
-                              ? "Orden entregada al chofer de Moto Uber"
-                              : `Confirmar salida a Moto Uber (por ${user.nombreCompleto || "Carlos López"})`}
-                          </button>
+                          p.estado === "ENTREGADO" ? (
+                            <button
+                              disabled
+                              className="w-full py-2.5 rounded-lg text-xs font-bold bg-zinc-800 text-[#6b6c75] cursor-not-allowed flex items-center justify-center gap-2"
+                            >
+                              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                              <span>Orden entregada al chofer de Moto Uber</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEntregaModal(p)}
+                              className="w-full py-2.5 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2 bg-[#16a34a] hover:bg-green-700 text-white shadow-lg shadow-green-900/20 cursor-pointer"
+                            >
+                              <Bike className="w-4 h-4" />
+                              <span>Confirmar salida a Moto Uber (por {user.nombreCompleto || "Carlos López"})</span>
+                            </button>
+                          )
                         )}
                       </div>
                     </div>
@@ -5559,7 +6646,15 @@ export default function PanelPage() {
         )}
 
         {/* ════════════════════════════════════════════════════════════ */}
-        {/* MODAL DE DETALLE COMPLETO DEL PEDIDO (CLICK EN CUALQUIER PEDIDO) */}
+        {/* VISTA 11: FINANZAS ONLINE (Cierres Diarios y Caja)           */}
+        {/* ════════════════════════════════════════════════════════════ */}
+        {activeView === "finanzas" && user && (
+          <FinanzasOnlineView
+            user={user}
+            role={role}
+            showFeedback={showFeedback}
+          />
+        )}
         {/* ════════════════════════════════════════════════════════════ */}
         {selectedPedido && (
           <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
@@ -5740,24 +6835,62 @@ export default function PanelPage() {
                     <div className="space-y-2">
                       <div className="flex items-center gap-3">
                         <div
-                          onClick={() => setComprobanteModalUrl(selectedPedido.comprobanteUrl)}
-                          className="w-16 h-16 rounded-lg bg-black border border-[#35363d] overflow-hidden cursor-pointer flex-shrink-0 flex items-center justify-center hover:opacity-80 transition-opacity"
+                          onClick={() => handleOpenComprobante(selectedPedido.comprobanteUrl, selectedPedido)}
+                          className="w-16 h-16 rounded-xl bg-black border border-[#35363d] overflow-hidden cursor-pointer flex-shrink-0 flex items-center justify-center hover:opacity-90 hover:border-amber-400 transition-all shadow"
+                          title="Hacé clic para ver el comprobante en visor"
                         >
-                          <img
-                            src={selectedPedido.comprobanteUrl}
-                            alt="Comprobante"
-                            className="w-full h-full object-cover"
-                          />
+                          {selectedPedido.comprobanteUrl.toLowerCase().endsWith(".pdf") ? (
+                            <div className="w-full h-full bg-red-950/40 border border-red-800/40 flex flex-col items-center justify-center text-red-400">
+                              <FileText className="w-6 h-6 mb-0.5" />
+                              <span className="text-[9px] font-black uppercase tracking-wider">PDF</span>
+                            </div>
+                          ) : (
+                            <img
+                              src={selectedPedido.comprobanteUrl}
+                              alt="Comprobante"
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                (e.currentTarget as HTMLElement).style.display = "none";
+                                const parent = e.currentTarget.parentElement;
+                                if (parent) {
+                                  parent.innerHTML = '<div class="w-full h-full bg-zinc-900 flex flex-col items-center justify-center p-1 text-center"><span class="text-[9px] text-amber-400 font-bold">Doc</span></div>';
+                                }
+                              }}
+                            />
+                          )}
                         </div>
-                        <div className="text-xs">
-                          <span className="text-emerald-400 font-bold block">✓ Comprobante de transferencia</span>
-                          <button
-                            type="button"
-                            onClick={() => setComprobanteModalUrl(selectedPedido.comprobanteUrl)}
-                            className="text-sky-400 underline hover:text-sky-300 text-[11px] mt-0.5"
-                          >
-                            Ver comprobante en tamaño completo
-                          </button>
+                        <div className="text-xs space-y-1">
+                          <span className="text-emerald-400 font-bold block flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                            Comprobante de transferencia ({selectedPedido.comprobanteUrl.toLowerCase().endsWith(".pdf") ? "PDF" : "Imagen"})
+                          </span>
+                          <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenComprobante(selectedPedido.comprobanteUrl, selectedPedido)}
+                              className="px-2.5 py-1 rounded-lg bg-[#20222a] hover:bg-[#2c2f3a] text-sky-400 hover:text-sky-300 text-[11px] font-semibold flex items-center gap-1 border border-sky-500/30 transition-colors cursor-pointer"
+                            >
+                              <Eye className="w-3 h-3" />
+                              <span>Ver en visor</span>
+                            </button>
+                            <a
+                              href={selectedPedido.comprobanteUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-2.5 py-1 rounded-lg bg-[#20222a] hover:bg-[#2c2f3a] text-gray-300 hover:text-white text-[11px] font-semibold flex items-center gap-1 border border-[#35363d] transition-colors"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              <span>Abrir completo</span>
+                            </a>
+                            <a
+                              href={selectedPedido.comprobanteUrl}
+                              download
+                              className="p-1 rounded-lg bg-[#20222a] hover:bg-[#2c2f3a] text-gray-400 hover:text-white border border-[#35363d] transition-colors"
+                              title="Descargar archivo"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                            </a>
+                          </div>
                         </div>
                       </div>
 
@@ -5774,27 +6907,31 @@ export default function PanelPage() {
                             className="w-full py-2 bg-[#3b82f6] hover:bg-blue-600 text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow"
                           >
                             <CheckCircle2 className="w-3.5 h-3.5" />
-                            Comprobante y pedido verificado · Enviar a Stock para preparar
+                            {selectedPedido.estadoPago === "PAGADO"
+                              ? "Orden verificada · Enviar a Stock para preparar"
+                              : "Comprobante y pedido verificado · Enviar a Stock para preparar"}
                           </button>
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              if (!confirm("¿Rechazar el comprobante? El pedido vuelve a PENDIENTE y se le informará al cliente.")) return;
-                              const res = await rechazarComprobantePedidoAction(selectedPedido.id, user.id, "Comprobante rechazado por Ventas");
-                              if (res.success) {
-                                showFeedback("success", "Comprobante rechazado. El pedido volvió a PENDIENTE.");
-                                setPedidos((prev) => prev.map((p) => p.id === selectedPedido.id ? { ...p, estado: "PENDIENTE", comprobanteUrl: null } : p));
-                                setSelectedPedido(null);
-                              } else {
-                                showFeedback("error", res.error || "No se pudo rechazar el comprobante.");
-                              }
-                            }}
-                            disabled={saving}
-                            className="w-full py-2 bg-transparent border border-red-500/40 text-red-400 hover:bg-red-500/10 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5"
-                          >
-                            <XCircle className="w-3.5 h-3.5" />
-                            Rechazar comprobante
-                          </button>
+                          {selectedPedido.estadoPago !== "PAGADO" && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (!confirm("¿Rechazar el comprobante? El pedido vuelve a PENDIENTE y se le informará al cliente.")) return;
+                                const res = await rechazarComprobantePedidoAction(selectedPedido.id, user.id, "Comprobante rechazado por Ventas");
+                                if (res.success) {
+                                  showFeedback("success", "Comprobante rechazado. El pedido volvió a PENDIENTE.");
+                                  setPedidos((prev) => prev.map((p) => p.id === selectedPedido.id ? { ...p, estado: "PENDIENTE", comprobanteUrl: null } : p));
+                                  setSelectedPedido(null);
+                                } else {
+                                  showFeedback("error", res.error || "No se pudo rechazar el comprobante.");
+                                }
+                              }}
+                              disabled={saving}
+                              className="w-full py-2 bg-transparent border border-red-500/40 text-red-400 hover:bg-red-500/10 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5"
+                            >
+                              <XCircle className="w-3.5 h-3.5" />
+                              Rechazar comprobante
+                            </button>
+                          )}
                         </div>
                       ) : null}
                     </div>
@@ -5937,17 +7074,18 @@ export default function PanelPage() {
                   {(selectedPedido.estado === "LISTO_ENTREGA" || selectedPedido.estado === "LISTO_PARA_RETIRAR") && (
                     <button
                       type="button"
-                      onClick={() =>
-                        handleCambiarEstadoPedido(
-                          selectedPedido.id,
-                          "ENTREGADO",
-                          `Entregado por: ${user.nombreCompleto || "Carlos López"}`
-                        )
-                      }
+                      onClick={() => {
+                        const p = selectedPedido;
+                        setSelectedPedido(null);
+                        handleOpenEntregaModal(p);
+                      }}
                       disabled={saving}
-                      className="px-4 py-2 bg-[#16a34a] hover:bg-green-700 text-white rounded-lg text-xs font-bold"
+                      className="px-4 py-2 bg-[#16a34a] hover:bg-green-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                     >
-                      Confirmar entrega al cliente / chofer
+                      <CheckCircle2 className="w-4 h-4" />
+                      {selectedPedido.metodoPago === "EFECTIVO_LOCAL" && selectedPedido.estadoPago !== "PAGADO"
+                        ? "Registrar cobro y entregar en mostrador"
+                        : "Procesar entrega / despacho"}
                     </button>
                   )}
                 </div>
@@ -5956,20 +7094,519 @@ export default function PanelPage() {
           </div>
         )}
 
-        {/* Modal de Comprobante */}
-        {comprobanteModalUrl && (
-          <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
-            <div className="bg-[#16171c] border border-[#26272e] rounded-xl max-w-lg w-full p-4 relative">
-              <button
-                onClick={() => setComprobanteModalUrl(null)}
-                className="absolute top-3 right-3 p-1.5 rounded-lg bg-black/60 text-white hover:bg-red-600"
-              >
-                <X className="w-5 h-5" />
-              </button>
-              <h3 className="text-sm font-bold text-white mb-3">Comprobante de Transferencia</h3>
-              <div className="max-h-[75vh] overflow-auto rounded bg-black flex items-center justify-center">
-                <img src={comprobanteModalUrl} alt="Comprobante" className="max-w-full h-auto object-contain" />
+        {/* Modal de Despacho y Entrega en Mostrador (Accesible desde Entregas y Pedidos) */}
+        {selectedEntregaPedido && (
+          <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-sm flex min-h-full items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200">
+            <div className="relative w-full max-w-xl rounded-2xl border border-[#26272e] bg-[#16171c] p-5 sm:p-6 shadow-2xl my-auto max-h-[calc(100vh-2.5rem)] flex flex-col">
+              {/* Header */}
+              <div className="flex items-start justify-between pb-4 border-b border-[#26272e] shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2.5 rounded-xl border ${
+                    selectedEntregaPedido.modalidadEntrega === "RETIRO_LOCAL"
+                      ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
+                      : "bg-blue-500/10 border-blue-500/20 text-blue-400"
+                  }`}>
+                    {selectedEntregaPedido.modalidadEntrega === "RETIRO_LOCAL" ? (
+                      <Store className="w-6 h-6" />
+                    ) : (
+                      <Bike className="w-6 h-6" />
+                    )}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-black text-white">
+                        #ORD-{selectedEntregaPedido.numero}
+                      </h3>
+                      <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-[#1f2029] text-gray-300 border border-[#2e303d]">
+                        {selectedEntregaPedido.modalidadEntrega === "RETIRO_LOCAL" ? "Retiro en local" : "Envío a domicilio"}
+                      </span>
+                      {selectedEntregaPedido.estadoPago === "PAGADO" ? (
+                        <span className="text-[11px] px-2 py-0.5 rounded-full font-bold bg-green-500/10 text-green-400 border border-green-500/20 flex items-center gap-1">
+                          <CheckCircle className="w-3 h-3" /> PAGADO
+                        </span>
+                      ) : (
+                        <span className="text-[11px] px-2 py-0.5 rounded-full font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1">
+                          <Clock className="w-3 h-3" /> PENDIENTE DE PAGO
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Cliente: <span className="text-gray-200 font-semibold">{selectedEntregaPedido.nombreCliente || "Consumidor Final"}</span>
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedEntregaPedido(null)}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-[#20222a] transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
+
+              {/* Scrollable Body */}
+              <div className="flex-1 overflow-y-auto space-y-4 py-4 pr-1 scrollbar-thin">
+                {/* Feedback Banners */}
+                {cobroError && (
+                  <div className="p-3.5 rounded-xl bg-red-950/40 border border-red-800/40 text-red-300 text-xs flex items-center gap-2.5">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+                    <span className="leading-relaxed">{cobroError}</span>
+                  </div>
+                )}
+                {cobroSuccess && (
+                  <div className="p-3.5 rounded-xl bg-green-950/40 border border-green-800/40 text-green-300 text-xs flex items-center gap-2.5">
+                    <CheckCircle className="w-4 h-4 shrink-0 text-green-400" />
+                    <span className="leading-relaxed">{cobroSuccess}</span>
+                  </div>
+                )}
+
+                {/* Resumen de orden y montos */}
+                <div className="p-3.5 rounded-xl bg-[#1a1b22] border border-[#26272e] flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <span className="text-[11px] text-gray-400 block uppercase tracking-wider font-semibold">Total del pedido</span>
+                    <span className="text-lg font-black text-amber-400">{formatPrice(selectedEntregaPedido.total)}</span>
+                  </div>
+                  <div>
+                    <span className="text-[11px] text-gray-400 block uppercase tracking-wider font-semibold">Método de pago</span>
+                    <span className="text-xs font-bold text-gray-200">
+                      {selectedEntregaPedido.metodoPago === "EFECTIVO_LOCAL"
+                        ? "Efectivo en mostrador"
+                        : selectedEntregaPedido.metodoPago === "TRANSFERENCIA_BANCARIA"
+                        ? "Transferencia previa"
+                        : selectedEntregaPedido.metodoPago || "No especificado"}
+                    </span>
+                  </div>
+                  {selectedEntregaPedido.telefonoCliente && (
+                    <div>
+                      <span className="text-[11px] text-gray-400 block uppercase tracking-wider font-semibold">Contacto</span>
+                      <a
+                        href={`https://wa.me/${selectedEntregaPedido.telefonoCliente.replace(/\D/g, "")}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs text-blue-400 hover:underline flex items-center gap-1 font-medium"
+                      >
+                        <Phone className="w-3.5 h-3.5" />
+                        {selectedEntregaPedido.telefonoCliente}
+                      </a>
+                    </div>
+                  )}
+                </div>
+
+                {/* Paso 1: Verificación de Identidad */}
+                <div className="p-4 rounded-xl bg-[#14151a] border border-[#26272e] space-y-3">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-blue-400" />
+                    <h4 className="text-xs font-bold text-gray-200 uppercase tracking-wider">
+                      Paso 1: Verificación de Identidad de quien retira
+                    </h4>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-400 mb-1.5">
+                      DNI presentado en mostrador
+                    </label>
+                    <input
+                      type="text"
+                      value={codigoRetiroVerificado}
+                      onChange={(e) => setCodigoRetiroVerificado(e.target.value)}
+                      placeholder="Ingresá el DNI de la persona que retira..."
+                      className="w-full px-3 py-2 bg-[#1b1c24] border border-[#2e303d] rounded-lg text-xs text-white focus:outline-none focus:border-amber-400"
+                    />
+                    <div className="mt-1.5 flex items-center justify-between text-[11px]">
+                      <span className="text-gray-400">
+                        DNI registrado en compra:{" "}
+                        <strong className="text-gray-300">{selectedEntregaPedido.dniCliente || "No especificado"}</strong>
+                      </span>
+                      {selectedEntregaPedido.dniCliente && codigoRetiroVerificado.trim() === selectedEntregaPedido.dniCliente.trim() ? (
+                        <span className="text-green-400 font-semibold flex items-center gap-1">
+                          <Check className="w-3.5 h-3.5" /> Coincide con cliente
+                        </span>
+                      ) : codigoRetiroVerificado.trim() ? (
+                        <span className="text-amber-400 font-medium">Tercero autorizado (se registrará)</span>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Paso 2: Control de repuestos y combos */}
+                <div className="p-4 rounded-xl bg-[#14151a] border border-[#26272e] space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Package className="w-4 h-4 text-amber-400" />
+                      <h4 className="text-xs font-bold text-gray-200 uppercase tracking-wider">
+                        Paso 2: Checklist de Repuestos a Entregar
+                      </h4>
+                    </div>
+                    {selectedEntregaPedido.items && selectedEntregaPedido.items.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const allChecked: Record<string, boolean> = {};
+                          selectedEntregaPedido.items?.forEach((it) => {
+                            allChecked[String(it.id)] = true;
+                          });
+                          setCheckedEntregaItems(allChecked);
+                        }}
+                        className="text-[11px] text-amber-400 hover:text-amber-300 font-semibold underline cursor-pointer"
+                      >
+                        Marcar todos
+                      </button>
+                    )}
+                  </div>
+                  <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                    {selectedEntregaPedido.items && selectedEntregaPedido.items.length > 0 ? (
+                      selectedEntregaPedido.items.map((it) => {
+                        const isChecked = !!checkedEntregaItems[String(it.id)];
+                        return (
+                          <label
+                            key={it.id}
+                            className={`flex items-center justify-between p-2.5 rounded-lg border text-xs cursor-pointer transition-colors ${
+                              isChecked
+                                ? "bg-green-950/20 border-green-800/40 text-gray-200"
+                                : "bg-[#1b1c24] border-[#2e303d] text-gray-300 hover:border-gray-600"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) =>
+                                  setCheckedEntregaItems((prev) => ({
+                                    ...prev,
+                                    [String(it.id)]: e.target.checked,
+                                  }))
+                                }
+                                className="w-4 h-4 rounded border-gray-600 text-amber-500 focus:ring-0 focus:ring-offset-0 bg-[#26272e]"
+                              />
+                              <div className="truncate">
+                                <span className="font-semibold block truncate">
+                                  {it.nombre || "Repuesto"}
+                                </span>
+                                <span className="text-[10px] text-gray-400">
+                                  Cant: <strong className="text-gray-300">{it.cantidad}</strong> · {formatPrice(it.precioUnitario)} c/u
+                                </span>
+                              </div>
+                            </div>
+                            <span className="text-xs font-bold text-gray-200 shrink-0">
+                              {formatPrice(it.subtotal)}
+                            </span>
+                          </label>
+                        );
+                      })
+                    ) : (
+                      <p className="text-xs text-gray-400 italic">No hay ítems registrados en este pedido.</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Paso 3: Cobro en Mostrador (Efectivo) */}
+                {selectedEntregaPedido.metodoPago === "EFECTIVO_LOCAL" && (
+                  <div className={`p-4 rounded-xl border space-y-3 ${
+                    selectedEntregaPedido.estadoPago === "PAGADO"
+                      ? "bg-green-950/20 border-green-800/40"
+                      : "bg-amber-950/20 border-amber-600/40"
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <CreditCard className={`w-4 h-4 ${
+                          selectedEntregaPedido.estadoPago === "PAGADO" ? "text-green-400" : "text-amber-400"
+                        }`} />
+                        <h4 className="text-xs font-bold text-gray-200 uppercase tracking-wider">
+                          Paso 3: Cobro en Efectivo en Mostrador
+                        </h4>
+                      </div>
+                      <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                        selectedEntregaPedido.estadoPago === "PAGADO"
+                          ? "bg-green-500/20 text-green-300 border border-green-500/30"
+                          : "bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse"
+                      }`}>
+                        {selectedEntregaPedido.estadoPago === "PAGADO" ? "COBRADO" : "PENDIENTE DE COBRO"}
+                      </span>
+                    </div>
+
+                    {selectedEntregaPedido.estadoPago === "PAGADO" ? (
+                      <div className="flex items-center gap-2 text-xs text-green-300 bg-green-950/40 p-2.5 rounded-lg border border-green-800/30">
+                        <CheckCircle className="w-4 h-4 shrink-0 text-green-400" />
+                        <span>Cobro completado por <strong>{formatPrice(selectedEntregaPedido.total)}</strong> en mostrador. Podés despachar la mercadería.</span>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <p className="text-xs text-gray-300 leading-relaxed">
+                          El cliente debe abonar <strong className="text-amber-400 font-bold">{formatPrice(selectedEntregaPedido.total)}</strong> en efectivo al retirar los repuestos.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={handleRegistrarCobroMostradorModal}
+                          disabled={isSubmittingCobro}
+                          className="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-[0.99] transition-all cursor-pointer"
+                        >
+                          {isSubmittingCobro ? (
+                            <>
+                              <RefreshCw className="w-4 h-4 animate-spin" />
+                              <span>Registrando cobro en mostrador...</span>
+                            </>
+                          ) : (
+                            <>
+                              <CreditCard className="w-4 h-4" />
+                              <span>Registrar cobro en mostrador ({formatPrice(selectedEntregaPedido.total)})</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Si es Motomandado, aviso de entrega */}
+                {selectedEntregaPedido.modalidadEntrega === "MOTOMANDADO" && (
+                  <div className="p-3.5 rounded-xl bg-blue-950/20 border border-blue-800/40 text-xs text-blue-300 flex items-start gap-2.5">
+                    <Bike className="w-4 h-4 shrink-0 text-blue-400 mt-0.5" />
+                    <div>
+                      <strong className="block text-white mb-0.5">Envío por Motomandado / Moto Uber</strong>
+                      <span>Dirección de destino: <strong className="text-blue-200">{selectedEntregaPedido.direccionEnvio || "Posadas, Misiones"}</strong></span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Sticky Footer */}
+              <div className="pt-4 border-t border-[#26272e] shrink-0 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setSelectedEntregaPedido(null)}
+                  className="px-4 py-2 rounded-xl border border-[#2e303d] text-gray-300 hover:bg-[#20222a] text-xs font-semibold transition-colors"
+                >
+                  Cerrar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmarEntregaModal}
+                  disabled={
+                    isSubmittingEntrega ||
+                    selectedEntregaPedido.estado === "ENTREGADO" ||
+                    (selectedEntregaPedido.metodoPago === "EFECTIVO_LOCAL" && selectedEntregaPedido.estadoPago !== "PAGADO")
+                  }
+                  className="px-5 py-2 rounded-xl bg-[#16a34a] hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold transition-all flex items-center gap-2 shadow-lg shadow-green-900/20 cursor-pointer"
+                >
+                  {isSubmittingEntrega ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Confirmando entrega...</span>
+                    </>
+                  ) : selectedEntregaPedido.estado === "ENTREGADO" ? (
+                    <>
+                      <CheckCircle className="w-4 h-4" />
+                      <span>Pedido ya entregado</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>
+                        {selectedEntregaPedido.modalidadEntrega === "RETIRO_LOCAL"
+                          ? "Confirmar entrega en mostrador"
+                          : "Confirmar salida a Motomandado"}
+                      </span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal de Comprobante Mejorado (Soporte PDF e Imágenes) */}
+        {comprobanteModalUrl && (
+          <div className="fixed inset-0 z-50 overflow-y-auto bg-black/85 backdrop-blur-sm flex min-h-full items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200">
+            <div className="relative w-full max-w-4xl rounded-2xl border border-[#26272e] bg-[#16171c] p-4 sm:p-6 shadow-2xl my-auto max-h-[calc(100vh-2rem)] flex flex-col">
+              {/* Header */}
+              <div className="flex items-start justify-between pb-3.5 border-b border-[#26272e] shrink-0 gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={`p-2.5 rounded-xl border shrink-0 ${
+                    comprobanteInfo?.esPdf || comprobanteModalUrl.toLowerCase().endsWith(".pdf")
+                      ? "bg-red-500/10 border-red-500/20 text-red-400"
+                      : "bg-sky-500/10 border-sky-500/20 text-sky-400"
+                  }`}>
+                    {comprobanteInfo?.esPdf || comprobanteModalUrl.toLowerCase().endsWith(".pdf") ? (
+                      <FileText className="w-5 h-5" />
+                    ) : (
+                      <ImageIcon className="w-5 h-5" />
+                    )}
+                  </div>
+                  <div className="truncate">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-sm sm:text-base font-bold text-white truncate">
+                        {comprobanteModalPedido ? `Comprobante Orden #ORD-${comprobanteModalPedido.numero}` : "Comprobante de Transferencia"}
+                      </h3>
+                      <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${
+                        comprobanteInfo?.esPdf || comprobanteModalUrl.toLowerCase().endsWith(".pdf")
+                          ? "bg-red-500/20 text-red-300 border border-red-500/30"
+                          : "bg-sky-500/20 text-sky-300 border border-sky-500/30"
+                      }`}>
+                        {comprobanteInfo?.esPdf || comprobanteModalUrl.toLowerCase().endsWith(".pdf") ? "Documento PDF" : "Imagen"}
+                      </span>
+                      {comprobanteInfo?.tamanoFormateado && (
+                        <span className="text-[10px] px-2 py-0.5 rounded font-medium bg-[#20222a] text-gray-300 border border-[#2e303d]">
+                          {comprobanteInfo.tamanoFormateado}
+                        </span>
+                      )}
+                    </div>
+                    {comprobanteModalPedido && (
+                      <p className="text-xs text-gray-400 mt-0.5 truncate">
+                        Cliente: <strong className="text-gray-200">{comprobanteModalPedido.nombreCliente}</strong> · Total: <strong className="text-amber-400">{formatPrice(comprobanteModalPedido.total)}</strong>
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <a
+                    href={comprobanteModalUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1.5 rounded-lg bg-[#20222a] hover:bg-[#2b2d38] text-xs font-semibold text-gray-200 hover:text-white border border-[#2e303d] flex items-center gap-1.5 transition-colors"
+                    title="Abrir en pestaña nueva"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Pestaña nueva</span>
+                  </a>
+                  <a
+                    href={comprobanteModalUrl}
+                    download={comprobanteInfo?.nombreArchivo || "comprobante"}
+                    className="p-1.5 rounded-lg bg-[#20222a] hover:bg-[#2b2d38] text-gray-300 hover:text-white border border-[#2e303d] transition-colors"
+                    title="Descargar archivo"
+                  >
+                    <Download className="w-4 h-4" />
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setComprobanteModalUrl(null);
+                      setComprobanteModalPedido(null);
+                    }}
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-[#20222a] transition-colors cursor-pointer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="flex-1 overflow-hidden py-3 flex flex-col justify-center">
+                {loadingComprobanteInfo ? (
+                  <div className="h-[60vh] flex flex-col items-center justify-center gap-3 text-gray-400">
+                    <RefreshCw className="w-6 h-6 animate-spin text-sky-400" />
+                    <span className="text-xs font-medium">Verificando comprobante en el servidor...</span>
+                  </div>
+                ) : comprobanteInfo && !comprobanteInfo.existe ? (
+                  <div className="h-[60vh] flex flex-col items-center justify-center p-6 text-center bg-[#101115] rounded-xl border border-red-900/30 space-y-3">
+                    <div className="w-12 h-12 rounded-full bg-red-950/40 border border-red-800/40 flex items-center justify-center text-red-400">
+                      <AlertTriangle className="w-6 h-6" />
+                    </div>
+                    <div className="max-w-md space-y-1">
+                      <h4 className="text-sm font-bold text-white">Comprobante no disponible</h4>
+                      <p className="text-xs text-gray-400 leading-relaxed">
+                        {comprobanteInfo.error || "El archivo asociado a este pedido no fue encontrado en el almacenamiento del servidor o fue eliminado."}
+                      </p>
+                    </div>
+                    <div className="pt-2 flex items-center gap-2">
+                      <a
+                        href={comprobanteModalUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1.5 bg-[#20222a] hover:bg-[#2a2c36] text-xs font-semibold text-gray-200 rounded-lg border border-[#2e303d] flex items-center gap-1.5"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Reintentar enlace directo</span>
+                      </a>
+                    </div>
+                  </div>
+                ) : (comprobanteInfo?.esPdf || comprobanteModalUrl.toLowerCase().endsWith(".pdf")) ? (
+                  <div className="flex-1 flex flex-col h-[65vh] min-h-[400px]">
+                    <iframe
+                      src={`${comprobanteModalUrl}#toolbar=1&navpanes=0`}
+                      className="w-full h-full rounded-xl border border-[#26272e] bg-[#0c0d10]"
+                      title="Visor de Comprobante PDF"
+                    />
+                    <div className="mt-2 text-center text-[11px] text-gray-400 flex items-center justify-center gap-1">
+                      <span>¿Tu navegador no muestra el PDF interactivo?</span>
+                      <a
+                        href={comprobanteModalUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sky-400 underline font-semibold hover:text-sky-300"
+                      >
+                        Abrir o descargar el PDF completo aquí
+                      </a>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex-1 flex items-center justify-center max-h-[68vh] bg-black/60 rounded-xl p-3 border border-[#26272e] overflow-auto">
+                    <img
+                      src={comprobanteModalUrl}
+                      alt="Comprobante"
+                      className="max-w-full max-h-[64vh] object-contain rounded-lg shadow-lg"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLElement).style.display = "none";
+                        const parent = e.currentTarget.parentElement;
+                        if (parent) {
+                          parent.innerHTML = '<div class="text-center p-6 text-xs text-gray-400"><p class="font-bold text-red-400 mb-1">No se pudo cargar la imagen del comprobante.</p><p>El formato puede ser incompatible o el archivo no existe en el servidor.</p></div>';
+                        }
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Footer con acciones rápidas de verificación si el pedido está PENDIENTE o CONFIRMADO */}
+              {comprobanteModalPedido && (comprobanteModalPedido.estado === "PENDIENTE" || comprobanteModalPedido.estado === "CONFIRMADO") && (
+                <div className="pt-3 border-t border-[#26272e] shrink-0 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] text-gray-400">
+                    Estado: <strong className={comprobanteModalPedido.estadoPago === "PAGADO" ? "text-emerald-400" : "text-amber-400"}>
+                      {comprobanteModalPedido.estadoPago === "PAGADO" ? "Pago ya acreditado" : "Pago pendiente de verificación"}
+                    </strong>
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {comprobanteModalPedido.estadoPago !== "PAGADO" && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!confirm("¿Rechazar el comprobante? El pedido vuelve a PENDIENTE y se notificará al cliente.")) return;
+                          const res = await rechazarComprobantePedidoAction(comprobanteModalPedido.id, user.id, "Comprobante rechazado tras revisión en visor");
+                          if (res.success) {
+                            showFeedback("success", "Comprobante rechazado.");
+                            setPedidos((prev) => prev.map((p) => p.id === comprobanteModalPedido.id ? { ...p, estado: "PENDIENTE", comprobanteUrl: null } : p));
+                            setComprobanteModalUrl(null);
+                            setComprobanteModalPedido(null);
+                            setSelectedPedido(null);
+                          } else {
+                            showFeedback("error", res.error || "No se pudo rechazar.");
+                          }
+                        }}
+                        disabled={saving}
+                        className="px-3 py-1.5 bg-transparent border border-red-500/40 text-red-400 hover:bg-red-500/10 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        <span>Rechazar comprobante</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const targetStock = comprobanteModalPedido.preparadorUsuarioId || selectedPreparadorId || staffPreparadores.find((s) => s.rol === "ENCARGADO_STOCK")?.id || null;
+                        handleCambiarEstadoPedido(comprobanteModalPedido.id, "PREPARANDO", "Ventas verificó comprobante en visor y envió orden a Stock", targetStock);
+                        setComprobanteModalUrl(null);
+                        setComprobanteModalPedido(null);
+                        setSelectedPedido(null);
+                      }}
+                      disabled={saving}
+                      className="px-4 py-1.5 bg-[#3b82f6] hover:bg-blue-600 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>{comprobanteModalPedido.estadoPago === "PAGADO" ? "Enviar a Stock" : "Comprobante verificado · Enviar a Stock"}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
