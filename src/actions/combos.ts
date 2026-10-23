@@ -3,6 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { COMBOS_DATA } from "@/data/combos";
+import { getEtiquetasOfertaAction } from "@/actions/configuracion";
+import { formatBadgeWithEmoji } from "@/lib/etiquetas";
+import { requireStaffSession } from "@/lib/session";
+import {
+  parseProductMetadata,
+  serializeProductMetadata,
+  ProductSpec,
+} from "@/lib/productMetadata";
 
 export interface ComboItemDTO {
   id: number;
@@ -25,15 +33,18 @@ export interface ComboDTO {
   descripcion: string | null;
   badge: string | null;
   precio: number;
-  precioRegular: number;
+  precioRegular: number | null;
   ahorro: number;
   descuentoPorcentaje: number;
+  enOferta: boolean;
   imagen: string | null;
   activo: boolean;
   destacado: boolean;
   orden: number;
   stockCalculado: number;
   items: ComboItemDTO[];
+  especificaciones?: ProductSpec[];
+  motosCompatibles?: string[];
 }
 
 export interface UpsertComboInput {
@@ -43,7 +54,7 @@ export interface UpsertComboInput {
   descripcion?: string;
   badge?: string;
   precio: number;
-  precioRegular?: number;
+  precioRegular?: number | null;
   imagen?: string;
   activo?: boolean;
   destacado?: boolean;
@@ -52,34 +63,25 @@ export interface UpsertComboInput {
     productoId: number;
     cantidad: number;
   }>;
+  especificaciones?: ProductSpec[];
+  motosCompatibles?: string[];
 }
 
 /**
- * Valida si un usuario tiene permisos de administración comercial
+ * Valida en el servidor que la sesión activa tenga permisos administrativos sobre combos
  */
-async function verifyStaff(userId: number): Promise<{ authorized: boolean; error?: string }> {
-  try {
-    const user = await prisma.usuario.findUnique({
-      where: { id: userId },
-      include: { rol: true },
-    });
-
-    if (!user || !user.activo) {
-      return { authorized: false, error: "Usuario inactivo o no encontrado." };
-    }
-
-    const rolName = (user.rol?.nombre || "").toUpperCase();
-    const isStaff = rolName === "ADMINISTRADOR" || rolName === "ENCARGADO_VENTAS" || rolName === "ENCARGADO_STOCK";
-
-    if (!isStaff) {
-      return { authorized: false, error: "No tenés permisos para administrar combos y kits." };
-    }
-
-    return { authorized: true };
-  } catch (e) {
-    console.error("Error verificando staff:", e);
-    return { authorized: false, error: "Error de verificación de permisos." };
+async function verifyStaff(
+  _ignoredUserId?: number,
+  allowedRoles: Array<"ADMINISTRADOR" | "ENCARGADO_VENTAS" | "ENCARGADO_STOCK"> = ["ADMINISTRADOR"]
+): Promise<{ authorized: boolean; error?: string }> {
+  const auth = await requireStaffSession(allowedRoles);
+  if (!auth.authorized) {
+    return {
+      authorized: false,
+      error: auth.error || "No tenés permisos para administrar combos y kits.",
+    };
   }
+  return { authorized: true };
 }
 
 /**
@@ -87,52 +89,62 @@ async function verifyStaff(userId: number): Promise<{ authorized: boolean; error
  */
 export async function getPublicCombosAction(): Promise<ComboDTO[]> {
   try {
-    const combos = await prisma.comboEcommerce.findMany({
-      where: { activo: true },
-      orderBy: [{ orden: "asc" }, { id: "asc" }],
-      include: {
-        items: {
-          include: {
-            producto: {
-              select: {
-                id: true,
-                nombre: true,
-                marca: true,
-                precioVenta: true,
-                cantidad: true,
-                imagen: true,
+    const [combos, etiquetas] = await Promise.all([
+      prisma.comboEcommerce.findMany({
+        where: { activo: true },
+        orderBy: [{ orden: "asc" }, { id: "asc" }],
+        include: {
+          items: {
+            include: {
+              producto: {
+                select: {
+                  id: true,
+                  nombre: true,
+                  marca: true,
+                  precioVenta: true,
+                  cantidad: true,
+                  imagen: true,
+                },
               },
             },
           },
         },
-      },
-    });
+      }),
+      getEtiquetasOfertaAction(),
+    ]);
 
     return combos.map((c) => {
-      const regularCalculado = c.items.reduce(
-        (acc, it) => acc + (it.producto?.precioVenta || 0) * it.cantidad,
-        0
-      );
-      const regularFinal = c.precioRegular && c.precioRegular > 0 ? c.precioRegular : regularCalculado;
-      const ahorro = Math.max(0, regularFinal - c.precio);
-      const descuentoPorcentaje = regularFinal > 0 ? Math.round((ahorro / regularFinal) * 100) : 0;
+      const meta = parseProductMetadata(c.descripcion);
+      const enOferta = Boolean(c.precioRegular && c.precioRegular > c.precio);
+      const regularFinal = enOferta ? c.precioRegular! : null;
+      const ahorro = enOferta && regularFinal ? regularFinal - c.precio : 0;
+      const descuentoPorcentaje = enOferta && regularFinal ? Math.round((ahorro / regularFinal) * 100) : 0;
 
       // El stock de un combo está limitado por el componente con menor disponibilidad proporcional
       const stocksPosibles = c.items.map((it) =>
         it.cantidad > 0 ? Math.floor((it.producto?.cantidad || 0) / it.cantidad) : 0
       );
-      const stockCalculado = stocksPosibles.length > 0 ? Math.min(...stocksPosibles) : 10;
+      const stockCalculado = c.items.length > 0 && stocksPosibles.length > 0 ? Math.min(...stocksPosibles) : 0;
+
+      let badge = c.badge ? c.badge.trim() : null;
+      if (badge) {
+        const matched = etiquetas.find((e) => e.nombre.toLowerCase().trim() === badge!.toLowerCase());
+        if (matched) {
+          badge = matched.activa ? formatBadgeWithEmoji(badge, matched.emoji) : null;
+        }
+      }
 
       return {
         id: c.id,
         nombre: c.nombre,
         slug: c.slug,
-        descripcion: c.descripcion,
-        badge: c.badge || "Mes de la Primavera",
+        descripcion: meta.texto || c.descripcion,
+        badge,
         precio: c.precio,
         precioRegular: regularFinal,
         ahorro,
         descuentoPorcentaje,
+        enOferta,
         imagen: c.imagen || "/combos/combo-service-motul.jpg",
         activo: c.activo,
         destacado: c.destacado,
@@ -151,6 +163,8 @@ export async function getPublicCombosAction(): Promise<ComboDTO[]> {
             imagen: it.producto.imagen,
           },
         })),
+        especificaciones: meta.especificaciones,
+        motosCompatibles: meta.motosCompatibles,
       };
     });
   } catch (error) {
@@ -164,49 +178,60 @@ export async function getPublicCombosAction(): Promise<ComboDTO[]> {
  */
 export async function getComboByIdAction(id: number): Promise<ComboDTO | null> {
   try {
-    const c = await prisma.comboEcommerce.findUnique({
-      where: { id },
-      include: {
-        items: {
-          include: {
-            producto: {
-              select: {
-                id: true,
-                nombre: true,
-                marca: true,
-                precioVenta: true,
-                cantidad: true,
-                imagen: true,
+    const [c, etiquetas] = await Promise.all([
+      prisma.comboEcommerce.findUnique({
+        where: { id },
+        include: {
+          items: {
+            include: {
+              producto: {
+                select: {
+                  id: true,
+                  nombre: true,
+                  marca: true,
+                  precioVenta: true,
+                  cantidad: true,
+                  imagen: true,
+                },
               },
             },
           },
         },
-      },
-    });
+      }),
+      getEtiquetasOfertaAction(),
+    ]);
 
     if (c) {
-      const regularCalculado = c.items.reduce(
-        (acc, it) => acc + (it.producto?.precioVenta || 0) * it.cantidad,
-        0
-      );
-      const regularFinal = c.precioRegular && c.precioRegular > 0 ? c.precioRegular : regularCalculado;
-      const ahorro = Math.max(0, regularFinal - c.precio);
-      const descuentoPorcentaje = regularFinal > 0 ? Math.round((ahorro / regularFinal) * 100) : 0;
+      const meta = parseProductMetadata(c.descripcion);
+      const enOferta = Boolean(c.precioRegular && c.precioRegular > c.precio);
+      const regularFinal = enOferta ? c.precioRegular! : null;
+      const ahorro = enOferta && regularFinal ? regularFinal - c.precio : 0;
+      const descuentoPorcentaje = enOferta && regularFinal ? Math.round((ahorro / regularFinal) * 100) : 0;
+
       const stocksPosibles = c.items.map((it) =>
         it.cantidad > 0 ? Math.floor((it.producto?.cantidad || 0) / it.cantidad) : 0
       );
-      const stockCalculado = stocksPosibles.length > 0 ? Math.min(...stocksPosibles) : 10;
+      const stockCalculado = c.items.length > 0 && stocksPosibles.length > 0 ? Math.min(...stocksPosibles) : 0;
+
+      let badge = c.badge ? c.badge.trim() : null;
+      if (badge) {
+        const matched = etiquetas.find((e) => e.nombre.toLowerCase().trim() === badge!.toLowerCase());
+        if (matched) {
+          badge = matched.activa ? formatBadgeWithEmoji(badge, matched.emoji) : null;
+        }
+      }
 
       return {
         id: c.id,
         nombre: c.nombre,
         slug: c.slug,
-        descripcion: c.descripcion,
-        badge: c.badge || "Mes de la Primavera",
+        descripcion: meta.texto || c.descripcion,
+        badge,
         precio: c.precio,
         precioRegular: regularFinal,
         ahorro,
         descuentoPorcentaje,
+        enOferta,
         imagen: c.imagen || "/combos/combo-service-motul.jpg",
         activo: c.activo,
         destacado: c.destacado,
@@ -225,6 +250,8 @@ export async function getComboByIdAction(id: number): Promise<ComboDTO | null> {
             imagen: it.producto.imagen,
           },
         })),
+        especificaciones: meta.especificaciones,
+        motosCompatibles: meta.motosCompatibles,
       };
     }
   } catch (error) {
@@ -244,12 +271,15 @@ export async function getComboByIdAction(id: number): Promise<ComboDTO | null> {
       precioRegular: staticCombo.precioOriginal,
       ahorro: staticCombo.ahorro,
       descuentoPorcentaje: Math.round((staticCombo.ahorro / staticCombo.precioOriginal) * 100),
+      enOferta: Boolean(staticCombo.precioOriginal && staticCombo.precioOriginal > staticCombo.precio),
       imagen: staticCombo.imagen,
       activo: true,
       destacado: true,
       orden: 0,
       stockCalculado: staticCombo.stock,
       items: [],
+      especificaciones: [],
+      motosCompatibles: [],
     };
   }
 
@@ -259,8 +289,8 @@ export async function getComboByIdAction(id: number): Promise<ComboDTO | null> {
 /**
  * Obtiene todos los combos para el panel administrativo (activos e inactivos)
  */
-export async function getAllCombosAdminAction(userId: number): Promise<{ success: boolean; combos?: ComboDTO[]; error?: string }> {
-  const auth = await verifyStaff(userId);
+export async function getAllCombosAdminAction(userId?: number): Promise<{ success: boolean; combos?: ComboDTO[]; error?: string }> {
+  const auth = await verifyStaff(userId, ["ADMINISTRADOR", "ENCARGADO_VENTAS", "ENCARGADO_STOCK"]);
   if (!auth.authorized) {
     return { success: false, error: auth.error };
   }
@@ -287,29 +317,28 @@ export async function getAllCombosAdminAction(userId: number): Promise<{ success
     });
 
     const mapped = combos.map((c) => {
-      const regularCalculado = c.items.reduce(
-        (acc, it) => acc + (it.producto?.precioVenta || 0) * it.cantidad,
-        0
-      );
-      const regularFinal = c.precioRegular && c.precioRegular > 0 ? c.precioRegular : regularCalculado;
-      const ahorro = Math.max(0, regularFinal - c.precio);
-      const descuentoPorcentaje = regularFinal > 0 ? Math.round((ahorro / regularFinal) * 100) : 0;
+      const meta = parseProductMetadata(c.descripcion);
+      const enOferta = Boolean(c.precioRegular && c.precioRegular > c.precio);
+      const regularFinal = enOferta ? c.precioRegular! : null;
+      const ahorro = enOferta && regularFinal ? regularFinal - c.precio : 0;
+      const descuentoPorcentaje = enOferta && regularFinal ? Math.round((ahorro / regularFinal) * 100) : 0;
 
       const stocksPosibles = c.items.map((it) =>
         it.cantidad > 0 ? Math.floor((it.producto?.cantidad || 0) / it.cantidad) : 0
       );
-      const stockCalculado = stocksPosibles.length > 0 ? Math.min(...stocksPosibles) : 0;
+      const stockCalculado = c.items.length > 0 && stocksPosibles.length > 0 ? Math.min(...stocksPosibles) : 0;
 
       return {
         id: c.id,
         nombre: c.nombre,
         slug: c.slug,
-        descripcion: c.descripcion,
+        descripcion: meta.texto || c.descripcion,
         badge: c.badge,
         precio: c.precio,
         precioRegular: regularFinal,
         ahorro,
         descuentoPorcentaje,
+        enOferta,
         imagen: c.imagen,
         activo: c.activo,
         destacado: c.destacado,
@@ -328,6 +357,8 @@ export async function getAllCombosAdminAction(userId: number): Promise<{ success
             imagen: it.producto.imagen,
           },
         })),
+        especificaciones: meta.especificaciones,
+        motosCompatibles: meta.motosCompatibles,
       };
     });
 
@@ -345,7 +376,7 @@ export async function upsertComboAction(
   userId: number,
   input: UpsertComboInput
 ): Promise<{ success: boolean; comboId?: number; error?: string }> {
-  const auth = await verifyStaff(userId);
+  const auth = await verifyStaff(userId, ["ADMINISTRADOR"]);
   if (!auth.authorized) {
     return { success: false, error: auth.error };
   }
@@ -354,17 +385,42 @@ export async function upsertComboAction(
     return { success: false, error: "El nombre del combo es obligatorio." };
   }
 
-  if (input.precio <= 0) {
+  if (typeof input.precio !== "number" || isNaN(input.precio) || input.precio <= 0) {
     return { success: false, error: "El precio del combo debe ser mayor a 0." };
   }
 
-  if (!input.items || input.items.length === 0) {
+  if (!input.items || !Array.isArray(input.items) || input.items.length === 0) {
     return { success: false, error: "El combo debe incluir al menos un producto del catálogo." };
   }
 
   try {
+    // Validar y consolidar productos, verificando enteros positivos >= 1
+    const consolidatedMap = new Map<number, number>();
+    for (const it of input.items) {
+      const pid = Number(it.productoId);
+      const qty = Number(it.cantidad);
+      if (!Number.isInteger(pid) || pid <= 0) {
+        return { success: false, error: "Identificador de producto inválido en el combo." };
+      }
+      if (!Number.isInteger(qty) || qty < 1) {
+        return {
+          success: false,
+          error: "Cada repuesto del combo debe tener una cantidad entera mayor o igual a 1.",
+        };
+      }
+      consolidatedMap.set(pid, (consolidatedMap.get(pid) || 0) + qty);
+    }
+    const cleanItems = Array.from(consolidatedMap.entries()).map(([productoId, cantidad]) => ({
+      productoId,
+      cantidad,
+    }));
+
+    if (cleanItems.length === 0) {
+      return { success: false, error: "El combo debe incluir al menos un producto válido." };
+    }
+
     // Validar productos existentes en el SGI
-    const productIds = input.items.map((it) => it.productoId);
+    const productIds = cleanItems.map((it) => it.productoId);
     const existingProducts = await prisma.producto.findMany({
       where: { id: { in: productIds } },
       select: { id: true, precioVenta: true },
@@ -374,14 +430,38 @@ export async function upsertComboAction(
       return { success: false, error: "Uno o más productos seleccionados no existen en el catálogo." };
     }
 
-    // Calcular precio regular base si no fue suministrado
-    let regularPrice = input.precioRegular;
-    if (!regularPrice || regularPrice <= 0) {
-      regularPrice = input.items.reduce((acc, it) => {
-        const prod = existingProducts.find((p) => p.id === it.productoId);
-        return acc + (prod ? prod.precioVenta * it.cantidad : 0);
-      }, 0);
+    // Precio regular opcional: únicamente si es mayor al precio de venta es una oferta real
+    const regularPrice =
+      input.precioRegular && input.precioRegular > input.precio
+        ? Number(input.precioRegular)
+        : null;
+
+    // Preservar especificaciones y motos compatibles si no se especifican explícitamente al editar
+    let especificaciones = input.especificaciones;
+    let motosCompatibles = input.motosCompatibles;
+
+    if (input.id && input.id > 0 && (especificaciones === undefined || motosCompatibles === undefined)) {
+      const existingCombo = await prisma.comboEcommerce.findUnique({
+        where: { id: input.id },
+        select: { descripcion: true },
+      });
+      if (existingCombo?.descripcion) {
+        const existingMeta = parseProductMetadata(existingCombo.descripcion);
+        if (especificaciones === undefined) {
+          especificaciones = existingMeta.especificaciones;
+        }
+        if (motosCompatibles === undefined) {
+          motosCompatibles = existingMeta.motosCompatibles;
+        }
+      }
     }
+
+    // Serializar descripción con metadata (specs y motos compatibles)
+    const serializedDesc = serializeProductMetadata({
+      texto: input.descripcion,
+      especificaciones,
+      motosCompatibles,
+    });
 
     if (input.id && input.id > 0) {
       // ACTUALIZAR COMBO
@@ -391,8 +471,8 @@ export async function upsertComboAction(
           data: {
             nombre: input.nombre.trim(),
             slug: input.slug?.trim() || null,
-            descripcion: input.descripcion?.trim() || null,
-            badge: input.badge !== undefined ? (input.badge.trim() || null) : null,
+            descripcion: serializedDesc,
+            badge: input.badge !== undefined ? (input.badge ? input.badge.trim() : null) : null,
             precio: input.precio,
             precioRegular: regularPrice,
             imagen: input.imagen?.trim() || null,
@@ -402,17 +482,17 @@ export async function upsertComboAction(
           },
         });
 
-        // Reemplazar items
+        // Reemplazar items con lista consolidada
         await tx.comboItemEcommerce.deleteMany({
           where: { comboId: input.id },
         });
 
-        for (const item of input.items) {
+        for (const item of cleanItems) {
           await tx.comboItemEcommerce.create({
             data: {
               comboId: input.id!,
               productoId: item.productoId,
-              cantidad: Math.max(1, item.cantidad),
+              cantidad: item.cantidad,
             },
           });
         }
@@ -432,8 +512,8 @@ export async function upsertComboAction(
           data: {
             nombre: input.nombre.trim(),
             slug: input.slug?.trim() || null,
-            descripcion: input.descripcion?.trim() || null,
-            badge: input.badge ? input.badge.trim() : "Mes de la Primavera",
+            descripcion: serializedDesc,
+            badge: input.badge?.trim() || null,
             precio: input.precio,
             precioRegular: regularPrice,
             imagen: input.imagen?.trim() || "/combos/combo-service-motul.jpg",
@@ -441,9 +521,9 @@ export async function upsertComboAction(
             destacado: input.destacado !== undefined ? input.destacado : false,
             orden: input.orden ?? 0,
             items: {
-              create: input.items.map((it) => ({
+              create: cleanItems.map((it) => ({
                 productoId: it.productoId,
-                cantidad: Math.max(1, it.cantidad),
+                cantidad: it.cantidad,
               })),
             },
           },
@@ -479,6 +559,45 @@ export async function toggleComboEstadoAction(
   }
 
   try {
+    if (activo) {
+      const combo = await prisma.comboEcommerce.findUnique({
+        where: { id: comboId },
+        include: {
+          items: {
+            include: {
+              producto: {
+                select: { id: true, cantidad: true },
+              },
+            },
+          },
+        },
+      });
+
+      if (!combo) {
+        return { success: false, error: "El combo no existe." };
+      }
+
+      if (!combo.nombre || combo.nombre.trim().length === 0) {
+        return { success: false, error: "El combo no tiene un nombre válido." };
+      }
+
+      if (combo.precio <= 0) {
+        return { success: false, error: "No se puede activar un combo con precio menor o igual a $0." };
+      }
+
+      if (!combo.items || combo.items.length === 0) {
+        return { success: false, error: "No se puede activar un combo sin repuestos incluidos." };
+      }
+
+      const missingProducts = combo.items.filter((it) => !it.producto);
+      if (missingProducts.length > 0) {
+        return {
+          success: false,
+          error: "Uno o más repuestos de este combo ya no existen en el catálogo.",
+        };
+      }
+    }
+
     await prisma.comboEcommerce.update({
       where: { id: comboId },
       data: { activo },

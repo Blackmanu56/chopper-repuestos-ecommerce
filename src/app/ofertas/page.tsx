@@ -1,4 +1,5 @@
 import React from "react";
+import { redirect } from "next/navigation";
 import { getCategories, getProducts } from "@/actions/ecommerce";
 import { getPublicCombosAction } from "@/actions/combos";
 import OfertasClient from "./OfertasClient";
@@ -21,6 +22,10 @@ export default async function OfertasPage({ searchParams }: PageProps) {
   const marca = params.marca || "";
   const cat = params.cat || "";
 
+  if (cat && cat.toLowerCase().includes("combo")) {
+    redirect("/combos");
+  }
+
   const [categories, products, combosDb] = await Promise.all([
     getCategories(),
     getProducts({}),
@@ -41,7 +46,7 @@ export default async function OfertasPage({ searchParams }: PageProps) {
     enOferta: true,
     precioOferta: c.precio,
     descuentoPorcentaje: c.descuentoPorcentaje,
-    badgePromo: c.badge || "Mes de la Primavera",
+    badgePromo: c.badge || null,
     destacado: c.destacado,
     recomendado: true,
     esCombo: true,
@@ -55,6 +60,7 @@ export default async function OfertasPage({ searchParams }: PageProps) {
 
   return (
     <OfertasClient
+      key={`ofertas-${q}-${marca}-${cat}`}
       initialProducts={allProducts as any}
       categories={allCategories}
       initialQuery={q}

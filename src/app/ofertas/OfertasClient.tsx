@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { ProductItem, CategoryItem } from "@/actions/ecommerce";
 import { useCart } from "@/context/CartContext";
+import { useConfig } from "@/context/ConfigContext";
 import {
   ShoppingCart,
   ChevronDown,
@@ -15,6 +16,7 @@ import {
   ArrowLeft,
   SlidersHorizontal,
   X,
+  Lock,
 } from "lucide-react";
 
 interface OfertasClientProps {
@@ -32,7 +34,8 @@ export default function OfertasClient({
   initialMarca = "",
   initialCatName = "",
 }: OfertasClientProps) {
-  const { addToCart } = useCart();
+  const { addToCart, isStaff, getItemCartQuantity, getRemainingStock } = useCart();
+  const { shouldShowAhorroBadge, calcularCuotas } = useConfig();
   const formatPrice = (n: number) => "$" + Number(n).toLocaleString("es-AR");
 
   // Estados de filtros laterales
@@ -64,6 +67,37 @@ export default function OfertasClient({
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
   const [search, setSearch] = useState(initialQuery);
+
+  // Sincronizar estados cuando cambian los searchParams
+  useEffect(() => {
+    setSearch(initialQuery);
+  }, [initialQuery]);
+
+  useEffect(() => {
+    if (initialCatName) {
+      const clean = initialCatName.toLowerCase();
+      const match = categories.find(
+        (c) =>
+          c.nombre.toLowerCase().includes(clean) ||
+          clean.includes(c.nombre.toLowerCase()) ||
+          (clean.includes("combo") && c.nombre.toLowerCase().includes("combo"))
+      );
+      setSelectedCats(match ? [match.id] : []);
+    } else {
+      setSelectedCats([]);
+    }
+  }, [initialCatName, categories]);
+
+  useEffect(() => {
+    if (initialMarca) {
+      const match = initialProducts.find(
+        (p) => (p.marca || "").toLowerCase() === initialMarca.toLowerCase()
+      );
+      setSelectedMarcas(match ? [match.marca] : [initialMarca.toUpperCase()]);
+    } else {
+      setSelectedMarcas([]);
+    }
+  }, [initialMarca, initialProducts]);
 
   // Colapsables de filtros
   const [catOpen, setCatOpen] = useState(true);
@@ -417,10 +451,15 @@ export default function OfertasClient({
                 const regular = p.precioRegular ?? p.precio;
                 const ahorro = p.enOferta ? Math.max(0, regular - p.precio) : 0;
                 const precioOriginal = regular;
-                const badge = p.badgePromo || (p.enOferta ? "Oferta Posadas" : null);
+                const badge = p.badgePromo || null;
+                const financiacion = calcularCuotas(p.precio);
 
                 const esCombo = Boolean((p as any).esCombo || p.categoriaId === 9999 || p.categoriaNombre.toLowerCase().includes("combo"));
                 const itemHref = esCombo ? `/combos/${p.id}` : `/producto/${p.id}`;
+
+                const inCartQty = getItemCartQuantity(p.id, esCombo);
+                const remainingStock = getRemainingStock(p);
+                const isLimitReached = p.stock > 0 && remainingStock <= 0;
 
                 return (
                   <div
@@ -430,14 +469,14 @@ export default function OfertasClient({
                     <div>
                       {/* Badge Ahorra & Promo */}
                       <div className="space-y-1 mb-2">
-                        {p.enOferta && ahorro > 0 && (
+                        {p.enOferta && shouldShowAhorroBadge(ahorro) && (
                           <span className="inline-block rounded-md bg-brand px-2 py-0.5 text-[9px] font-black uppercase text-white shadow-sm">
                             AHORRÁ {formatPrice(ahorro)} ({p.descuentoPorcentaje}% OFF)
                           </span>
                         )}
                         {badge && (
                           <div className="rounded-md border border-brand/40 bg-brand/10 px-1.5 py-0.5 text-[9px] font-bold text-brand w-fit truncate max-w-[130px]">
-                            🏷️ {badge}
+                            {badge}
                           </div>
                         )}
                       </div>
@@ -491,26 +530,70 @@ export default function OfertasClient({
                       ) : (
                         <div className="text-[11px] text-transparent select-none">-</div>
                       )}
-                      <div className="text-lg font-black text-slate-900 dark:text-white">
-                        {formatPrice(p.precio)}
+                      <div className="flex items-baseline justify-between gap-1">
+                        <div className="text-lg font-black text-slate-900 dark:text-white">
+                          {formatPrice(p.precio)}
+                        </div>
+                        {p.stock > 0 && p.stock <= 5 && (
+                          <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                            Últimas {p.stock} u.
+                          </span>
+                        )}
+                        {p.stock <= 0 && (
+                          <span className="text-[10px] font-bold text-red-600 dark:text-red-400">
+                            Sin stock
+                          </span>
+                        )}
                       </div>
-                      <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mt-0.5">
-                        3 cuotas sin interés de {formatPrice(Math.round(p.precio / 3))}
-                      </div>
+                      {financiacion.habilitadas && (
+                        <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mt-0.5">
+                          {financiacion.sinInteres
+                            ? `${financiacion.cuotas} cuotas sin interés de ${formatPrice(financiacion.valorCuota)}`
+                            : `${financiacion.cuotas} cuotas fijas de ${formatPrice(financiacion.valorCuota)}`}
+                        </div>
+                      )}
 
-                      {/* Entrega y Botón Carrito (sin exponer stock numérico local) */}
+                      {/* Entrega y Botón Carrito */}
                       <div className="mt-2.5 flex items-center justify-between gap-2">
                         <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">
                           {esCombo ? "Kit Armado · Envío o Retiro" : "Disponible en Posadas"}
                         </span>
 
-                        <button
-                          onClick={() => addToCart(p, 1)}
-                          className="flex h-8 w-8 items-center justify-center rounded-xl bg-brand text-white hover:bg-brandhover transition-colors shadow-md active:scale-95 shrink-0 cursor-pointer"
-                          title="Agregar al carrito"
-                        >
-                          <ShoppingCart size={15} />
-                        </button>
+                        {isStaff ? (
+                          <button
+                            onClick={() => addToCart(p, 1)}
+                            className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 hover:bg-slate-200 dark:hover:bg-zinc-700 transition-colors border border-slate-300 dark:border-zinc-700 shadow-sm shrink-0 cursor-pointer"
+                            title="Estás utilizando una cuenta de personal. Para realizar compras, ingresá con una cuenta de cliente."
+                          >
+                            <Lock size={14} />
+                          </button>
+                        ) : p.stock <= 0 ? (
+                          <button
+                            disabled
+                            className="flex h-8 px-2.5 items-center justify-center rounded-xl bg-slate-200 dark:bg-zinc-800 text-slate-400 dark:text-zinc-500 text-[10px] font-bold cursor-not-allowed border border-slate-300 dark:border-zinc-700/50 shrink-0"
+                          >
+                            Sin stock
+                          </button>
+                        ) : isLimitReached ? (
+                          <button
+                            type="button"
+                            onClick={() => addToCart(p, 1)}
+                            className="flex h-8 px-2 items-center justify-center gap-1 rounded-xl border border-emerald-500/40 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 text-[10px] font-bold hover:bg-emerald-500/20 transition-all shrink-0 cursor-pointer shadow-xs"
+                            title="Ya tenés todas las unidades disponibles en tu carrito"
+                          >
+                            <Check size={12} className="text-emerald-600 dark:text-emerald-400" />
+                            <span>En carrito</span>
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => addToCart(p, 1)}
+                            className="flex h-8 items-center gap-1 px-2.5 rounded-xl bg-brand text-white hover:bg-brandhover transition-colors shadow-md active:scale-95 shrink-0 cursor-pointer"
+                            title={inCartQty > 0 ? `Ya tenés ${inCartQty} en tu carrito. Clic para agregar otro.` : "Agregar al carrito"}
+                          >
+                            <ShoppingCart size={14} />
+                            {inCartQty > 0 && <span className="text-[10px] font-black">+{inCartQty}</span>}
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>

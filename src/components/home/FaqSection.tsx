@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { useConfig } from "@/context/ConfigContext";
 import {
   ShoppingBag,
   CreditCard,
@@ -21,6 +22,7 @@ interface FaqItem {
 }
 
 export default function FaqSection() {
+  const { config } = useConfig();
   const [activeCategory, setActiveCategory] = useState("compras");
   const [openId, setOpenId] = useState<string | null>("c1");
 
@@ -52,7 +54,7 @@ export default function FaqSection() {
       category: "compras",
       question: "¿Puedo pedir asesoramiento sobre qué pieza lleva mi moto?",
       answer:
-        "¡Totalmente! Escribinos a nuestro WhatsApp (+54 9 376 524-3554) indicando marca, modelo y año de tu moto (Honda Wave, Yamaha YBR, Gilera Smash, Motomel Blitz, etc.) y te confirmamos la compatibilidad exacta.",
+        `¡Totalmente! Escribinos a nuestro WhatsApp (${config.telefono || "+54 9 376 524-3554"}) indicando marca, modelo y año de tu moto (Honda Wave, Yamaha YBR, Gilera Smash, Motomel Blitz, etc.) y te confirmamos la compatibilidad exacta.`,
     },
     {
       id: "c4",
@@ -73,7 +75,7 @@ export default function FaqSection() {
       category: "envios",
       question: "¿Dónde y en qué horarios puedo retirar personalmente?",
       answer:
-        "Podés retirar por nuestro local comercial en Av. Roque Sáenz Peña 1500 (Posadas, Misiones). Atendemos de Lunes a Sábados de 8:00 a 12:30 y de 16:30 a 20:30 hs.",
+        `Podés retirar por nuestro local comercial en ${config.direccion || "Av. Roque Sáenz Peña 1500 (Posadas, Misiones)"}. Atendemos en los horarios: ${config.horarios || "Lunes a Sábados de 8:00 a 12:30 y de 16:30 a 20:30 hs."}`,
     },
     {
       id: "e3",
@@ -94,7 +96,7 @@ export default function FaqSection() {
       category: "pagos",
       question: "¿Cómo informo el pago si transfiero por Mercado Pago o banco?",
       answer:
-        "Podés usar la opción 'Subir Comprobante' en el menú o enviarnos la captura de la transferencia directamente a nuestro WhatsApp con tu número de orden.",
+        "Adjuntás el comprobante de transferencia bancaria directamente al confirmar tu compra en el checkout, o podés enviarnos la constancia a nuestro WhatsApp con tu número de orden.",
     },
     {
       id: "p3",
@@ -127,9 +129,9 @@ export default function FaqSection() {
     {
       id: "em2",
       category: "empresa",
-      question: "¿Dónde está ubicado el local de Chopper Repuestos?",
+      question: `¿Dónde está ubicado el local de ${config.nombre_tienda || "Chopper Repuestos"}?`,
       answer:
-        "Nuestro local comercial y depósito se encuentra ubicado en Av. Roque Sáenz Peña 1500, Posadas, Misiones. Podés ver el mapa interactivo y coordenadas GPS en la sección Nosotros.",
+        `Nuestro local comercial y depósito se encuentra ubicado en ${config.direccion || "Av. Roque Sáenz Peña 1500, Posadas, Misiones"}. Podés ver el mapa interactivo y coordenadas GPS en la sección Nosotros.`,
     },
   ];
 
@@ -151,13 +153,13 @@ export default function FaqSection() {
           </p>
         </div>
         <a
-          href="https://wa.me/5493765243554"
+          href={`https://wa.me/${(config.whatsapp || "5493765243554").replace(/\D/g, "")}`}
           target="_blank"
           rel="noreferrer"
           className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:text-emerald-500 transition-colors"
         >
           <MessageCircle size={14} />
-          <span>¿Dudas adicionales? Escribinos por WhatsApp (376 524-3554) →</span>
+          <span>¿Dudas adicionales? Escribinos por WhatsApp ({config.telefono || "376 524-3554"}) →</span>
         </a>
       </div>
 

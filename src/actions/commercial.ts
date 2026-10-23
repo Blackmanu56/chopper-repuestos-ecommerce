@@ -3,6 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { COMBOS_DATA } from "@/data/combos";
+import { requireStaffSession } from "@/lib/session";
+import {
+  ProductSpec,
+  parseProductMetadata,
+  serializeProductMetadata,
+} from "@/lib/productMetadata";
 
 export interface CommercialProductItem {
   id: number;
@@ -25,12 +31,16 @@ export interface CommercialProductItem {
   destacado: boolean;
   recomendado: boolean;
   badgePromo: string | null;
+  descripcion?: string | null;
+  especificaciones?: ProductSpec[];
+  motosCompatibles?: string[];
   ordenOferta: number;
   actualizadoEn?: Date | null;
 }
 
 export interface ValidatedCartItem {
   id: number;
+  cartItemId?: string;
   nombre: string;
   marca: string;
   precioRegular: number;
@@ -45,34 +55,22 @@ export interface ValidatedCartItem {
 }
 
 /**
- * Valida si un usuario tiene permisos de administración comercial
+ * Valida en el servidor que la sesión activa tenga permisos de administración comercial
  */
-async function verifyCommercialStaff(userId: number): Promise<{ authorized: boolean; error?: string }> {
-  try {
-    const user = await prisma.usuario.findUnique({
-      where: { id: userId },
-      include: { rol: true },
-    });
-
-    if (!user || !user.activo) {
-      return { authorized: false, error: "Usuario inactivo o no encontrado." };
-    }
-
-    const rolName = (user.rol?.nombre || "").toUpperCase();
-    const isStaff = rolName.includes("ADMIN") || rolName.includes("VENTAS");
-
-    if (!isStaff) {
-      return {
-        authorized: false,
-        error: "No tenés permisos para modificar la configuración comercial del e-commerce.",
-      };
-    }
-
-    return { authorized: true };
-  } catch (error) {
-    console.error("Error verifying commercial staff:", error);
-    return { authorized: false, error: "Error de verificación de permisos." };
+async function verifyCommercialStaff(
+  _ignoredUserId?: number,
+  allowedRoles: Array<"ADMINISTRADOR" | "ENCARGADO_VENTAS" | "ENCARGADO_STOCK"> = ["ADMINISTRADOR"]
+): Promise<{ authorized: boolean; error?: string }> {
+  const auth = await requireStaffSession(allowedRoles);
+  if (!auth.authorized) {
+    return {
+      authorized: false,
+      error:
+        auth.error ||
+        "No tenés permisos para modificar la configuración comercial del e-commerce.",
+    };
   }
+  return { authorized: true };
 }
 
 /**
@@ -83,6 +81,15 @@ export async function getCommercialProductsAction(params?: {
   categoriaId?: number;
   filtro?: "TODOS" | "OFERTAS" | "NO_PUBLICADOS" | "DESTACADOS" | "RECOMENDADOS";
 }): Promise<{ success: boolean; products: CommercialProductItem[]; error?: string }> {
+  const auth = await requireStaffSession(["ADMINISTRADOR", "ENCARGADO_VENTAS", "ENCARGADO_STOCK"]);
+  if (!auth.authorized) {
+    return {
+      success: false,
+      products: [],
+      error: auth.error || "Acceso denegado: solo personal autorizado puede consultar el catálogo administrativo.",
+    };
+  }
+
   try {
     const where: any = { activo: true };
 
@@ -124,6 +131,8 @@ export async function getCommercialProductsAction(params?: {
         descuentoPorcentaje = Math.max(0, Math.round(((p.precioVenta - precioOferta) / p.precioVenta) * 100));
       }
 
+      const meta = parseProductMetadata(ecom?.descripcion);
+
       return {
         id: p.id,
         nombre: p.nombre,
@@ -132,7 +141,7 @@ export async function getCommercialProductsAction(params?: {
         categoriaId: p.categoriaId,
         categoriaNombre: p.categoria.nombre,
         precioVenta: p.precioVenta,
-        precioCompra: p.precioCompra,
+        precioCompra: auth.rol === "ADMINISTRADOR" ? p.precioCompra : 0,
         cantidad: p.cantidad,
         imagen: p.imagen,
         activo: p.activo,
@@ -143,6 +152,9 @@ export async function getCommercialProductsAction(params?: {
         destacado,
         recomendado,
         badgePromo,
+        descripcion: meta.texto || null,
+        especificaciones: meta.especificaciones,
+        motosCompatibles: meta.motosCompatibles,
         ordenOferta,
         actualizadoEn: ecom?.actualizadoEn || null,
       };
@@ -180,6 +192,9 @@ export async function upsertCommercialProductAction(
     destacado?: boolean;
     recomendado?: boolean;
     badgePromo?: string | null;
+    descripcion?: string | null;
+    especificaciones?: ProductSpec[];
+    motosCompatibles?: string[];
     ordenOferta?: number;
     imagenes?: string[];
     precioVenta?: number;
@@ -240,6 +255,29 @@ export async function upsertCommercialProductAction(
       });
     }
 
+    // Determinar descripción y metadatos estructurados
+    let finalDescripcion: string | null | undefined = undefined;
+    if (
+      data.descripcion !== undefined ||
+      data.especificaciones !== undefined ||
+      data.motosCompatibles !== undefined
+    ) {
+      const existingEcom = await prisma.productoEcommerce.findUnique({
+        where: { productoId },
+        select: { descripcion: true },
+      });
+      const currentMeta = parseProductMetadata(existingEcom?.descripcion);
+      const newTexto = data.descripcion !== undefined ? (data.descripcion || "") : currentMeta.texto;
+      const newSpecs = data.especificaciones !== undefined ? data.especificaciones : currentMeta.especificaciones;
+      const newMotos = data.motosCompatibles !== undefined ? data.motosCompatibles : currentMeta.motosCompatibles;
+
+      finalDescripcion = serializeProductMetadata({
+        texto: newTexto,
+        especificaciones: newSpecs,
+        motosCompatibles: newMotos,
+      });
+    }
+
     // Upsert exclusivamente en productos_ecommerce (cero impacto en precioVenta o cantidad física de SGI si no se envió explícito)
     const updatedEcom = await prisma.productoEcommerce.upsert({
       where: { productoId },
@@ -251,6 +289,7 @@ export async function upsertCommercialProductAction(
         destacado: data.destacado ?? false,
         recomendado: data.recomendado ?? false,
         badgePromo: data.badgePromo !== undefined ? (data.badgePromo ? data.badgePromo.trim() : null) : null,
+        descripcion: finalDescripcion !== undefined ? finalDescripcion : null,
         ordenOferta: data.ordenOferta ?? 0,
       },
       update: {
@@ -261,6 +300,9 @@ export async function upsertCommercialProductAction(
         ...(data.recomendado !== undefined && { recomendado: data.recomendado }),
         ...(data.badgePromo !== undefined && {
           badgePromo: data.badgePromo ? data.badgePromo.trim() : null,
+        }),
+        ...(finalDescripcion !== undefined && {
+          descripcion: finalDescripcion,
         }),
         ...(data.ordenOferta !== undefined && { ordenOferta: data.ordenOferta }),
       },
@@ -273,6 +315,15 @@ export async function upsertCommercialProductAction(
         Math.round(((currentProduct.precioVenta - updatedEcom.precioOferta) / currentProduct.precioVenta) * 100)
       );
     }
+
+    try {
+      revalidatePath("/panel");
+      revalidatePath(`/producto/${productoId}`);
+      revalidatePath("/ofertas");
+      revalidatePath("/");
+    } catch {}
+
+    const metaResult = parseProductMetadata(updatedEcom.descripcion);
 
     const result: CommercialProductItem = {
       id: currentProduct.id,
@@ -293,6 +344,9 @@ export async function upsertCommercialProductAction(
       destacado: updatedEcom.destacado,
       recomendado: updatedEcom.recomendado,
       badgePromo: updatedEcom.badgePromo,
+      descripcion: metaResult.texto || null,
+      especificaciones: metaResult.especificaciones,
+      motosCompatibles: metaResult.motosCompatibles,
       ordenOferta: updatedEcom.ordenOferta,
       actualizadoEn: updatedEcom.actualizadoEn,
     };
@@ -565,10 +619,11 @@ export async function toggleMultiplesMarcasAction(
 }
 
 /**
- * Valida precios y disponibilidad de stock en el servidor para evitar fraudes en el checkout
+ * Valida precios y disponibilidad de stock en el servidor para evitar fraudes en el checkout.
+ * Diferencia estrictamente entre productos individuales y combos para evitar colisiones y sustituciones erróneas.
  */
 export async function validarPreciosServerAction(
-  items: { id: number; cantidad: number }[]
+  items: { id: number; cantidad: number; esCombo?: boolean; cartItemId?: string }[]
 ): Promise<{
   success: boolean;
   items: ValidatedCartItem[];
@@ -586,72 +641,89 @@ export async function validarPreciosServerAction(
     let subtotalGeneral = 0;
 
     for (const item of items) {
-      // 1. Manejo dinámico de combos armados desde PostgreSQL
-      const dbCombo = await prisma.comboEcommerce.findUnique({
-        where: { id: item.id },
-        include: {
-          items: {
-            include: { producto: true },
+      const isExplicitCombo = item.esCombo === true || (typeof item.cartItemId === "string" && item.cartItemId.startsWith("combo-"));
+      const isExplicitProduct = item.esCombo === false || (typeof item.cartItemId === "string" && item.cartItemId.startsWith("prod-"));
+
+      // 1. Si es explícitamente un combo: validar ÚNICAMENTE contra combos (nunca contra Producto)
+      if (isExplicitCombo) {
+        const dbCombo = await prisma.comboEcommerce.findUnique({
+          where: { id: item.id },
+          include: {
+            items: {
+              include: { producto: true },
+            },
           },
-        },
-      });
-
-      if (dbCombo && dbCombo.activo) {
-        const stocksPosibles = dbCombo.items.map((it) =>
-          it.cantidad > 0 ? Math.floor((it.producto?.cantidad || 0) / it.cantidad) : 0
-        );
-        const comboStock = stocksPosibles.length > 0 ? Math.min(...stocksPosibles) : 10;
-        const cant = Math.max(1, Math.min(item.cantidad, Math.max(1, comboStock)));
-        const regularCalculado = dbCombo.items.reduce(
-          (acc, it) => acc + (it.producto?.precioVenta || 0) * it.cantidad,
-          0
-        );
-        const regular = dbCombo.precioRegular && dbCombo.precioRegular > 0 ? dbCombo.precioRegular : regularCalculado;
-        const sub = dbCombo.precio * cant;
-        subtotalGeneral += sub;
-
-        validated.push({
-          id: dbCombo.id,
-          nombre: dbCombo.nombre,
-          marca: "Combo Chopper",
-          precioRegular: regular,
-          precioFinal: dbCombo.precio,
-          enOferta: true,
-          ahorroUnitario: Math.max(0, regular - dbCombo.precio),
-          cantidad: cant,
-          stockDisponible: comboStock,
-          subtotal: sub,
-          imagen: dbCombo.imagen || "/combos/combo-service-motul.jpg",
-          esCombo: true,
         });
+
+        if (dbCombo && dbCombo.activo) {
+          const stocksPosibles = dbCombo.items.map((it) =>
+            it.cantidad > 0 ? Math.floor((it.producto?.cantidad || 0) / it.cantidad) : 0
+          );
+          const comboStock = dbCombo.items.length > 0 && stocksPosibles.length > 0 ? Math.min(...stocksPosibles) : 0;
+
+          if (comboStock <= 0) {
+            warnings.push(`El combo "${dbCombo.nombre}" no tiene stock disponible en este momento y no se pudo incluir en tu pedido.`);
+            continue;
+          }
+
+          const cant = Math.min(Math.max(1, Math.floor(item.cantidad || 1)), comboStock);
+          if (cant < item.cantidad) {
+            warnings.push(`Se ajustó la cantidad del combo "${dbCombo.nombre}" a ${cant} por disponibilidad de stock.`);
+          }
+
+          const tieneOferta = Boolean(dbCombo.precioRegular && dbCombo.precioRegular > dbCombo.precio);
+          const regular = tieneOferta ? dbCombo.precioRegular! : dbCombo.precio;
+          const sub = dbCombo.precio * cant;
+          subtotalGeneral += sub;
+
+          validated.push({
+            id: dbCombo.id,
+            cartItemId: item.cartItemId || `combo-${dbCombo.id}`,
+            nombre: dbCombo.nombre,
+            marca: "Combo Chopper",
+            precioRegular: regular,
+            precioFinal: dbCombo.precio,
+            enOferta: tieneOferta,
+            ahorroUnitario: tieneOferta ? Math.max(0, regular - dbCombo.precio) : 0,
+            cantidad: cant,
+            stockDisponible: comboStock,
+            subtotal: sub,
+            imagen: dbCombo.imagen || "/combos/combo-service-motul.jpg",
+            esCombo: true,
+          });
+          continue;
+        }
+
+        // Fallback a combos estáticos si fuera necesario
+        const combo = COMBOS_DATA.find((c) => c.id === item.id);
+        if (combo) {
+          const cant = Math.max(1, Math.min(item.cantidad, combo.stock));
+          const sub = combo.precio * cant;
+          subtotalGeneral += sub;
+
+          validated.push({
+            id: combo.id,
+            cartItemId: item.cartItemId || `combo-${combo.id}`,
+            nombre: combo.nombre,
+            marca: combo.marca,
+            precioRegular: combo.precioOriginal,
+            precioFinal: combo.precio,
+            enOferta: true,
+            ahorroUnitario: combo.ahorro,
+            cantidad: cant,
+            stockDisponible: combo.stock,
+            subtotal: sub,
+            imagen: combo.imagen,
+            esCombo: true,
+          });
+          continue;
+        }
+
+        warnings.push(`El combo ID #${item.id} ya no está disponible en la tienda.`);
         continue;
       }
 
-      // Fallback a combos estáticos si fuera necesario
-      const combo = COMBOS_DATA.find((c) => c.id === item.id);
-      if (combo) {
-        const cant = Math.max(1, Math.min(item.cantidad, combo.stock));
-        const sub = combo.precio * cant;
-        subtotalGeneral += sub;
-
-        validated.push({
-          id: combo.id,
-          nombre: combo.nombre,
-          marca: combo.marca,
-          precioRegular: combo.precioOriginal,
-          precioFinal: combo.precio,
-          enOferta: true,
-          ahorroUnitario: combo.ahorro,
-          cantidad: cant,
-          stockDisponible: combo.stock,
-          subtotal: sub,
-          imagen: combo.imagen,
-          esCombo: true,
-        });
-        continue;
-      }
-
-      // 2. Consulta en base de datos real PostgreSQL con configuración comercial
+      // 2. Si es explícitamente un producto, o si es ambiguo/legado: validar PRIMERO contra Producto
       const p = await prisma.producto.findUnique({
         where: { id: item.id },
         include: {
@@ -660,52 +732,159 @@ export async function validarPreciosServerAction(
         },
       });
 
-      if (!p || !p.activo) {
-        warnings.push(`El producto ID #${item.id} ya no está disponible en la tienda.`);
+      if (p && p.activo) {
+        const ecom = p.ecommerce;
+        const publicado = ecom ? ecom.publicadoOnline : true;
+
+        if (!publicado) {
+          warnings.push(`"${p.nombre}" ha sido pausado para la venta online.`);
+          continue;
+        }
+
+        if (p.cantidad <= 0) {
+          warnings.push(`"${p.nombre}" se quedó sin stock físico.`);
+          continue;
+        }
+
+        const cantidadFinal = Math.min(item.cantidad, p.cantidad);
+        if (cantidadFinal < item.cantidad) {
+          warnings.push(`Stock limitado para "${p.nombre}": solo hay ${p.cantidad} unidad(es) disponible(s).`);
+        }
+
+        const enOfertaActiva = Boolean(ecom?.enOferta && ecom.precioOferta && ecom.precioOferta > 0);
+        const precioFinal = enOfertaActiva ? (ecom!.precioOferta as number) : p.precioVenta;
+        const ahorroUnitario = enOfertaActiva ? Math.max(0, p.precioVenta - precioFinal) : 0;
+        const subtotalItem = precioFinal * cantidadFinal;
+        subtotalGeneral += subtotalItem;
+
+        validated.push({
+          id: p.id,
+          cartItemId: item.cartItemId || `prod-${p.id}`,
+          nombre: p.nombre,
+          marca: p.marca || p.marcaRelacionada?.nombre || "Genérico",
+          precioRegular: p.precioVenta,
+          precioFinal,
+          enOferta: enOfertaActiva,
+          ahorroUnitario,
+          cantidad: cantidadFinal,
+          stockDisponible: p.cantidad,
+          subtotal: subtotalItem,
+          imagen: p.imagen,
+          esCombo: false,
+        });
         continue;
       }
 
-      const ecom = p.ecommerce;
-      const publicado = ecom ? ecom.publicadoOnline : true;
+      // 3. Fallback para carritos antiguos donde esCombo no estaba definido (y no se encontró como producto)
+      if (!isExplicitProduct) {
+        const dbComboLegacy = await prisma.comboEcommerce.findUnique({
+          where: { id: item.id },
+          include: {
+            items: {
+              include: { producto: true },
+            },
+          },
+        });
 
-      if (!publicado) {
-        warnings.push(`"${p.nombre}" ha sido pausado para la venta online.`);
-        continue;
+        if (dbComboLegacy && dbComboLegacy.activo) {
+          const stocksPosibles = dbComboLegacy.items.map((it) =>
+            it.cantidad > 0 ? Math.floor((it.producto?.cantidad || 0) / it.cantidad) : 0
+          );
+          const comboStock = dbComboLegacy.items.length > 0 && stocksPosibles.length > 0 ? Math.min(...stocksPosibles) : 0;
+
+          if (comboStock > 0) {
+            const cant = Math.min(Math.max(1, Math.floor(item.cantidad || 1)), comboStock);
+            const tieneOferta = Boolean(dbComboLegacy.precioRegular && dbComboLegacy.precioRegular > dbComboLegacy.precio);
+            const regular = tieneOferta ? dbComboLegacy.precioRegular! : dbComboLegacy.precio;
+            const sub = dbComboLegacy.precio * cant;
+            subtotalGeneral += sub;
+
+            validated.push({
+              id: dbComboLegacy.id,
+              cartItemId: item.cartItemId || `combo-${dbComboLegacy.id}`,
+              nombre: dbComboLegacy.nombre,
+              marca: "Combo Chopper",
+              precioRegular: regular,
+              precioFinal: dbComboLegacy.precio,
+              enOferta: tieneOferta,
+              ahorroUnitario: tieneOferta ? Math.max(0, regular - dbComboLegacy.precio) : 0,
+              cantidad: cant,
+              stockDisponible: comboStock,
+              subtotal: sub,
+              imagen: dbComboLegacy.imagen || "/combos/combo-service-motul.jpg",
+              esCombo: true,
+            });
+            continue;
+          }
+        }
       }
 
-      // Verificar stock físico real en SGI
-      if (p.cantidad <= 0) {
-        warnings.push(`"${p.nombre}" se quedó sin stock físico.`);
-        continue;
-      }
-
-      const cantidadFinal = Math.min(item.cantidad, p.cantidad);
-      if (cantidadFinal < item.cantidad) {
-        warnings.push(`Stock limitado para "${p.nombre}": solo hay ${p.cantidad} unidad(es) disponible(s).`);
-      }
-
-      // Precio inmutable calculado en el servidor
-      const enOfertaActiva = Boolean(ecom?.enOferta && ecom.precioOferta && ecom.precioOferta > 0);
-      const precioFinal = enOfertaActiva ? (ecom!.precioOferta as number) : p.precioVenta;
-      const ahorroUnitario = enOfertaActiva ? Math.max(0, p.precioVenta - precioFinal) : 0;
-      const subtotalItem = precioFinal * cantidadFinal;
-      subtotalGeneral += subtotalItem;
-
-      validated.push({
-        id: p.id,
-        nombre: p.nombre,
-        marca: p.marca || p.marcaRelacionada?.nombre || "Genérico",
-        precioRegular: p.precioVenta,
-        precioFinal,
-        enOferta: enOfertaActiva,
-        ahorroUnitario,
-        cantidad: cantidadFinal,
-        stockDisponible: p.cantidad,
-        subtotal: subtotalItem,
-        imagen: p.imagen,
-        esCombo: false,
-      });
+      warnings.push(`El artículo ID #${item.id} ya no está disponible en la tienda.`);
     }
+
+    // 3. Verificación de consumo acumulado de stock entre combos y productos individuales
+    const demandaTotal = new Map<number, { requerido: number; nombre: string }>();
+
+    for (const v of validated) {
+      if (v.esCombo) {
+        const cDb = await prisma.comboEcommerce.findUnique({
+          where: { id: v.id },
+          include: { items: { include: { producto: true } } },
+        });
+        if (cDb?.items) {
+          for (const ci of cDb.items) {
+            const req = ci.cantidad * v.cantidad;
+            const cur = demandaTotal.get(ci.productoId) || { requerido: 0, nombre: ci.producto?.nombre || `Producto #${ci.productoId}` };
+            cur.requerido += req;
+            demandaTotal.set(ci.productoId, cur);
+          }
+        }
+      } else {
+        const cur = demandaTotal.get(v.id) || { requerido: 0, nombre: v.nombre };
+        cur.requerido += v.cantidad;
+        demandaTotal.set(v.id, cur);
+      }
+    }
+
+    for (const [prodId, dem] of demandaTotal.entries()) {
+      const prodDb = await prisma.producto.findUnique({
+        where: { id: prodId },
+        select: { id: true, nombre: true, cantidad: true },
+      });
+      if (prodDb && prodDb.cantidad < dem.requerido) {
+        warnings.push(
+          `Stock limitado para "${dem.nombre}": se requieren ${dem.requerido} u. en total (entre repuestos y combos), pero solo hay ${prodDb.cantidad} u. disponibles en el local.`
+        );
+
+        // Ajustar la disponibilidad reportada y corregir cantidades para evitar sobreventa
+        for (const v of validated) {
+          if (!v.esCombo && v.id === prodId) {
+            v.stockDisponible = Math.min(v.stockDisponible, prodDb.cantidad);
+            if (v.cantidad > prodDb.cantidad) {
+              v.cantidad = Math.max(0, prodDb.cantidad);
+              v.subtotal = v.precioFinal * v.cantidad;
+            }
+          } else if (v.esCombo) {
+            const cDb = await prisma.comboEcommerce.findUnique({
+              where: { id: v.id },
+              include: { items: true },
+            });
+            const comp = cDb?.items.find((it) => it.productoId === prodId);
+            if (comp && comp.cantidad > 0) {
+              const maxPosible = Math.floor(prodDb.cantidad / comp.cantidad);
+              v.stockDisponible = Math.min(v.stockDisponible, maxPosible);
+              if (v.cantidad > maxPosible) {
+                v.cantidad = Math.max(0, maxPosible);
+                v.subtotal = v.precioFinal * v.cantidad;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Recalcular subtotal con las cantidades validadas
+    subtotalGeneral = validated.reduce((acc, it) => acc + it.subtotal, 0);
 
     if (validated.length === 0) {
       return {
@@ -766,13 +945,13 @@ export async function aplicarOfertaLoteAction(
           productoId: prod.id,
           enOferta: true,
           precioOferta,
-          badgePromo: badgePromo || "Mes de la Primavera",
+          badgePromo: badgePromo ? badgePromo.trim() : null,
           publicadoOnline: true,
         },
         update: {
           enOferta: true,
           precioOferta,
-          badgePromo: badgePromo || "Mes de la Primavera",
+          badgePromo: badgePromo ? badgePromo.trim() : null,
           publicadoOnline: true,
         },
       });

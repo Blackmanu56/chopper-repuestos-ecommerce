@@ -4,10 +4,12 @@ import React, { useRef } from "react";
 import Link from "next/link";
 import { ProductItem } from "@/actions/ecommerce";
 import { useCart } from "@/context/CartContext";
-import { ShoppingCart, ChevronRight, ChevronLeft, Star } from "lucide-react";
+import { useConfig } from "@/context/ConfigContext";
+import { ShoppingCart, ChevronRight, ChevronLeft, Star, Lock, Check } from "lucide-react";
 
 export default function MasVendidosSection({ products }: { products: ProductItem[] }) {
-  const { addToCart } = useCart();
+  const { addToCart, isStaff, getItemCartQuantity, getRemainingStock } = useCart();
+  const { shouldShowAhorroBadge, calcularCuotas } = useConfig();
   const formatPrice = (n: number) => "$" + Number(n).toLocaleString("es-AR");
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -23,22 +25,16 @@ export default function MasVendidosSection({ products }: { products: ProductItem
   const otros = products.filter((p) => !p.destacado && !p.recomendado);
   const displayList = [...destacados, ...otros].slice(0, 16);
 
-  const masVendidos = displayList.map((p, idx) => {
+  const masVendidos = displayList.map((p) => {
     const regular = p.precioRegular ?? p.precio;
-    const ahorro = p.enOferta
-      ? Math.max(0, regular - p.precio)
-      : Math.round(p.precio * 0.15);
-    const precioOriginal = p.enOferta ? regular : p.precio + ahorro;
-    const rating = (4.7 + (idx % 3) * 0.1).toFixed(1);
-    const reviews = 12 + idx * 5;
+    const ahorro = p.enOferta ? Math.max(0, regular - p.precio) : 0;
+    const precioOriginal = p.enOferta ? regular : p.precio;
     const badge = p.badgePromo || (p.destacado ? "Destacado" : p.recomendado ? "Recomendado" : null);
 
     return {
       ...p,
       ahorro,
       precioOriginal,
-      rating,
-      reviews,
       badge,
     };
   });
@@ -92,25 +88,36 @@ export default function MasVendidosSection({ products }: { products: ProductItem
           ref={scrollRef}
           className="flex gap-3 overflow-x-auto scroll-smooth scrollbar-none pb-4 pt-1 px-1"
         >
-          {masVendidos.map((prod) => (
+          {masVendidos.map((prod) => {
+            const inCartQty = getItemCartQuantity(prod.id, false);
+            const remainingStock = getRemainingStock(prod);
+            const hasStock = prod.stock > 0;
+            const isLimitReached = hasStock && remainingStock <= 0;
+            const isLowStock = hasStock && prod.stock <= 5;
+            const financiacion = calcularCuotas(prod.precio);
+            return (
             <div
               key={prod.id}
               className="w-[185px] sm:w-[210px] md:w-[220px] shrink-0 group flex flex-col justify-between rounded-2xl border border-slate-200 dark:border-line bg-white dark:bg-card p-3 hover:border-brand/70 hover:shadow-xl transition-all shadow-sm"
             >
             <div>
               {/* Badges superiores */}
-              <div className="space-y-1 mb-2">
-                {prod.ahorro > 0 && (
-                  <span className="inline-block rounded-md bg-brand px-2 py-0.5 text-[9px] font-black uppercase text-white shadow-sm">
-                    AHORRÁ {formatPrice(prod.ahorro)}
+              <div className="flex items-center justify-between gap-1 mb-2">
+                <span className="rounded-md bg-slate-100 dark:bg-surface border border-slate-200 dark:border-line px-1.5 py-0.5 text-[9px] font-bold uppercase text-slate-600 dark:text-slate-400 truncate max-w-[90px]">
+                  {prod.marca || "Original"}
+                </span>
+                {prod.enOferta && prod.ahorro > 0 && prod.descuentoPorcentaje ? (
+                  <span className="rounded-md bg-brand px-1.5 py-0.5 text-[9px] font-black uppercase text-white shadow-xs">
+                    {prod.descuentoPorcentaje}% OFF
                   </span>
-                )}
-                {prod.badge && (
-                  <div className="rounded-md border border-brand/40 bg-brand/10 px-1.5 py-0.5 text-[9px] font-bold text-brand w-fit truncate max-w-[130px]">
-                    🏷️ {prod.badge}
-                  </div>
-                )}
+                ) : null}
               </div>
+
+              {prod.badge && (
+                <div className="mb-2 rounded-md border border-brand/40 bg-brand/10 px-1.5 py-0.5 text-[9px] font-bold text-brand w-fit truncate max-w-[130px]">
+                  {prod.badge}
+                </div>
+              )}
 
               {/* Imagen del Producto */}
               <Link
@@ -138,7 +145,7 @@ export default function MasVendidosSection({ products }: { products: ProductItem
                 )}
               </Link>
 
-              {/* Título y Calificación */}
+              {/* Título */}
               <Link
                 href={`/producto/${prod.id}`}
                 className="line-clamp-2 text-xs font-bold text-slate-900 dark:text-white hover:text-brand transition-colors min-h-[34px] leading-snug"
@@ -146,46 +153,97 @@ export default function MasVendidosSection({ products }: { products: ProductItem
               >
                 {prod.nombre}
               </Link>
-
-              <div className="mt-1 flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400 font-bold">
-                <Star size={11} className="fill-amber-400" />
-                <span>{prod.rating}</span>
-                <span className="text-slate-500 font-normal">({prod.reviews})</span>
-              </div>
             </div>
 
             <div className="mt-3 pt-2 border-t border-slate-200 dark:border-line/60">
-              {/* Precio Original Tachado + Precio Final */}
-              {prod.enOferta && prod.precioOriginal > prod.precio ? (
-                <div className="text-[11px] text-slate-500 line-through">
-                  {formatPrice(prod.precioOriginal)}
+              {/* Precio Original Tachado (izq) y Ahorrás (der) solo si hay oferta real */}
+              {prod.enOferta && prod.ahorro > 0 ? (
+                <div className="flex items-center justify-between gap-1 mb-1">
+                  <span className="text-[11px] text-slate-500 line-through">
+                    {formatPrice(prod.precioOriginal)}
+                  </span>
+                  {shouldShowAhorroBadge(prod.ahorro) && (
+                    <span className="rounded-md bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800/60 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 dark:text-emerald-400">
+                      Ahorrás {formatPrice(prod.ahorro)}
+                    </span>
+                  )}
                 </div>
               ) : (
-                <div className="text-[11px] text-transparent select-none">-</div>
+                <div className="text-[11px] text-transparent select-none mb-1">-</div>
               )}
-              <div className="text-base font-black text-brand tracking-tight">
-                {formatPrice(prod.precio)}
+              <div className="flex items-baseline justify-between gap-1">
+                <div className="text-base font-black text-brand tracking-tight">
+                  {formatPrice(prod.precio)}
+                </div>
+                {isLowStock && (
+                  <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                    Últimas {prod.stock} u.
+                  </span>
+                )}
+                {!hasStock && (
+                  <span className="text-[10px] font-bold text-red-600 dark:text-red-400">
+                    Sin stock
+                  </span>
+                )}
               </div>
               <div className="text-[10px] text-slate-600 dark:text-slate-400">
                 Efectivo / Transferencia
               </div>
 
-              {/* Pill amarillo: 3 cuotas sin interés */}
-              <div className="mt-2 flex items-center justify-center gap-1 rounded-lg bg-amber-400 py-1 px-1.5 text-[10px] font-black text-slate-900 shadow-sm">
-                <span>💳 3 cuotas sin interés</span>
-              </div>
+              {/* Pill amarillo: cuotas */}
+              {financiacion.habilitadas && (
+                <div className="mt-2 flex items-center justify-center gap-1 rounded-lg bg-amber-400 py-1 px-1.5 text-[10px] font-black text-slate-900 shadow-sm">
+                  <span>
+                    💳{" "}
+                    {financiacion.sinInteres
+                      ? `${financiacion.cuotas} cuotas sin interés`
+                      : `${financiacion.cuotas} cuotas fijas`}
+                  </span>
+                </div>
+              )}
 
               {/* Botón Agregar al Carrito */}
-              <button
-                onClick={() => addToCart(prod, 1)}
-                className="mt-2 w-full flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 py-2 text-[11px] font-bold text-white shadow transition-all active:scale-95"
-              >
-                <ShoppingCart size={13} />
-                <span>Agregar al carrito</span>
-              </button>
+              {isStaff ? (
+                <button
+                  type="button"
+                  onClick={() => addToCart(prod, 1)}
+                  className="mt-2 w-full flex items-center justify-center gap-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 py-2 text-[11px] font-bold border border-slate-300 dark:border-zinc-700 shadow-sm transition-all cursor-pointer"
+                  title="Estás utilizando una cuenta de personal. Para realizar compras, ingresá con una cuenta de cliente."
+                >
+                  <Lock size={12} className="text-slate-500 dark:text-zinc-400" />
+                  <span>Solo consulta</span>
+                </button>
+              ) : !hasStock ? (
+                <button
+                  type="button"
+                  disabled
+                  className="mt-2 w-full flex items-center justify-center gap-1.5 rounded-xl bg-slate-200 dark:bg-zinc-800 text-slate-400 dark:text-zinc-500 py-2 text-[11px] font-bold cursor-not-allowed border border-slate-300 dark:border-zinc-700/50"
+                >
+                  Sin stock
+                </button>
+              ) : isLimitReached ? (
+                <button
+                  type="button"
+                  onClick={() => addToCart(prod, 1)}
+                  className="mt-2 w-full flex items-center justify-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 py-2 text-[11px] font-bold hover:bg-emerald-500/20 transition-all cursor-pointer shadow-xs"
+                  title="Ya tenés todas las unidades disponibles en tu carrito"
+                >
+                  <Check size={13} className="text-emerald-600 dark:text-emerald-400" />
+                  <span>En carrito (máx.)</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => addToCart(prod, 1)}
+                  className="mt-2 w-full flex items-center justify-center gap-1.5 rounded-xl bg-brand hover:bg-brandhover py-2 text-[11px] font-bold text-white shadow transition-all active:scale-95 cursor-pointer"
+                >
+                  <ShoppingCart size={13} />
+                  <span>{inCartQty > 0 ? `Agregar otro (${inCartQty})` : "Agregar al carrito"}</span>
+                </button>
+              )}
             </div>
           </div>
-        ))}
+            );
+          })}
         </div>
       </div>
     </section>
