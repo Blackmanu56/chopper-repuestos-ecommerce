@@ -1,6 +1,7 @@
 import React from "react";
 import { getCategories, getProducts } from "@/actions/ecommerce";
 import { getPublicCombosAction } from "@/actions/combos";
+import { getBannersHomeAction } from "@/actions/configuracion";
 import HeroBanners from "@/components/home/HeroBanners";
 import OfertasSection from "@/components/home/OfertasSection";
 import CombosSection from "@/components/home/CombosSection";
@@ -19,15 +20,16 @@ export default async function HomePage({ searchParams }: PageProps) {
   const params = await searchParams;
   const q = params.q || "";
 
-  const [products, combos] = await Promise.all([
+  const [products, combos, banners] = await Promise.all([
     getProducts({ query: q }),
     getPublicCombosAction(),
+    getBannersHomeAction(),
   ]);
 
   return (
     <div className="space-y-12">
       {/* 1. HERO Y MINI BANNERS (SCREENSHOT 1 Y 2) */}
-      <HeroBanners />
+      <HeroBanners initialBanners={banners} />
 
       {/* 2. PRODUCTOS EN OFERTA (CAPTURA 221212) */}
       <OfertasSection products={products} />

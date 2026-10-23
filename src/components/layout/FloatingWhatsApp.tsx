@@ -2,18 +2,20 @@
 
 import React from "react";
 import { MessageCircle } from "lucide-react";
+import { useConfig } from "@/context/ConfigContext";
 
 export default function FloatingWhatsApp() {
-  const phone = "5493765243554";
+  const { config } = useConfig();
+  const phone = (config.whatsapp || "5493765243554").replace(/\D/g, "");
   const message = encodeURIComponent(
-    "Hola Chopper Repuestos! Quería hacer una consulta sobre repuestos para mi moto."
+    `Hola ${config.nombre_tienda || "Chopper Repuestos"}! Quería hacer una consulta sobre repuestos para mi moto.`
   );
   const waUrl = `https://wa.me/${phone}?text=${message}`;
 
   return (
     <aside aria-label="Contacto por WhatsApp" className="fixed bottom-6 right-6 z-50 flex items-center group">
       <span className="hidden sm:inline-block mr-3 rounded-xl bg-card border border-line px-3 py-1.5 text-xs font-semibold text-slate-200 shadow-xl opacity-0 group-hover:opacity-100 transition-opacity">
-        ¿Dudas? Escribinos al 376 524-3554
+        ¿Dudas? Escribinos al {config.telefono || "376 524-3554"}
       </span>
       <a
         href={waUrl}

@@ -18,6 +18,7 @@ import {
   FileText,
   AtSign,
   Trash2,
+  ChevronRight,
 } from "lucide-react";
 
 const AVATAR_PRESETS = [
@@ -136,7 +137,7 @@ export default function UserProfileModal() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="relative w-full max-w-lg rounded-2xl border border-slate-200 dark:border-line bg-white dark:bg-[#121318] p-6 shadow-2xl space-y-5 max-h-[92vh] overflow-y-auto">
         {/* Cabecera */}
         <div className="flex items-center justify-between border-b border-slate-200 dark:border-line/80 pb-3">
@@ -171,6 +172,19 @@ export default function UserProfileModal() {
             <span className="font-bold">¡Datos de perfil y foto actualizados con éxito!</span>
           </div>
         )}
+
+        {/* Acceso directo a Mis Pedidos */}
+        <Link
+          href="/mis-pedidos"
+          onClick={closeProfile}
+          className="flex items-center justify-between p-3 rounded-xl border border-brand/30 bg-brand/5 hover:bg-brand/10 transition-colors group"
+        >
+          <div className="flex items-center gap-2.5 text-xs font-bold text-slate-800 dark:text-slate-200 group-hover:text-brand">
+            <Package size={16} className="text-brand shrink-0" />
+            <span>Consultar mis compras y seguimiento en <strong>Mis Pedidos</strong></span>
+          </div>
+          <ChevronRight size={15} className="text-slate-400 group-hover:text-brand group-hover:translate-x-0.5 transition-all" />
+        </Link>
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
           {/* FOTO DE PERFIL / AVATAR */}

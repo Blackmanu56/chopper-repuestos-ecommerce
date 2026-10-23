@@ -4,52 +4,73 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCart } from "@/context/CartContext";
+import { useAuth } from "@/context/AuthContext";
+import { useConfig } from "@/context/ConfigContext";
 import {
   MapPin,
   Bike,
   CreditCard,
   Building,
   ShieldCheck,
+  ShieldAlert,
+  UserCheck,
+  Lock,
   AlertCircle,
   Clock,
   Ticket,
   RefreshCw,
   CheckCircle,
   Upload,
-  Sparkles,
   Zap,
+  Sparkles,
+  XCircle,
 } from "lucide-react";
 import { validarPreciosServerAction, ValidatedCartItem } from "@/actions/commercial";
-import { crearPedidoOnlineAction, subirComprobantePedidoAction } from "@/actions/pedidos";
+import {
+  crearPedidoOnlineAction,
+  subirComprobantePedidoAction,
+  subirComprobanteDirectoAction,
+  limpiarComprobanteHuerfanoAction,
+} from "@/actions/pedidos";
 
 export default function CheckoutPage() {
   const router = useRouter();
-  const { items, subtotal, clearCart, crearPedido } = useCart();
+  const { user, openLogin } = useAuth();
+  const { items, subtotal, clearCart, crearPedido, isStaff, sincronizarCarrito } = useCart();
+  const { config, calcularCuotas } = useConfig();
   const formatPrice = (n: number) => "$" + Number(n).toLocaleString("es-AR");
+
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
   const [modalidadEntrega, setModalidadEntrega] = useState<"RETIRO_LOCAL" | "MOTOMANDADO">("RETIRO_LOCAL");
   const [formData, setFormData] = useState({
-    nombre: "Cliente Chopper",
-    dni: "34.567.890",
-    tel: "376 524-3554",
-    email: "cliente@gmail.com",
-    direccionEnvio: "Posadas, Misiones",
+    nombre: user?.nombreCompleto || "",
+    dni: user?.dni || "",
+    tel: user?.telefono || "",
+    email: user?.correo || "",
+    direccionEnvio: user?.direccion || "",
     pago: "TRANSFERENCIA" as "TRANSFERENCIA" | "TARJETA" | "EFECTIVO_LOCAL",
   });
 
-  // Simulación de Tarjeta y Cuotas
+  useEffect(() => {
+    if (user) {
+      setFormData((prev) => ({
+        ...prev,
+        nombre: prev.nombre || user.nombreCompleto || "",
+        dni: prev.dni || user.dni || "",
+        tel: prev.tel || user.telefono || "",
+        email: prev.email || user.correo || "",
+        direccionEnvio: prev.direccionEnvio || user.direccion || "",
+      }));
+    }
+  }, [user]);
+
+  // Datos de Tarjeta y Cuotas
   const [tarjetaCuotas, setTarjetaCuotas] = useState<number>(1);
   const [tarjetaNumero, setTarjetaNumero] = useState("");
   const [tarjetaTitular, setTarjetaTitular] = useState("");
   const [tarjetaVence, setTarjetaVence] = useState("");
   const [tarjetaCvv, setTarjetaCvv] = useState("");
-
-  const cargarTarjetaFicticia = () => {
-    setTarjetaNumero("4509 8812 3456 7890");
-    setTarjetaTitular("CARLOS LOPEZ");
-    setTarjetaVence("08/29");
-    setTarjetaCvv("742");
-  };
 
   // Transferencia (Comprobante directo en checkout)
   const [archivoComprobante, setArchivoComprobante] = useState<File | null>(null);
@@ -66,7 +87,14 @@ export default function CheckoutPage() {
     let isMounted = true;
     async function check() {
       try {
-        const res = await validarPreciosServerAction(items.map((i) => ({ id: i.id, cantidad: i.cantidad })));
+        const res = await validarPreciosServerAction(
+          items.map((i) => ({
+            id: i.id,
+            cantidad: i.cantidad,
+            esCombo: Boolean(i.esCombo),
+            cartItemId: i.cartItemId,
+          }))
+        );
         if (isMounted && res.success) {
           setServerVerifiedItems(res.items);
           setServerSubtotal(res.subtotal);
@@ -88,42 +116,96 @@ export default function CheckoutPage() {
   const costoEnvio = modalidadEntrega === "MOTOMANDADO" ? costoMotomandado : 0;
   const effectiveSubtotal = serverSubtotal !== null ? serverSubtotal : subtotal;
   const totalConEnvio = effectiveSubtotal + costoEnvio;
+  const financiacion = calcularCuotas(totalConEnvio);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const handleConfirmar = async (e: React.FormEvent) => {
     e.preventDefault();
+    setCheckoutError(null);
+
+    if (isStaff) {
+      setCheckoutError("Estás utilizando una cuenta de personal. Para realizar compras, ingresá con una cuenta de cliente.");
+      return;
+    }
+
+    if (!user || user.rol !== "CLIENTE") {
+      setCheckoutError("Para completar tu compra, por favor iniciá sesión o registrate con tu cuenta de cliente.");
+      openLogin();
+      return;
+    }
+
     if (items.length === 0) {
       router.push("/carrito");
       return;
     }
 
+    if (isSubmitting) return;
+
+    // Validación obligatoria para transferencias bancarias
+    if (formData.pago === "TRANSFERENCIA" && !archivoComprobante) {
+      setCheckoutError("Para abonar por transferencia bancaria, es obligatorio adjuntar la constancia o comprobante de pago.");
+      return;
+    }
+
+    setIsSubmitting(true);
     setVerificandoPrecios(true);
     setServerWarnings([]);
+
+    let comprobanteSubidoUrl: string | undefined = undefined;
 
     try {
       // 1. Verificación obligatoria inmutable en el servidor contra PostgreSQL
       const res = await validarPreciosServerAction(
-        items.map((i) => ({ id: i.id, cantidad: i.cantidad }))
+        items.map((i) => ({
+          id: i.id,
+          cantidad: i.cantidad,
+          esCombo: Boolean(i.esCombo),
+          cartItemId: i.cartItemId,
+        }))
       );
 
       if (!res.success) {
-        alert(res.error || "No se pudo verificar el pedido contra el servidor.");
-        setVerificandoPrecios(false);
+        setCheckoutError(res.error || "No se pudo verificar el pedido contra el servidor.");
         return;
       }
 
       if (res.warnings && res.warnings.length > 0) {
         setServerWarnings(res.warnings);
+        sincronizarCarrito(res.items);
+        const hayIncompatibilidad = res.items.some((it) => it.stockDisponible <= 0 || it.cantidad <= 0);
+        if (hayIncompatibilidad) {
+          setCheckoutError(
+            "La disponibilidad de algunos repuestos cambió en el local. Por favor revisá los avisos arriba y ajustá tu carrito antes de continuar."
+          );
+          return;
+        }
       }
 
       // 2. Si elige efectivo pero seleccionó motomandado, forzamos retiro en local
       const modFinal = formData.pago === "EFECTIVO_LOCAL" ? "RETIRO_LOCAL" : modalidadEntrega;
 
-      // 3. Crear pedido con datos certificados en PostgreSQL
+      // 3. Si pagó por transferencia y adjuntó comprobante, subir el archivo de inmediato
+      if (formData.pago === "TRANSFERENCIA" && archivoComprobante) {
+        const compFd = new FormData();
+        compFd.append("comprobante", archivoComprobante);
+        const resSubida = await subirComprobanteDirectoAction(compFd);
+        if (!resSubida.success || !resSubida.comprobanteUrl) {
+          setCheckoutError(
+            resSubida.error ||
+              "No se pudo procesar el comprobante adjuntado. Por favor, verificá que sea un formato válido (JPG, PNG, WEBP o PDF)."
+          );
+          return;
+        }
+        comprobanteSubidoUrl = resSubida.comprobanteUrl;
+      }
+
+      // 4. Crear pedido con datos certificados en PostgreSQL
       const resOnline = await crearPedidoOnlineAction({
         nombre: formData.nombre,
         dni: formData.dni,
@@ -134,6 +216,7 @@ export default function CheckoutPage() {
         costoEnvio: modFinal === "MOTOMANDADO" ? costoMotomandado : 0,
         metodoPago: formData.pago,
         cuotas: formData.pago === "TARJETA" ? tarjetaCuotas : undefined,
+        comprobanteUrl: comprobanteSubidoUrl,
         items: items.map((i) => ({
           id: i.id,
           nombre: i.nombre,
@@ -144,20 +227,11 @@ export default function CheckoutPage() {
       });
 
       if (!resOnline.success || !resOnline.pedido) {
-        alert(resOnline.error || "No se pudo registrar el pedido.");
-        setVerificandoPrecios(false);
-        return;
-      }
-
-      // 4. Si pagó por transferencia y adjuntó comprobante en checkout, subirlo de inmediato
-      if (formData.pago === "TRANSFERENCIA" && archivoComprobante && resOnline.pedido) {
-        try {
-          const compFd = new FormData();
-          compFd.append("comprobante", archivoComprobante);
-          await subirComprobantePedidoAction(resOnline.pedido.numero, compFd);
-        } catch (errComp) {
-          console.error("Error al subir comprobante adjunto:", errComp);
+        if (comprobanteSubidoUrl) {
+          await limpiarComprobanteHuerfanoAction(comprobanteSubidoUrl);
         }
+        setCheckoutError(resOnline.error || "No se pudo registrar el pedido.");
+        return;
       }
 
       // También mantener sincronizado el contexto del cliente y vaciar carrito
@@ -175,17 +249,26 @@ export default function CheckoutPage() {
           marca: i.marca,
           precio: i.precioFinal,
           cantidad: i.cantidad,
+          esCombo: Boolean(i.esCombo),
         })),
         totalVerificado: res.subtotal,
       });
 
       clearCart();
       router.push(`/mis-pedidos?num=${resOnline.pedido.numero}`);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error en checkout:", err);
-      alert("Ocurrió un error al procesar el pedido.");
+      if (comprobanteSubidoUrl) {
+        await limpiarComprobanteHuerfanoAction(comprobanteSubidoUrl);
+      }
+      setCheckoutError(
+        err?.message
+          ? `Error al procesar el pedido: ${err.message}`
+          : "Ocurrió un error al procesar el pedido. Por favor, verificá los datos ingresados."
+      );
     } finally {
       setVerificandoPrecios(false);
+      setIsSubmitting(false);
     }
   };
 
@@ -219,8 +302,65 @@ export default function CheckoutPage() {
         </p>
       </div>
 
+      {checkoutError && (
+        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-xs text-red-700 dark:text-red-400 flex items-start justify-between gap-3 shadow-sm animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold text-sm text-red-800 dark:text-red-300">
+                Atención al procesar la compra
+              </p>
+              <p className="mt-1 leading-relaxed">{checkoutError}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCheckoutError(null)}
+            className="text-red-500 hover:text-red-700 dark:hover:text-red-300 p-1 cursor-pointer"
+            aria-label="Cerrar aviso"
+          >
+            <XCircle className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       <form onSubmit={handleConfirmar} className="grid gap-6 lg:grid-cols-12 items-start">
         <div className="lg:col-span-8 space-y-5">
+          {/* Aviso para personal */}
+          {isStaff && (
+            <div className="rounded-2xl border border-amber-500/40 bg-amber-50 dark:bg-amber-950/30 p-5 text-amber-900 dark:text-amber-200 flex items-start gap-3.5 shadow-sm animate-in fade-in">
+              <ShieldAlert size={22} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <h3 className="font-bold text-sm">Compras deshabilitadas para personal</h3>
+                <p className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
+                  Estás utilizando una cuenta de personal. Para realizar compras, ingresá con una cuenta de cliente.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Aviso para visitante no autenticado */}
+          {!user && (
+            <div className="rounded-2xl border border-brand/40 bg-brand/5 dark:bg-brand/10 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm animate-in fade-in">
+              <div className="space-y-1">
+                <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                  <UserCheck size={18} className="text-brand" />
+                  <span>Identificación de cliente requerida</span>
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                  Las compras online están reservadas exclusivamente a clientes. Iniciá sesión o registrate para confirmar tu pedido.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={openLogin}
+                className="shrink-0 px-4 py-2.5 rounded-xl bg-brand hover:bg-brandhover text-white text-xs font-bold transition-all shadow-sm cursor-pointer"
+              >
+                Iniciar Sesión / Registrarse
+              </button>
+            </div>
+          )}
+
           {/* 1. TUS DATOS */}
           <div className="rounded-2xl border border-slate-200 dark:border-line bg-white dark:bg-card p-5 space-y-3 shadow-sm">
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
@@ -309,11 +449,11 @@ export default function CheckoutPage() {
                     </span>
                   </div>
                   <p className="text-slate-600 dark:text-slate-400 text-[11px] pt-1 leading-relaxed">
-                    Av. Roque Sáenz Peña 1500 (Posadas). Te genera un <strong>Ticket Digital con Código de Retiro</strong>.
+                    {config.direccion || "Av. Roque Sáenz Peña 1500 (Posadas)"}. Te genera un <strong>Ticket Digital con Código de Retiro</strong>.
                   </p>
                 </div>
                 <div className="pt-2 text-[10px] text-slate-500">
-                  Lun a Sáb 8:00-12:30 / 16:30-20:30 hs.
+                  {config.horarios || "Lun a Sáb 8:00-12:30 / 16:30-20:30 hs."}
                 </div>
               </label>
 
@@ -428,14 +568,20 @@ export default function CheckoutPage() {
                     Banco: <strong>Banco Macro</strong> · Titular: <strong>Chopper Repuestos S.R.L.</strong>
                   </div>
 
-                  {/* Adjuntar comprobante */}
+                  {/* Adjuntar comprobante obligatorio */}
                   <div className="pt-2 border-t border-slate-200 dark:border-[#26272e]">
-                    <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1.5 flex items-center gap-1.5">
-                      <Upload className="w-3.5 h-3.5 text-brand" />
-                      Adjuntar captura o comprobante de transferencia (Opcional ahora):
-                    </span>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <Upload className="w-3.5 h-3.5 text-brand" />
+                        Comprobante de transferencia *
+                      </span>
+                      <span className="text-[10px] text-amber-500 font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                        Obligatorio
+                      </span>
+                    </div>
                     <input
                       type="file"
+                      required={formData.pago === "TRANSFERENCIA"}
                       accept="image/*,application/pdf"
                       onChange={(e) => {
                         const file = e.target.files?.[0];
@@ -462,8 +608,18 @@ export default function CheckoutPage() {
                         </div>
                       </div>
                     )}
+                    {archivoComprobante && !previewComprobante && (
+                      <div className="mt-2 text-xs text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                        <CheckCircle className="w-4 h-4" /> Archivo PDF adjuntado: {archivoComprobante.name}
+                      </div>
+                    )}
+                    {!archivoComprobante && (
+                      <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 font-medium">
+                        ⚠️ Debés adjuntar la constancia o captura de tu transferencia bancaria antes de confirmar el pedido.
+                      </p>
+                    )}
                     <p className="text-[10px] text-slate-500 dark:text-[#6b6c75] mt-1">
-                      Si aún no hiciste la transferencia, podés confirmar ahora y adjuntar el comprobante más tarde en <strong>Mis Pedidos</strong>.
+                      Tu pedido se registrará en estado <strong>Por verificar pago</strong> y será validado por el equipo de Ventas.
                     </p>
                   </div>
                 </div>
@@ -499,15 +655,11 @@ export default function CheckoutPage() {
                 <div className="bg-slate-50 dark:bg-[#141519] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 space-y-4 ml-2 mr-2">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 dark:border-[#26272e] pb-2">
                     <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5 text-xs">
-                      <CreditCard className="w-4 h-4 text-brand" /> Simulación de Pago con Tarjeta
+                      <CreditCard className="w-4 h-4 text-brand" /> Pago con Tarjeta de Débito o Crédito
                     </span>
-                    <button
-                      type="button"
-                      onClick={cargarTarjetaFicticia}
-                      className="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 dark:text-amber-400 border border-amber-500/30 rounded-lg text-[11px] font-bold transition-colors flex items-center gap-1 self-start sm:self-auto"
-                    >
-                      <Zap className="w-3.5 h-3.5" /> ⚡ Cargar tarjeta ficticia de prueba
-                    </button>
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Operación online protegida
+                    </span>
                   </div>
 
                   {/* Selector de Cuotas */}
@@ -515,7 +667,7 @@ export default function CheckoutPage() {
                     <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1.5">
                       Seleccioná el plan de cuotas:
                     </label>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <button
                         type="button"
                         onClick={() => setTarjetaCuotas(1)}
@@ -527,36 +679,30 @@ export default function CheckoutPage() {
                       >
                         <div className="text-xs font-bold">1 pago</div>
                         <div className="text-[11px] font-extrabold">{formatPrice(totalConEnvio)}</div>
-                        <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">Sin interés</div>
+                        <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">Sin recargo</div>
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={() => setTarjetaCuotas(3)}
-                        className={`p-2.5 rounded-lg border text-left transition-all ${
-                          tarjetaCuotas === 3
-                            ? "border-brand bg-brand/10 text-brand font-bold"
-                            : "border-slate-200 dark:border-[#26272e] bg-white dark:bg-[#0f1012] text-slate-700 dark:text-[#b8b9c0]"
-                        }`}
-                      >
-                        <div className="text-xs font-bold">3 cuotas</div>
-                        <div className="text-[11px] font-extrabold">{formatPrice(Math.round(totalConEnvio / 3))} / mes</div>
-                        <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">Sin interés</div>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setTarjetaCuotas(6)}
-                        className={`p-2.5 rounded-lg border text-left transition-all ${
-                          tarjetaCuotas === 6
-                            ? "border-brand bg-brand/10 text-brand font-bold"
-                            : "border-slate-200 dark:border-[#26272e] bg-white dark:bg-[#0f1012] text-slate-700 dark:text-[#b8b9c0]"
-                        }`}
-                      >
-                        <div className="text-xs font-bold">6 cuotas</div>
-                        <div className="text-[11px] font-extrabold">{formatPrice(Math.round(totalConEnvio / 6))} / mes</div>
-                        <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">Cuotas fijas</div>
-                      </button>
+                      {financiacion.habilitadas ? (
+                        <button
+                          type="button"
+                          onClick={() => setTarjetaCuotas(financiacion.cuotas)}
+                          className={`p-2.5 rounded-lg border text-left transition-all ${
+                            tarjetaCuotas === financiacion.cuotas
+                              ? "border-brand bg-brand/10 text-brand font-bold"
+                              : "border-slate-200 dark:border-[#26272e] bg-white dark:bg-[#0f1012] text-slate-700 dark:text-[#b8b9c0]"
+                          }`}
+                        >
+                          <div className="text-xs font-bold">{financiacion.cuotas} cuotas</div>
+                          <div className="text-[11px] font-extrabold">{formatPrice(financiacion.valorCuota)} / mes</div>
+                          <div className={`text-[10px] font-semibold ${financiacion.sinInteres ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
+                            {financiacion.sinInteres ? "Sin interés" : `Cuotas fijas (+${financiacion.recargoPorcentaje}%)`}
+                          </div>
+                        </button>
+                      ) : (
+                        <div className="p-2.5 rounded-lg border border-slate-200 dark:border-[#26272e] bg-slate-100/60 dark:bg-[#0f1012] text-slate-500 text-[11px] flex items-center justify-center text-center">
+                          Cuotas financiadas pausadas
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -648,7 +794,7 @@ export default function CheckoutPage() {
                     💵 Efectivo en el Local (Orden de Compra / Reserva presencial)
                   </span>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Generás tu <strong>Orden de Compra</strong> y tus repuestos quedan reservados en estantería. Te acercás a Av. Roque Sáenz Peña 1500, pagás en efectivo y listo.
+                    Generás tu <strong>Orden de Compra</strong> y tus repuestos quedan reservados en estantería. Te acercás a {config.direccion || "Av. Roque Sáenz Peña 1500"}, pagás en efectivo y listo.
                   </p>
                   <p className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold pt-0.5">
                     ⚠️ Si el cliente no se acerca al local a pagar y retirar, la orden de compra se cancela automáticamente.
@@ -667,7 +813,10 @@ export default function CheckoutPage() {
 
           <div className="max-h-60 space-y-2 overflow-y-auto pr-1 text-xs divide-y divide-slate-100 dark:divide-line/50">
             {items.map((item) => (
-              <div key={item.id} className="pt-2 flex justify-between gap-2">
+              <div
+                key={item.cartItemId || (item.esCombo ? `combo-${item.id}` : `prod-${item.id}`)}
+                className="pt-2 flex justify-between gap-2"
+              >
                 <span className="text-slate-700 dark:text-slate-300 truncate font-medium">
                   {item.cantidad}x {item.nombre}
                 </span>
@@ -720,28 +869,59 @@ export default function CheckoutPage() {
             </div>
           )}
 
+          {/* Banner de error directo sobre el botón */}
+          {checkoutError && (
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-[11px] text-red-700 dark:text-red-400 flex items-start gap-2 animate-in fade-in">
+              <AlertCircle size={15} className="text-red-600 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <span className="font-bold block text-red-800 dark:text-red-300">No se pudo procesar:</span>
+                <p className="leading-tight">{checkoutError}</p>
+              </div>
+            </div>
+          )}
+
           {/* Botón de Confirmación */}
-          <button
-            type="submit"
-            disabled={verificandoPrecios}
-            className="w-full flex items-center justify-center gap-2 rounded-xl bg-brand hover:bg-brandhover py-3 text-xs font-black text-white shadow-lg shadow-brand/20 transition-all active:scale-95 text-center disabled:opacity-60"
-          >
-            {verificandoPrecios ? (
-              <>
-                <RefreshCw size={14} className="animate-spin" />
-                <span>Verificando precios y stock...</span>
-              </>
-            ) : formData.pago === "EFECTIVO_LOCAL" ? (
-              "Generar Orden de Compra y Reservar"
-            ) : (
-              "Confirmar Pedido y Pagar"
-            )}
-          </button>
+          {isStaff ? (
+            <button
+              type="button"
+              disabled
+              className="w-full flex items-center justify-center gap-2 rounded-xl bg-slate-200 dark:bg-surface py-3.5 text-xs font-bold text-slate-500 dark:text-slate-400 cursor-not-allowed border border-slate-300 dark:border-line"
+            >
+              <Lock size={15} className="text-amber-500" />
+              <span>Compras no permitidas con cuenta de personal</span>
+            </button>
+          ) : !user ? (
+            <button
+              type="button"
+              onClick={openLogin}
+              className="w-full flex items-center justify-center gap-2 rounded-xl bg-brand hover:bg-brandhover py-3.5 text-xs font-black text-white shadow-lg shadow-brand/20 transition-all active:scale-95 cursor-pointer"
+            >
+              <UserCheck size={16} />
+              <span>Iniciar Sesión como Cliente para Confirmar</span>
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={verificandoPrecios || isSubmitting}
+              className="w-full flex items-center justify-center gap-2 rounded-xl bg-brand hover:bg-brandhover py-3 text-xs font-black text-white shadow-lg shadow-brand/20 transition-all active:scale-95 text-center disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+            >
+              {verificandoPrecios || isSubmitting ? (
+                <>
+                  <RefreshCw size={14} className="animate-spin" />
+                  <span>{isSubmitting ? "Procesando pedido..." : "Verificando precios y stock..."}</span>
+                </>
+              ) : formData.pago === "EFECTIVO_LOCAL" ? (
+                "Generar Orden de Compra y Reservar"
+              ) : (
+                "Confirmar Pedido y Pagar"
+              )}
+            </button>
+          )}
 
           <p className="text-[11px] text-center text-slate-500">
             {formData.pago === "EFECTIVO_LOCAL"
-              ? "📋 Se generará tu ticket con código para pagar al retirar en Av. Roque Sáenz Peña 1500."
-              : "🔒 Transacción protegida por Chopper Repuestos Posadas."}
+              ? `📋 Se generará tu ticket con código para pagar al retirar en ${config.direccion || "Av. Roque Sáenz Peña 1500"}.`
+              : `🔒 Transacción protegida por ${config.nombre_tienda || "Chopper Repuestos"}.`}
           </p>
         </aside>
       </form>

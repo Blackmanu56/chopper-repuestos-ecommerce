@@ -20,7 +20,15 @@ import Image from "next/image";
 type AuthMode = "LOGIN" | "REGISTER" | "RECOVERY" | "STAFF";
 
 export default function LoginModal() {
-  const { isLoginOpen, closeLogin, loginClient, loginStaff } = useAuth();
+  const {
+    isLoginOpen,
+    closeLogin,
+    loginClient,
+    registerClient,
+    loginStaff,
+    sessionExpiredNotice,
+    clearSessionExpiredNotice,
+  } = useAuth();
   const router = useRouter();
 
   const [mode, setMode] = useState<AuthMode>("LOGIN");
@@ -55,17 +63,21 @@ export default function LoginModal() {
 
   if (!isLoginOpen) return null;
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     if (!username.trim()) {
       setError("Ingresá tu usuario o correo");
       return;
     }
-    const res = loginClient(username, password);
-    if (!res.success) {
-      setError(res.error || "No se pudo iniciar sesión");
-      return;
+    setLoading(true);
+    try {
+      const res = await loginClient(username, password);
+      if (!res.success) {
+        setError(res.error || "No se pudo iniciar sesión");
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -88,17 +100,32 @@ export default function LoginModal() {
     }
   };
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
     if (!nombreCompleto || !email || !password) {
       setError("Completá todos los campos requeridos");
       return;
     }
-    loginClient(nombreCompleto.split(" ")[0].toLowerCase(), password);
-    setSuccessMsg("¡Cuenta creada con éxito! Ya podés hacer tus pedidos.");
-    setTimeout(() => {
-      closeLogin();
-    }, 1200);
+    setLoading(true);
+    try {
+      const res = await registerClient({
+        nombreCompleto,
+        email,
+        telefono,
+        password,
+      });
+      if (!res.success) {
+        setError(res.error || "No se pudo crear la cuenta.");
+        return;
+      }
+      setSuccessMsg("¡Cuenta creada con éxito! Ya podés hacer tus pedidos.");
+      setTimeout(() => {
+        closeLogin();
+      }, 1200);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleRecovery = (e: React.FormEvent) => {
@@ -126,7 +153,7 @@ export default function LoginModal() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="relative w-full max-w-md rounded-2xl border border-line bg-card p-6 shadow-2xl space-y-5">
         {/* Botón cerrar */}
         <button
@@ -196,6 +223,16 @@ export default function LoginModal() {
             Recuperar
           </button>
         </div>
+
+        {sessionExpiredNotice && (
+          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-400 flex items-start gap-2.5">
+            <Lock size={16} className="shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold">Sesión finalizada</p>
+              <p className="text-[11px] text-amber-300/90 mt-0.5">{sessionExpiredNotice}</p>
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-2.5 text-xs text-red-400">

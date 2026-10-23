@@ -3,6 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { useConfig } from "@/context/ConfigContext";
 import {
   MapPin,
   Clock,
@@ -14,6 +15,10 @@ import {
 } from "lucide-react";
 
 export default function Footer() {
+  const { config } = useConfig();
+  const cleanWhatsappNumber = (config.whatsapp || "5493765243554").replace(/\D/g, "");
+  const mapsHref = config.mapa_url || `https://maps.google.com/?q=${encodeURIComponent(config.direccion || "Av. Roque Sáenz Peña 1500, Posadas, Misiones")}`;
+
   return (
     <footer className="mt-16 border-t border-slate-200 dark:border-[#1e2028] bg-white dark:bg-[#0c0d10] text-slate-700 dark:text-slate-300 transition-colors shadow-sm">
       {/* Contenedor conciso y resumido */}
@@ -24,26 +29,32 @@ export default function Footer() {
             <Link
               href="/"
               className="inline-block group rounded-2xl overflow-hidden border border-slate-300 dark:border-line/80 shrink-0 shadow-lg transition-transform hover:scale-105"
-              title="Chopper Repuestos"
+              title={config.nombre_tienda || "Chopper Repuestos"}
             >
               <Image
-                src="/logo-nav.png"
-                alt="Chopper Repuestos"
+                src={config.logo_url || "/logo-nav.png"}
+                alt={config.nombre_tienda || "Chopper Repuestos"}
                 width={200}
                 height={95}
                 priority
-                className="h-16 sm:h-20 w-auto object-cover block rounded-2xl"
+                unoptimized
+                className="h-16 sm:h-20 w-auto object-contain block rounded-2xl p-1"
               />
             </Link>
 
             <div className="text-xs space-y-1">
               <p className="font-black text-slate-900 dark:text-white text-base tracking-tight">
-                Chopper Repuestos
+                {config.nombre_tienda || "Chopper Repuestos"}
               </p>
-              <p className="text-slate-600 dark:text-slate-400 font-medium flex items-center gap-1.5">
+              <a
+                href={mapsHref}
+                target="_blank"
+                rel="noreferrer"
+                className="text-slate-600 dark:text-slate-400 font-medium flex items-center gap-1.5 hover:text-brand transition-colors"
+              >
                 <MapPin size={13} className="text-brand shrink-0" />
-                <span>Av. Roque Sáenz Peña 1500 · Posadas, Misiones</span>
-              </p>
+                <span>{config.direccion || "Av. Roque Sáenz Peña 1500 · Posadas, Misiones"}</span>
+              </a>
               <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
                 <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/40 font-semibold">
                   <Bike size={12} /> Motomandado y Moto Uber
@@ -67,7 +78,7 @@ export default function Footer() {
               🔥 Ofertas
             </Link>
             <Link
-              href="/#combos"
+              href="/combos"
               className="text-slate-700 dark:text-slate-300 hover:text-brand transition-colors"
             >
               📦 Combos
@@ -90,23 +101,23 @@ export default function Footer() {
           <div className="flex flex-col sm:items-end justify-center gap-1.5 shrink-0 text-left sm:text-right text-xs">
             <p className="flex items-center sm:justify-end gap-1.5 text-slate-600 dark:text-slate-300 font-medium">
               <Clock size={13} className="text-brand shrink-0" />
-              <span>Lun a Sáb 8:00-12:30 / 16:30-20:30</span>
+              <span>{config.horarios || "Lun a Sáb 8:00-12:30 / 16:30-20:30"}</span>
             </p>
             <a
-              href="https://wa.me/5493765243554"
+              href={`https://wa.me/${cleanWhatsappNumber}`}
               target="_blank"
               rel="noreferrer"
               className="flex items-center sm:justify-end gap-1.5 text-sm sm:text-base font-black text-slate-900 dark:text-white hover:text-emerald-500 dark:hover:text-emerald-400 transition-colors tracking-wide"
             >
               <Phone size={14} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
-              <span>376 524-3554 (WhatsApp)</span>
+              <span>{config.telefono || "376 524-3554"} (WhatsApp)</span>
             </a>
             <a
-              href="mailto:contacto@chopperrepuestos.com"
+              href={`mailto:${config.email || "contacto@chopper-repuestos.com"}`}
               className="flex items-center sm:justify-end gap-1.5 text-xs text-slate-600 dark:text-slate-400 hover:text-brand transition-colors font-medium"
             >
               <Mail size={13} className="text-sky-500 shrink-0" />
-              <span>contacto@chopperrepuestos.com</span>
+              <span>{config.email || "contacto@chopper-repuestos.com"}</span>
             </a>
           </div>
         </div>
@@ -114,7 +125,7 @@ export default function Footer() {
         {/* Barra inferior compacta */}
         <div className="pt-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
           <div>
-            © 2026 Chopper Repuestos · Todos los derechos reservados.
+            © {new Date().getFullYear()} {config.nombre_tienda || "Chopper Repuestos"} · Todos los derechos reservados.
           </div>
           <div>
             100% Repuestos Nuevos con Garantía Oficial de Fábrica

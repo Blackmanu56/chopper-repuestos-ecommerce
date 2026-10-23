@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useConfig } from "@/context/ConfigContext";
 import {
   MapPin,
   Clock,
@@ -20,6 +21,7 @@ import {
 } from "lucide-react";
 
 export default function NosotrosPage() {
+  const { config } = useConfig();
   const [formState, setFormState] = useState({
     nombre: "",
     telefono: "",
@@ -120,7 +122,7 @@ Aguardo su respuesta con cotización y disponibilidad en el local de Posadas. Mu
             </div>
 
             <h1 className="text-3xl font-black tracking-tight text-white md:text-4xl">
-              Sobre Chopper Repuestos
+              Sobre {config.nombre_tienda || "Chopper Repuestos"}
             </h1>
 
             <p className="text-slate-300 text-sm sm:text-base leading-relaxed">
@@ -184,7 +186,7 @@ Aguardo su respuesta con cotización y disponibilidad en el local de Posadas. Mu
           </div>
 
           <a
-            href="https://www.google.com/maps/place/Av.+Roque+S%C3%A1enz+Pe%C3%B1a+1500,+N3301BJF+Posadas,+Misiones/@-27.3649105,-55.8869655,17z"
+            href={config.mapa_url || `https://maps.google.com/?q=${encodeURIComponent(config.direccion || "Av. Roque Sáenz Peña 1500, Posadas, Misiones")}`}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1.5 text-xs font-bold text-brand hover:underline"
@@ -205,7 +207,7 @@ Aguardo su respuesta con cotización y disponibilidad en el local de Posadas. Mu
                 <div>
                   <h4 className="text-sm font-bold text-white">Local Comercial</h4>
                   <p className="text-sm text-brand mt-0.5 font-black">
-                    Av. Roque Sáenz Peña 1500
+                    {config.direccion || "Av. Roque Sáenz Peña 1500"}
                   </p>
                   <p className="text-xs text-slate-400">
                     Posadas, Misiones, Argentina
@@ -224,7 +226,7 @@ Aguardo su respuesta con cotización y disponibilidad en el local de Posadas. Mu
                   <h4 className="text-sm font-bold text-white">Horarios de Atención</h4>
                   <div className="text-xs text-slate-300 mt-0.5 space-y-0.5">
                     <p>
-                      <strong>Lunes a Sábados:</strong> 8:00 a 12:30 y 16:30 a 20:30 hs
+                      <strong>Atención:</strong> {config.horarios || "Lun a Sáb 8:00-12:30 / 16:30-20:30"}
                     </p>
                     <p className="text-slate-500">
                       Domingos y feriados: Cerrado
@@ -252,7 +254,7 @@ Aguardo su respuesta con cotización y disponibilidad en el local de Posadas. Mu
                 <span>Teléfono / WhatsApp</span>
               </div>
               <p className="text-sm font-black text-white font-mono">
-                376 524-3554
+                {config.telefono || "376 524-3554"}
               </p>
               <p className="text-[11px] text-slate-400 mt-0.5">
                 Atención rápida para consultas de compatibilidad y pedidos.
@@ -260,12 +262,12 @@ Aguardo su respuesta con cotización y disponibilidad en el local de Posadas. Mu
             </div>
           </div>
 
-          {/* MAPA REAL EMBEBIDO INTERACTIVO MARCANDO AV. ROQUE SAENZ PEÑA 1500 */}
+          {/* MAPA REAL EMBEBIDO INTERACTIVO MARCANDO LA DIRECCIÓN */}
           <div className="md:col-span-7 rounded-2xl border border-line bg-card overflow-hidden flex flex-col shadow-xl">
             <div className="p-3.5 border-b border-line flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs bg-surface/60">
               <span className="font-black text-white flex items-center gap-1.5 text-sm">
                 <MapPin size={16} className="text-brand" />
-                Av. Roque Sáenz Peña 1500 (Posadas, Misiones)
+                {config.direccion || "Av. Roque Sáenz Peña 1500 (Posadas, Misiones)"}
               </span>
               <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
                 <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -273,15 +275,15 @@ Aguardo su respuesta con cotización y disponibilidad en el local de Posadas. Mu
               </span>
             </div>
 
-            {/* Iframe interactivo de OpenStreetMap con marcador en Av. Roque Sáenz Peña 1500 */}
+            {/* Iframe interactivo dinámico con marcador */}
             <div className="relative w-full h-[320px] bg-[#1a1b22]">
               <iframe
-                title="Mapa de ubicación en Av. Roque Sáenz Peña 1500, Posadas"
+                title="Mapa de ubicación de la tienda"
                 width="100%"
                 height="100%"
                 style={{ border: 0 }}
                 loading="lazy"
-                src="https://www.openstreetmap.org/export/embed.html?bbox=-55.8910%2C-27.3675%2C-55.8830%2C-27.3625&layer=mapnik&marker=-27.36491%2C-55.88697"
+                src={`https://maps.google.com/maps?q=${encodeURIComponent(config.direccion || "Av. Roque Sáenz Peña 1500, Posadas, Misiones")}&t=&z=16&ie=UTF8&iwloc=&output=embed`}
               />
             </div>
 

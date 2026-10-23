@@ -2,6 +2,9 @@
 
 import { prisma } from "@/lib/prisma";
 import { COMBOS_DATA, COMBOS_CATEGORY_ID, COMBOS_CATEGORY_NAME } from "@/data/combos";
+import { getEtiquetasOfertaAction } from "@/actions/configuracion";
+import { formatBadgeWithEmoji } from "@/lib/etiquetas";
+import { ProductSpec, parseProductMetadata } from "@/lib/productMetadata";
 
 export interface ProductItem {
   id: number;
@@ -16,11 +19,15 @@ export interface ProductItem {
   precioOferta?: number | null;
   descuentoPorcentaje?: number;
   badgePromo?: string | null;
+  descripcion?: string | null;
+  especificaciones?: ProductSpec[];
+  motosCompatibles?: string[];
   destacado?: boolean;
   recomendado?: boolean;
   publicadoOnline?: boolean;
   codigo?: string | null;
   imagen?: string | null;
+  esCombo?: boolean;
 }
 
 export interface CategoryItem {
@@ -119,15 +126,23 @@ export async function getProducts(params?: {
       ];
     }
 
-    const products = await prisma.producto.findMany({
-      where,
-      include: {
-        categoria: { select: { id: true, nombre: true } },
-        marcaRelacionada: { select: { id: true, nombre: true } },
-        ecommerce: true,
-      },
-      orderBy: { nombre: "asc" },
-    });
+    const [products, etiquetas] = await Promise.all([
+      prisma.producto.findMany({
+        where,
+        include: {
+          categoria: { select: { id: true, nombre: true } },
+          marcaRelacionada: { select: { id: true, nombre: true } },
+          ecommerce: true,
+        },
+        orderBy: { nombre: "asc" },
+      }),
+      getEtiquetasOfertaAction(),
+    ]);
+
+    const etiquetasMap = new Map<string, (typeof etiquetas)[0]>();
+    for (const e of etiquetas) {
+      etiquetasMap.set(e.nombre.toLowerCase().trim(), e);
+    }
 
     return products
       .filter((p) => {
@@ -147,6 +162,19 @@ export async function getProducts(params?: {
           descuentoPorcentaje = Math.max(0, Math.round(((precioRegular - precio) / precioRegular) * 100));
         }
 
+        const rawBadge = ecom?.badgePromo ? ecom.badgePromo.trim() : null;
+        let badgePromo: string | null = null;
+        if (rawBadge) {
+          const matched = etiquetasMap.get(rawBadge.toLowerCase());
+          if (matched) {
+            badgePromo = matched.activa ? formatBadgeWithEmoji(rawBadge, matched.emoji) : null;
+          } else {
+            badgePromo = rawBadge;
+          }
+        }
+
+        const meta = parseProductMetadata(ecom?.descripcion);
+
         return {
           id: p.id,
           nombre: p.nombre,
@@ -158,7 +186,10 @@ export async function getProducts(params?: {
           enOferta,
           precioOferta,
           descuentoPorcentaje,
-          badgePromo: ecom?.badgePromo || null,
+          badgePromo,
+          descripcion: meta.texto || null,
+          especificaciones: meta.especificaciones,
+          motosCompatibles: meta.motosCompatibles,
           destacado: Boolean(ecom?.destacado),
           recomendado: Boolean(ecom?.recomendado),
           publicadoOnline: ecom ? ecom.publicadoOnline : true,
@@ -174,73 +205,97 @@ export async function getProducts(params?: {
 }
 
 export async function getProductById(id: number): Promise<ProductItem | null> {
-  // Soporte directo para combos armados de Chopper
-  const combo = COMBOS_DATA.find((c) => c.id === id);
-  if (combo) {
-    return {
-      id: combo.id,
-      nombre: combo.nombre,
-      marca: combo.marca,
-      categoriaId: COMBOS_CATEGORY_ID,
-      categoriaNombre: COMBOS_CATEGORY_NAME,
-      precio: combo.precio,
-      precioRegular: combo.precio,
-      enOferta: true,
-      precioOferta: combo.precio,
-      descuentoPorcentaje: 15,
-      badgePromo: "Combo Chopper",
-      destacado: true,
-      recomendado: true,
-      stock: combo.stock,
-      codigo: combo.codigo,
-      imagen: combo.imagen,
-    };
-  }
-
   try {
-    const p = await prisma.producto.findUnique({
-      where: { id },
-      include: {
-        categoria: { select: { id: true, nombre: true } },
-        marcaRelacionada: { select: { id: true, nombre: true } },
-        ecommerce: true,
-      },
-    });
+    const [p, etiquetas] = await Promise.all([
+      prisma.producto.findUnique({
+        where: { id },
+        include: {
+          categoria: { select: { id: true, nombre: true } },
+          marcaRelacionada: { select: { id: true, nombre: true } },
+          ecommerce: true,
+        },
+      }),
+      getEtiquetasOfertaAction(),
+    ]);
 
-    if (!p || !p.activo) return null;
-    // Si fue despublicado por el administrador, no se puede ver el detalle
-    if (p.ecommerce && !p.ecommerce.publicadoOnline) return null;
+    if (p && p.activo) {
+      // Si fue despublicado por el administrador, no se puede ver el detalle
+      if (p.ecommerce && !p.ecommerce.publicadoOnline) return null;
 
-    const ecom = p.ecommerce;
-    const enOferta = Boolean(ecom?.enOferta && ecom.precioOferta && ecom.precioOferta > 0);
-    const precioOferta = enOferta ? Number(ecom!.precioOferta) : null;
-    const precio = enOferta ? precioOferta! : p.precioVenta;
-    const precioRegular = p.precioVenta;
+      const ecom = p.ecommerce;
+      const enOferta = Boolean(ecom?.enOferta && ecom.precioOferta && ecom.precioOferta > 0);
+      const precioOferta = enOferta ? Number(ecom!.precioOferta) : null;
+      const precio = enOferta ? precioOferta! : p.precioVenta;
+      const precioRegular = p.precioVenta;
 
-    let descuentoPorcentaje = 0;
-    if (enOferta && precioRegular > 0) {
-      descuentoPorcentaje = Math.max(0, Math.round(((precioRegular - precio) / precioRegular) * 100));
+      let descuentoPorcentaje = 0;
+      if (enOferta && precioRegular > 0) {
+        descuentoPorcentaje = Math.max(0, Math.round(((precioRegular - precio) / precioRegular) * 100));
+      }
+
+      const rawBadge = ecom?.badgePromo ? ecom.badgePromo.trim() : null;
+      let badgePromo: string | null = null;
+      if (rawBadge) {
+        const matched = etiquetas.find((e) => e.nombre.toLowerCase().trim() === rawBadge.toLowerCase());
+        if (matched) {
+          badgePromo = matched.activa ? formatBadgeWithEmoji(rawBadge, matched.emoji) : null;
+        } else {
+          badgePromo = rawBadge;
+        }
+      }
+
+      const meta = parseProductMetadata(ecom?.descripcion);
+
+      return {
+        id: p.id,
+        nombre: p.nombre,
+        marca: p.marca || p.marcaRelacionada?.nombre || "Genérico",
+        categoriaId: p.categoriaId,
+        categoriaNombre: p.categoria.nombre,
+        precio,
+        precioRegular,
+        enOferta,
+        precioOferta,
+        descuentoPorcentaje,
+        badgePromo,
+        descripcion: meta.texto || null,
+        especificaciones: meta.especificaciones,
+        motosCompatibles: meta.motosCompatibles,
+        destacado: Boolean(ecom?.destacado),
+        recomendado: Boolean(ecom?.recomendado),
+        publicadoOnline: ecom ? ecom.publicadoOnline : true,
+        stock: p.cantidad,
+        codigo: p.codigo,
+        imagen: p.imagen,
+        esCombo: false,
+      };
     }
 
-    return {
-      id: p.id,
-      nombre: p.nombre,
-      marca: p.marca || p.marcaRelacionada?.nombre || "Genérico",
-      categoriaId: p.categoriaId,
-      categoriaNombre: p.categoria.nombre,
-      precio,
-      precioRegular,
-      enOferta,
-      precioOferta,
-      descuentoPorcentaje,
-      badgePromo: ecom?.badgePromo || null,
-      destacado: Boolean(ecom?.destacado),
-      recomendado: Boolean(ecom?.recomendado),
-      publicadoOnline: ecom ? ecom.publicadoOnline : true,
-      stock: p.cantidad,
-      codigo: p.codigo,
-      imagen: p.imagen,
-    };
+    // Fallback a combos estáticos de Chopper únicamente si no existe un producto con dicho ID
+    const combo = COMBOS_DATA.find((c) => c.id === id);
+    if (combo) {
+      return {
+        id: combo.id,
+        nombre: combo.nombre,
+        marca: combo.marca,
+        categoriaId: COMBOS_CATEGORY_ID,
+        categoriaNombre: COMBOS_CATEGORY_NAME,
+        precio: combo.precio,
+        precioRegular: combo.precio,
+        enOferta: true,
+        precioOferta: combo.precio,
+        descuentoPorcentaje: 15,
+        badgePromo: "Combo Chopper",
+        destacado: true,
+        recomendado: true,
+        stock: combo.stock,
+        codigo: combo.codigo,
+        imagen: combo.imagen,
+        esCombo: true,
+      };
+    }
+
+    return null;
   } catch (error) {
     console.error("Error fetching product by id:", error);
     return null;

@@ -259,26 +259,98 @@ html.light .panel-root {
 
 /* Sidebar en modo claro */
 html.light .panel-root aside[class*="bg-[#16171c]"],
-html.light aside[class*="bg-[#16171c]"] {
+html.light aside[class*="bg-[#16171c]"],
+html.light .panel-root aside {
   background-color: #ffffff !important;
   border-color: #e2e8f0 !important;
   color: #0f172a !important;
 }
 
-html.light aside nav button:not([class*="bg-[#1a1b20]"]) {
-  color: #475569 !important;
+/* Tarjeta del Administrador / Usuario en sidebar */
+html.light .panel-root aside div[class*="bg-[#121316]"],
+html.light aside div[class*="bg-[#121316]"] {
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+  color: #0f172a !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04) !important;
 }
 
-html.light aside nav button:not([class*="bg-[#1a1b20]"]):hover {
-  background-color: #f1f5f9 !important;
+html.light .panel-root aside div[class*="bg-[#121316]"] p,
+html.light aside div[class*="bg-[#121316]"] p {
   color: #0f172a !important;
 }
 
-html.light aside nav button[class*="bg-[#1a1b20]"] {
-  background-color: #fee2e2 !important;
+html.light .panel-root aside [class*="bg-red-500/10"],
+html.light aside [class*="bg-red-500/10"] {
+  background-color: #fef2f2 !important;
   color: #dc2626 !important;
-  border-left: 3px solid #dc2626 !important;
+  border-color: #fecaca !important;
+}
+
+/* Switcher de Vista Operativa en sidebar */
+html.light .panel-root aside div[class*="bg-[#0f1012]"],
+html.light aside div[class*="bg-[#0f1012]"],
+html.light .panel-root aside div[class*="bg-slate-200/70"] {
+  background-color: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+}
+
+html.light .panel-root aside div[class*="bg-[#0f1012]"] button:not([class*="bg-red-600"]):not([class*="bg-emerald-600"]):not([class*="bg-sky-600"]),
+html.light aside div[class*="bg-[#0f1012]"] button:not([class*="bg-red-600"]):not([class*="bg-emerald-600"]):not([class*="bg-sky-600"]) {
+  color: #475569 !important;
   font-weight: 700 !important;
+}
+
+html.light .panel-root aside div[class*="bg-[#0f1012]"] button:not([class*="bg-red-600"]):not([class*="bg-emerald-600"]):not([class*="bg-sky-600"]):hover,
+html.light aside div[class*="bg-[#0f1012]"] button:not([class*="bg-red-600"]):not([class*="bg-emerald-600"]):not([class*="bg-sky-600"]):hover {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) !important;
+}
+
+/* Sidebar Opciones Seleccionadas en modo claro */
+html.light aside nav button[class*="bg-[#1f2026]"],
+html.light .panel-root aside nav button[class*="bg-[#1f2026]"],
+html.light aside nav button[class*="bg-red-50"],
+html.light .panel-root aside nav button[class*="bg-red-50"] {
+  background-color: #fef2f2 !important;
+  color: #b91c1c !important;
+  border-left: 4px solid #dc2626 !important;
+  font-weight: 700 !important;
+}
+
+html.light aside nav button[class*="bg-[#1f2026]"] svg,
+html.light .panel-root aside nav button[class*="bg-[#1f2026]"] svg,
+html.light aside nav button[class*="bg-red-50"] svg,
+html.light .panel-root aside nav button[class*="bg-red-50"] svg {
+  color: #dc2626 !important;
+  stroke: #dc2626 !important;
+}
+
+html.light aside nav button[class*="bg-[#1f2026]"] span,
+html.light .panel-root aside nav button[class*="bg-[#1f2026]"] span,
+html.light aside nav button[class*="bg-red-50"] span,
+html.light .panel-root aside nav button[class*="bg-red-50"] span {
+  color: #b91c1c !important;
+}
+
+/* Sidebar Opciones Inactivas en modo claro */
+html.light aside nav button:not([class*="bg-[#1f2026]"]):not([class*="bg-red-50"]),
+html.light .panel-root aside nav button:not([class*="bg-[#1f2026]"]):not([class*="bg-red-50"]) {
+  color: #475569 !important;
+  background-color: transparent !important;
+  border-left: 4px solid transparent !important;
+}
+
+html.light aside nav button:not([class*="bg-[#1f2026]"]):not([class*="bg-red-50"]):hover,
+html.light .panel-root aside nav button:not([class*="bg-[#1f2026]"]):not([class*="bg-red-50"]):hover {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+html.light aside nav button:not([class*="bg-[#1f2026]"]):not([class*="bg-red-50"]):hover svg,
+html.light .panel-root aside nav button:not([class*="bg-[#1f2026]"]):not([class*="bg-red-50"]):hover svg {
+  color: #0f172a !important;
 }
 
 html.light .panel-root aside [class*="bg-[#141519]"] {
@@ -753,9 +825,40 @@ html.light .panel-root div[class*="bg-[#0f1012]"] button[class*="bg-[#1a1b20]"] 
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08) !important;
 }
 
+/* Badges con fondo oscuro en modo claro */
 html.light .panel-root span[class*="bg-[#1f2026]"] {
   background-color: #e2e8f0 !important;
   color: #475569 !important;
+}
+
+html.light .panel-root span[class*="bg-[#1a1b20]"],
+html.light .fixed.inset-0 span[class*="bg-[#1a1b20]"] {
+  background-color: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+html.light .panel-root span[class*="bg-[#26272e]"],
+html.light .fixed.inset-0 span[class*="bg-[#26272e]"] {
+  background-color: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+  color: #334155 !important;
+}
+
+/* Tarjetas de items de pedidos en kanban y columnas */
+html.light .panel-root div[class*="bg-[#101114]"] {
+  background-color: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+html.light .panel-root div[class*="bg-[#101114]"] [class*="text-[#b8b9c0]"] {
+  color: #1e293b !important;
+}
+
+html.light .panel-root div[class*="bg-[#101114]"] [class*="text-[#6b6c75]"],
+html.light .panel-root div[class*="bg-[#101114]"] [class*="text-[#8e8f96]"] {
+  color: #64748b !important;
 }
 
 /* Tablas en el panel */

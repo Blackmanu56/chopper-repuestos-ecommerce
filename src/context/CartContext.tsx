@@ -2,9 +2,18 @@
 
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { ProductItem } from "@/actions/ecommerce";
+import { useAuth } from "@/context/AuthContext";
+
+export interface CartItemComponente {
+  productoId: number;
+  cantidad: number;
+  nombre?: string;
+  stockProducto?: number;
+}
 
 export interface CartItem {
   id: number;
+  cartItemId?: string;
   nombre: string;
   marca: string;
   categoriaNombre: string;
@@ -13,6 +22,12 @@ export interface CartItem {
   stock: number;
   imagen?: string | null;
   esCombo?: boolean;
+  componentes?: CartItemComponente[];
+}
+
+export function getCartItemKey(item: { id: number; esCombo?: boolean; cartItemId?: string }): string {
+  if (item.cartItemId) return item.cartItemId;
+  return item.esCombo ? `combo-${item.id}` : `prod-${item.id}`;
 }
 
 export interface PedidoItem {
@@ -21,6 +36,7 @@ export interface PedidoItem {
   marca: string;
   precio: number;
   cantidad: number;
+  esCombo?: boolean;
 }
 
 export interface Pedido {
@@ -34,17 +50,21 @@ export interface Pedido {
   modalidadEntrega: "RETIRO_LOCAL" | "MOTOMANDADO";
   costoEnvio?: number;
   codigoTicket?: string;
-  estado: "PENDIENTE" | "CONFIRMADO" | "PREPARANDO" | "LISTO_PARA_RETIRAR" | "RETIRADO" | "CANCELADO";
+  estado: "PENDIENTE" | "CONFIRMADO" | "PREPARANDO" | "LISTO_ENTREGA" | "LISTO_PARA_RETIRAR" | "ENTREGADO" | "RETIRADO" | "CANCELADO";
+  estadoPago?: string;
+  fechaPago?: string | Date | null;
   items: PedidoItem[];
   total: number;
 }
 
 interface CartContextType {
   items: CartItem[];
-  addToCart: (product: ProductItem, cantidad?: number) => void;
-  updateQuantity: (id: number, delta: number) => void;
-  removeFromCart: (id: number) => void;
+  isStaff: boolean;
+  addToCart: (product: ProductItem & { componentes?: CartItemComponente[] }, cantidad?: number) => void;
+  updateQuantity: (idOrKey: number | string, delta: number, esCombo?: boolean) => void;
+  removeFromCart: (idOrKey: number | string, esCombo?: boolean) => void;
   clearCart: () => void;
+  sincronizarCarrito: (validated: any[]) => void;
   totalItems: number;
   subtotal: number;
   toastMessage: string | null;
@@ -62,142 +82,130 @@ interface CartContextType {
   }) => number | null;
   cambiarEstadoPedido: (numero: number, nuevoEstado: Pedido["estado"]) => void;
   cancelarPedido: (numero: number) => void;
+  getItemCartQuantity: (id: number, esCombo?: boolean) => number;
+  getRemainingStock: (product: {
+    id: number;
+    stock: number;
+    esCombo?: boolean;
+    componentes?: CartItemComponente[];
+  }) => number;
+  isItemAtLimit: (product: {
+    id: number;
+    stock: number;
+    esCombo?: boolean;
+    componentes?: CartItemComponente[];
+  }) => boolean;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
+  const { user, isStaff } = useAuth();
   const [items, setItems] = useState<CartItem[]>([]);
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Load from localStorage on client mount
+  const getStorageKey = (currentUser: typeof user) => {
+    if (!currentUser) return "choper_cart_guest";
+    if (currentUser.rol === "CLIENTE") return `choper_cart_client_${currentUser.id}`;
+    return `choper_cart_staff_${currentUser.id}`;
+  };
+
+  // Carga y aislamiento de carritos por tipo de sesión
   useEffect(() => {
     try {
-      const savedCart = localStorage.getItem("choper_cart");
-      if (savedCart) setItems(JSON.parse(savedCart));
+      if (isStaff) {
+        // Cuentas de personal: no tienen permitido operar ni comprar en la tienda pública
+        setItems([]);
+        setIsLoaded(true);
+        return;
+      }
+
+      let rawSaved: string | null = null;
+      if (user && user.rol === "CLIENTE") {
+        rawSaved = localStorage.getItem(`choper_cart_client_${user.id}`);
+        // Si el cliente no tiene carrito guardado aún, migrar el carrito del visitante (guest)
+        if (!rawSaved) {
+          const guestSaved = localStorage.getItem("choper_cart_guest") || localStorage.getItem("choper_cart");
+          if (guestSaved) {
+            rawSaved = guestSaved;
+            localStorage.setItem(`choper_cart_client_${user.id}`, guestSaved);
+            localStorage.removeItem("choper_cart_guest");
+          }
+        }
+      } else {
+        // Visitante
+        rawSaved = localStorage.getItem("choper_cart_guest") || localStorage.getItem("choper_cart");
+      }
+
+      if (rawSaved) {
+        const parsed = JSON.parse(rawSaved);
+        if (Array.isArray(parsed)) {
+          const sanitized: CartItem[] = [];
+          for (const raw of parsed) {
+            if (!raw || typeof raw.id !== "number" || raw.id <= 0) continue;
+
+            const esCombo = Boolean(
+              raw.esCombo === true ||
+              (typeof raw.cartItemId === "string" && raw.cartItemId.startsWith("combo-")) ||
+              raw.categoriaNombre === "Combos Armados" ||
+              raw.categoriaId === 9999 ||
+              raw.marca === "Combo Chopper"
+            );
+
+            const cartItemId = raw.cartItemId || (esCombo ? `combo-${raw.id}` : `prod-${raw.id}`);
+
+            const existingIndex = sanitized.findIndex((s) => s.cartItemId === cartItemId);
+            if (existingIndex >= 0) {
+              sanitized[existingIndex].cantidad = Math.min(
+                sanitized[existingIndex].cantidad + (Number(raw.cantidad) || 1),
+                sanitized[existingIndex].stock || 99
+              );
+            } else {
+              sanitized.push({
+                ...raw,
+                id: Number(raw.id),
+                cartItemId,
+                esCombo,
+                cantidad: Math.max(1, Number(raw.cantidad) || 1),
+                precio: Number(raw.precio) || 0,
+                stock: Number(raw.stock) || 0,
+              });
+            }
+          }
+          setItems(sanitized);
+        }
+      } else {
+        setItems([]);
+      }
 
       const savedPedidos = localStorage.getItem("choper_pedidos");
       if (savedPedidos) {
         setPedidos(JSON.parse(savedPedidos));
       } else {
-        // Sample orders matching Chopper Posadas business rules
-        const defaultPedidos: Pedido[] = [
-          {
-            numero: 1043,
-            fecha: "26/09/2026 17:30",
-            nombre: "Cliente Chopper",
-            dni: "34.567.890",
-            tel: "376 524-3554",
-            email: "cliente@gmail.com",
-            pago: "EFECTIVO_LOCAL",
-            modalidadEntrega: "RETIRO_LOCAL",
-            codigoTicket: "OC-1043",
-            estado: "PREPARANDO",
-            items: [
-              {
-                id: 1,
-                nombre: "Aceite Motul 5100 15W-50 4T 1L",
-                marca: "MOTUL",
-                precio: 16800,
-                cantidad: 2,
-              },
-              {
-                id: 2,
-                nombre: "Cadena DID 520 Reforzada Dorada 118L",
-                marca: "DID",
-                precio: 48500,
-                cantidad: 1,
-              },
-              {
-                id: 3,
-                nombre: "Pastillas de Freno Brenta Cerámica Delanteras",
-                marca: "BREMBO",
-                precio: 18900,
-                cantidad: 1,
-              },
-            ],
-            total: 101000,
-          },
-          {
-            numero: 1028,
-            fecha: "26/09/2026 11:15",
-            nombre: "Carlos Motero",
-            dni: "34.567.890",
-            tel: "376 524-3554",
-            email: "cliente@gmail.com",
-            pago: "TRANSFERENCIA",
-            modalidadEntrega: "MOTOMANDADO",
-            costoEnvio: 2500,
-            estado: "CONFIRMADO",
-            items: [
-              {
-                id: 4,
-                nombre: "Cubierta Delantera Pirelli Diablo Rosso IV 110/70-17",
-                marca: "PIRELLI",
-                precio: 98000,
-                cantidad: 1,
-              },
-              {
-                id: 5,
-                nombre: "Bujía NGK CR9E Japón Iridium",
-                marca: "NGK",
-                precio: 14500,
-                cantidad: 2,
-              },
-            ],
-            total: 127000,
-          },
-          {
-            numero: 1001,
-            fecha: "20/09/2026 14:22",
-            nombre: "Juan García",
-            dni: "31.254.770",
-            tel: "376 524-3554",
-            email: "juan.garcia@gmail.com",
-            pago: "TRANSFERENCIA",
-            modalidadEntrega: "RETIRO_LOCAL",
-            codigoTicket: "TK-1001",
-            estado: "RETIRADO",
-            items: [
-              {
-                id: 1,
-                nombre: "Kit de transmisión para Honda CG 150",
-                marca: "Honda",
-                precio: 15000,
-                cantidad: 1,
-              },
-              {
-                id: 2,
-                nombre: "Pastillas de freno delantero Rouser NS200",
-                marca: "Bajaj",
-                precio: 7500,
-                cantidad: 2,
-              },
-            ],
-            total: 30000,
-          },
-        ];
-        setPedidos(defaultPedidos);
-        localStorage.setItem("choper_pedidos", JSON.stringify(defaultPedidos));
+        setPedidos([]);
       }
     } catch (e) {
       console.error("Error reading localStorage:", e);
     } finally {
       setIsLoaded(true);
     }
-  }, []);
+  }, [user?.id, user?.rol, isStaff]);
 
-  // Save cart to localStorage
+  // Guardar carrito en localStorage de forma aislada (el personal nunca guarda operaciones de compra)
   useEffect(() => {
-    if (!isLoaded) return;
+    if (!isLoaded || isStaff) return;
     try {
-      localStorage.setItem("choper_cart", JSON.stringify(items));
+      const key = getStorageKey(user);
+      localStorage.setItem(key, JSON.stringify(items));
+      if (!user) {
+        localStorage.setItem("choper_cart", JSON.stringify(items));
+      }
     } catch (e) {
       console.error("Error saving cart to localStorage:", e);
     }
-  }, [items, isLoaded]);
+  }, [items, isLoaded, user, isStaff]);
 
   // Save pedidos to localStorage
   useEffect(() => {
@@ -213,71 +221,266 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     setToastMessage(msg);
     setTimeout(() => {
       setToastMessage(null);
-    }, 2400);
+    }, 3200);
   };
 
-  const addToCart = (product: ProductItem, cantidad: number = 1) => {
+  const computeCartDemand = (cartItems: CartItem[]): Map<number, number> => {
+    const demand = new Map<number, number>();
+    for (const item of cartItems) {
+      if (item.esCombo && item.componentes && item.componentes.length > 0) {
+        for (const comp of item.componentes) {
+          const cur = demand.get(comp.productoId) || 0;
+          demand.set(comp.productoId, cur + comp.cantidad * item.cantidad);
+        }
+      } else if (!item.esCombo) {
+        const cur = demand.get(item.id) || 0;
+        demand.set(item.id, cur + item.cantidad);
+      }
+    }
+    return demand;
+  };
+
+  const getItemCartQuantity = (id: number, esCombo?: boolean): number => {
+    const isCombo = Boolean(esCombo);
+    const itemKey = isCombo ? `combo-${id}` : `prod-${id}`;
+    const found = items.find((i) => {
+      if (i.cartItemId) return i.cartItemId === itemKey;
+      return i.id === id && Boolean(i.esCombo) === isCombo;
+    });
+    return found ? found.cantidad : 0;
+  };
+
+  const getRemainingStock = (product: {
+    id: number;
+    stock: number;
+    esCombo?: boolean;
+    componentes?: CartItemComponente[];
+  }): number => {
+    if (product.stock <= 0) return 0;
+    const esCombo = Boolean(product.esCombo);
+
+    if (esCombo && product.componentes && product.componentes.length > 0) {
+      const demand = computeCartDemand(items);
+      const possibleAdditions = product.componentes.map((comp) => {
+        const compStock =
+          comp.stockProducto !== undefined ? comp.stockProducto : comp.cantidad * product.stock;
+        const alreadyUsed = demand.get(comp.productoId) || 0;
+        const remainingCompStock = Math.max(0, compStock - alreadyUsed);
+        return Math.floor(remainingCompStock / comp.cantidad);
+      });
+      return Math.max(0, Math.min(product.stock, ...possibleAdditions));
+    }
+
+    const demand = computeCartDemand(items);
+    const alreadyUsed = demand.get(product.id) || 0;
+    return Math.max(0, product.stock - alreadyUsed);
+  };
+
+  const isItemAtLimit = (product: {
+    id: number;
+    stock: number;
+    esCombo?: boolean;
+    componentes?: CartItemComponente[];
+  }): boolean => {
+    if (product.stock <= 0) return true;
+    return getRemainingStock(product) <= 0;
+  };
+
+  const addToCart = (
+    product: ProductItem & { componentes?: CartItemComponente[] },
+    cantidad: number = 1
+  ) => {
+    if (isStaff) {
+      showToast("Estás utilizando una cuenta de personal. Para realizar compras, ingresá con una cuenta de cliente.");
+      return;
+    }
+
     if (product.stock <= 0) {
       showToast("Producto sin stock disponible");
       return;
     }
 
+    const cantSolicitada = Math.max(1, Math.floor(cantidad || 1));
+    const esCombo = Boolean(
+      (product as any).esCombo === true ||
+      product.categoriaNombre === "Combos Armados" ||
+      product.categoriaId === 9999 ||
+      product.marca === "Combo Chopper"
+    );
+    const itemKey = esCombo ? `combo-${product.id}` : `prod-${product.id}`;
+
     setItems((prev) => {
-      const existing = prev.find((item) => item.id === product.id);
-      if (existing) {
-        const nuevaCantidad = existing.cantidad + cantidad;
-        if (nuevaCantidad > product.stock) {
-          showToast(`Solo hay ${product.stock} unidades en stock`);
-          return prev;
+      const existingIndex = prev.findIndex((item) => {
+        if (item.cartItemId) return item.cartItemId === itemKey;
+        return item.id === product.id && Boolean(item.esCombo) === esCombo;
+      });
+
+      const demand = computeCartDemand(prev);
+      let remaining = 0;
+
+      if (esCombo && product.componentes && product.componentes.length > 0) {
+        const possibleAdditions = product.componentes.map((comp) => {
+          const compStock =
+            comp.stockProducto !== undefined ? comp.stockProducto : comp.cantidad * product.stock;
+          const alreadyUsed = demand.get(comp.productoId) || 0;
+          const remainingCompStock = Math.max(0, compStock - alreadyUsed);
+          return Math.floor(remainingCompStock / comp.cantidad);
+        });
+        remaining = Math.max(0, Math.min(product.stock, ...possibleAdditions));
+      } else {
+        const alreadyUsed = demand.get(product.id) || 0;
+        remaining = Math.max(0, product.stock - alreadyUsed);
+      }
+
+      if (remaining <= 0) {
+        showToast("Ya tenés todas las unidades disponibles en tu carrito");
+        return prev;
+      }
+
+      const toAdd = Math.min(cantSolicitada, remaining);
+
+      if (existingIndex >= 0) {
+        const existing = prev[existingIndex];
+        const nuevaCantidad = existing.cantidad + toAdd;
+
+        if (toAdd < cantSolicitada) {
+          showToast(`Se agregaron las ${toAdd} u. restantes disponibles (${nuevaCantidad} u. en total)`);
+        } else {
+          showToast(`${product.nombre} actualizado en el carrito`);
         }
-        showToast(`${product.nombre} actualizado en el carrito`);
-        return prev.map((item) =>
-          item.id === product.id ? { ...item, cantidad: nuevaCantidad } : item
+
+        return prev.map((item, idx) =>
+          idx === existingIndex
+            ? {
+                ...item,
+                cantidad: nuevaCantidad,
+                stock: product.stock,
+                componentes: product.componentes || item.componentes,
+              }
+            : item
         );
       } else {
-        showToast(`${product.nombre} agregado al carrito`);
+        if (toAdd < cantSolicitada) {
+          showToast(`Se agregaron las ${toAdd} u. restantes disponibles (límite alcanzado)`);
+        } else {
+          showToast(`${product.nombre} agregado al carrito`);
+        }
+
         return [
           ...prev,
           {
             id: product.id,
+            cartItemId: itemKey,
             nombre: product.nombre,
             marca: product.marca,
             categoriaNombre: product.categoriaNombre,
             precio: product.precio,
-            cantidad: Math.min(cantidad, product.stock),
+            cantidad: toAdd,
             stock: product.stock,
             imagen: product.imagen,
-            esCombo: (product as unknown as { esCombo?: boolean }).esCombo || false,
+            esCombo,
+            componentes: product.componentes,
           },
         ];
       }
     });
   };
 
-  const updateQuantity = (id: number, delta: number) => {
-    setItems((prev) =>
-      prev
-        .map((item) => {
-          if (item.id === id) {
-            const nuevaCantidad = item.cantidad + delta;
-            if (nuevaCantidad > item.stock) {
-              showToast(`Stock máximo disponible alcanzado (${item.stock} u.)`);
-              return item;
-            }
-            return nuevaCantidad <= 0 ? null : { ...item, cantidad: nuevaCantidad };
-          }
-          return item;
-        })
-        .filter(Boolean) as CartItem[]
-    );
+  const updateQuantity = (idOrKey: number | string, delta: number, esCombo?: boolean) => {
+    if (isStaff) {
+      showToast("Estás utilizando una cuenta de personal. Para realizar compras, ingresá con una cuenta de cliente.");
+      return;
+    }
+
+    setItems((prev) => {
+      const targetIndex = prev.findIndex((item) => {
+        if (typeof idOrKey === "string") {
+          return item.cartItemId === idOrKey || getCartItemKey(item) === idOrKey;
+        }
+        return item.id === idOrKey && (esCombo === undefined || Boolean(item.esCombo) === esCombo);
+      });
+
+      if (targetIndex < 0) return prev;
+
+      const item = prev[targetIndex];
+
+      if (delta > 0) {
+        const demand = computeCartDemand(prev);
+        let remaining = 0;
+        if (item.esCombo && item.componentes && item.componentes.length > 0) {
+          const possible = item.componentes.map((comp) => {
+            const compStock =
+              comp.stockProducto !== undefined ? comp.stockProducto : comp.cantidad * item.stock;
+            const alreadyUsed = demand.get(comp.productoId) || 0;
+            const remainingComp = Math.max(0, compStock - alreadyUsed);
+            return Math.floor(remainingComp / comp.cantidad);
+          });
+          remaining = Math.max(0, Math.min(item.stock, ...possible));
+        } else {
+          const alreadyUsed = demand.get(item.id) || 0;
+          remaining = Math.max(0, item.stock - alreadyUsed);
+        }
+
+        if (remaining <= 0 || item.cantidad >= item.stock) {
+          showToast("Ya tenés todas las unidades disponibles en tu carrito");
+          return prev;
+        }
+      }
+
+      const nuevaCantidad = item.cantidad + delta;
+      if (nuevaCantidad <= 0) {
+        return prev.filter((_, idx) => idx !== targetIndex);
+      }
+
+      return prev.map((it, idx) => (idx === targetIndex ? { ...it, cantidad: nuevaCantidad } : it));
+    });
   };
 
-  const removeFromCart = (id: number) => {
-    setItems((prev) => prev.filter((item) => item.id !== id));
+  const removeFromCart = (idOrKey: number | string, esCombo?: boolean) => {
+    setItems((prev) =>
+      prev.filter((item) => {
+        const match =
+          typeof idOrKey === "string"
+            ? item.cartItemId === idOrKey || getCartItemKey(item) === idOrKey
+            : item.id === idOrKey && (esCombo === undefined || Boolean(item.esCombo) === esCombo);
+        return !match;
+      })
+    );
   };
 
   const clearCart = () => {
     setItems([]);
+    try {
+      const key = getStorageKey(user);
+      localStorage.removeItem(key);
+      if (!user) localStorage.removeItem("choper_cart");
+    } catch {}
+  };
+
+  const sincronizarCarrito = (validated: any[]) => {
+    if (!Array.isArray(validated)) return;
+    setItems((prev) => {
+      return prev.map((localItem) => {
+        const val = validated.find((v) => {
+          if (v.cartItemId && localItem.cartItemId) {
+            return v.cartItemId === localItem.cartItemId;
+          }
+          return v.id === localItem.id && Boolean(v.esCombo) === Boolean(localItem.esCombo);
+        });
+        if (val) {
+          return {
+            ...localItem,
+            nombre: val.nombre,
+            marca: val.marca,
+            precio: val.precioFinal,
+            stock: val.stockDisponible,
+            imagen: val.imagen || localItem.imagen,
+            cantidad: Math.min(localItem.cantidad, Math.max(1, val.stockDisponible)),
+          };
+        }
+        return localItem;
+      });
+    });
   };
 
   const totalItems = items.reduce((acc, item) => acc + item.cantidad, 0);
@@ -294,6 +497,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     itemsVerificados?: PedidoItem[];
     totalVerificado?: number;
   }): number | null => {
+    if (isStaff) {
+      showToast("Estás utilizando una cuenta de personal. Para realizar compras, ingresá con una cuenta de cliente.");
+      return null;
+    }
+
     if (items.length === 0) return null;
 
     const nextNumero =
@@ -365,10 +573,12 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     <CartContext.Provider
       value={{
         items,
+        isStaff,
         addToCart,
         updateQuantity,
         removeFromCart,
         clearCart,
+        sincronizarCarrito,
         totalItems,
         subtotal,
         toastMessage,
@@ -376,6 +586,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         crearPedido,
         cambiarEstadoPedido,
         cancelarPedido,
+        getItemCartQuantity,
+        getRemainingStock,
+        isItemAtLimit,
       }}
     >
       {children}

@@ -1,8 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import Image from "next/image";
+import { useConfig } from "@/context/ConfigContext";
 import {
   X,
   ChevronRight,
@@ -10,7 +12,6 @@ import {
   Layers,
   Building,
   Package,
-  FileCheck,
   ShieldCheck,
   HelpCircle,
   CircleDot,
@@ -33,7 +34,33 @@ interface CategoryGroup {
 }
 
 export default function CategoryDrawer({ isOpen, onClose }: CategoryDrawerProps) {
+  const { config } = useConfig();
   const [expandedCat, setExpandedCat] = useState<string | null>("cubiertas");
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Cerrar con tecla Escape y bloquear scroll del body cuando el catálogo está abierto
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    };
+
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen, onClose]);
 
   const categories: CategoryGroup[] = [
     {
@@ -118,14 +145,20 @@ export default function CategoryDrawer({ isOpen, onClose }: CategoryDrawerProps)
     },
   ];
 
-  if (!isOpen) return null;
+  if (!isOpen || !mounted) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex">
-      {/* Overlay oscuro */}
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[99] flex"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Catálogo de Repuestos"
+    >
+      {/* Overlay oscuro para toda la pantalla */}
       <div
         onClick={onClose}
         className="fixed inset-0 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
+        aria-hidden="true"
       />
 
       {/* Drawer Panel */}
@@ -136,14 +169,15 @@ export default function CategoryDrawer({ isOpen, onClose }: CategoryDrawerProps)
             href="/"
             onClick={onClose}
             className="flex flex-col items-center group py-0.5"
-            title="Chopper Repuestos - Inicio"
+            title={`${config.nombre_tienda || "Chopper Repuestos"} - Inicio`}
           >
             <Image
-              src="/logo-nav.png"
-              alt="Chopper Repuestos"
+              src={config.logo_url || "/logo-nav.png"}
+              alt={config.nombre_tienda || "Chopper Repuestos"}
               width={180}
               height={80}
               priority
+              unoptimized
               className="h-12 w-auto object-contain drop-shadow transition-transform duration-300 group-hover:scale-105"
             />
             <span className="text-[10px] font-black tracking-widest text-slate-500 dark:text-slate-400 uppercase mt-1">
@@ -172,7 +206,7 @@ export default function CategoryDrawer({ isOpen, onClose }: CategoryDrawerProps)
           </Link>
 
           <Link
-            href="/#combos"
+            href="/combos"
             onClick={onClose}
             className="flex flex-col items-center justify-center rounded-xl border border-slate-200 dark:border-line bg-white dark:bg-surface p-2 text-center hover:border-amber-500 transition-colors group"
           >
@@ -253,17 +287,8 @@ export default function CategoryDrawer({ isOpen, onClose }: CategoryDrawerProps)
             <span>Seguir mi Pedido</span>
           </Link>
 
-          <Link
-            href="/panel?tab=comprobante"
-            onClick={onClose}
-            className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-surface hover:text-emerald-500 transition-colors"
-          >
-            <FileCheck size={15} className="text-emerald-500" />
-            <span>Subir Comprobante</span>
-          </Link>
-
           <a
-            href="https://wa.me/5493765243554?text=Hola%20Chopper%20Repuestos!%20Necesito%20ayuda"
+            href={`https://wa.me/${(config.whatsapp || "5493765243554").replace(/\D/g, "")}?text=${encodeURIComponent(`Hola ${config.nombre_tienda || "Chopper Repuestos"}! Necesito ayuda`)}`}
             target="_blank"
             rel="noreferrer"
             className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-colors font-semibold"
@@ -273,6 +298,7 @@ export default function CategoryDrawer({ isOpen, onClose }: CategoryDrawerProps)
           </a>
         </div>
       </aside>
-    </div>
+    </div>,
+    document.body
   );
 }
