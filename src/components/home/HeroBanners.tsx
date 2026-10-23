@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   CreditCard,
@@ -9,9 +9,32 @@ import {
   Bike,
   ShieldCheck,
   MessageCircle,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
+import { useConfig } from "@/context/ConfigContext";
+import { BannerHome } from "@/actions/configuracion";
 
-export default function HeroBanners() {
+interface HeroBannersProps {
+  initialBanners?: BannerHome[];
+}
+
+export default function HeroBanners({ initialBanners = [] }: HeroBannersProps) {
+  const { config } = useConfig();
+  const activeBanners = initialBanners.filter((b) => b.activo);
+  const [currentIdx, setCurrentIdx] = useState(0);
+
+  // Auto-rotar banners si hay más de uno activo
+  useEffect(() => {
+    if (activeBanners.length <= 1) return;
+    const interval = setInterval(() => {
+      setCurrentIdx((prev) => (prev + 1) % activeBanners.length);
+    }, 7000);
+    return () => clearInterval(interval);
+  }, [activeBanners.length]);
+
+  const currentBanner = activeBanners.length > 0 ? activeBanners[currentIdx] : null;
+
   const quickCategories = [
     {
       title: "Lubricantes y Aceites",
@@ -32,6 +55,10 @@ export default function HeroBanners() {
       marca: "PIRELLI",
     },
   ];
+
+  const waLink = `https://wa.me/${(config.whatsapp || "5493765243554").replace(/[^0-9]/g, "")}`;
+  const addressText = config.direccion || "Av. Roque Sáenz Peña 1500 · Posadas, Misiones";
+  const shopName = config.nombre_tienda || "Chopper Repuestos";
 
   return (
     <section className="mt-4 space-y-6">
@@ -61,30 +88,48 @@ export default function HeroBanners() {
 
       {/* Banner Principal Hero Adaptativo (Modo Oscuro / Modo Claro) */}
       <div className="hero-banner-adaptive relative overflow-hidden rounded-2xl border border-slate-200 dark:border-line bg-gradient-to-r from-red-50/60 via-white to-slate-50 dark:from-[#17181d] dark:via-[#14151a] dark:to-[#101114] p-6 md:p-10 shadow-lg transition-colors">
+        {currentBanner?.imagenUrl && (
+          <div
+            className="absolute inset-0 bg-cover bg-center opacity-15 dark:opacity-25 pointer-events-none transition-all duration-500"
+            style={{ backgroundImage: `url(${currentBanner.imagenUrl})` }}
+          />
+        )}
         <div className="relative z-10 grid gap-8 lg:grid-cols-12 lg:items-center">
           <div className="lg:col-span-8 space-y-4">
             <div className="inline-flex items-center gap-2 rounded-full border border-brand/40 bg-brand/10 dark:bg-brand/15 px-3 py-1 text-xs font-semibold text-brand">
               <Flame size={14} className="fill-brand animate-pulse" />
-              <span className="tracking-wide">CHOPPER REPUESTOS · POSADAS, MISIONES</span>
+              <span className="tracking-wide uppercase">
+                {currentBanner?.badge || `${shopName} · POSADAS, MISIONES`}
+              </span>
             </div>
 
             <h1 className="text-3xl font-black tracking-tight text-slate-900 dark:text-white md:text-5xl leading-tight">
-              Hacé tu pedido y{" "}
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-600 via-orange-600 to-amber-600 dark:from-red-500 dark:via-orange-500 dark:to-amber-500">
-                retiralo en el local
-              </span>
+              {currentBanner ? (
+                currentBanner.titulo
+              ) : (
+                <>
+                  Hacé tu pedido y{" "}
+                  <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-600 via-orange-600 to-amber-600 dark:from-red-500 dark:via-orange-500 dark:to-amber-500">
+                    retiralo en el local
+                  </span>
+                </>
+              )}
             </h1>
 
             <p className="max-w-2xl text-sm md:text-base text-slate-700 dark:text-slate-300 leading-relaxed font-medium">
-              Buscá tu repuesto, armá el pedido online y pasá a retirarlo por nuestro local en{" "}
-              <strong className="text-brand">Av. Roque Sáenz Peña 1500</strong>, o pedí envío con{" "}
-              <strong className="text-emerald-600 dark:text-emerald-500">Motomandado / Moto Uber</strong>. Pagás en efectivo
-              o transferencia al recibir tu mercadería.
+              {currentBanner?.descripcion || (
+                <>
+                  Buscá tu repuesto, armá el pedido online y pasá a retirarlo por nuestro local en{" "}
+                  <strong className="text-brand">{addressText}</strong>, o pedí envío con{" "}
+                  <strong className="text-emerald-600 dark:text-emerald-500">Motomandado / Moto Uber</strong>. Pagás en efectivo
+                  o transferencia al recibir tu mercadería.
+                </>
+              )}
             </p>
 
             <div className="flex flex-wrap items-center gap-3 pt-2">
               <Link
-                href="/ofertas"
+                href={currentBanner?.enlace || "/ofertas"}
                 className="flex items-center gap-2 rounded-xl bg-brand px-6 py-3 text-sm font-bold text-white hover:bg-brandhover shadow-lg shadow-brand/30 transition-all active:scale-95"
               >
                 <span>Ver productos en oferta</span>
@@ -92,7 +137,7 @@ export default function HeroBanners() {
               </Link>
 
               <a
-                href="https://wa.me/5493765243554"
+                href={waLink}
                 target="_blank"
                 rel="noreferrer"
                 className="flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-5 py-3 text-sm font-bold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-all active:scale-95"
@@ -101,6 +146,45 @@ export default function HeroBanners() {
                 <span>Contactar por WhatsApp</span>
               </a>
             </div>
+
+            {/* Controles del carrusel si hay múltiples banners activos */}
+            {activeBanners.length > 1 && (
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCurrentIdx((prev) => (prev - 1 + activeBanners.length) % activeBanners.length)
+                  }
+                  className="p-1 rounded-lg border border-slate-300 dark:border-line bg-white/70 dark:bg-card/70 text-slate-700 dark:text-slate-300 hover:text-brand transition-colors"
+                  aria-label="Banner anterior"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <div className="flex items-center gap-1.5 px-2">
+                  {activeBanners.map((_, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setCurrentIdx(i)}
+                      className={`h-2 rounded-full transition-all ${
+                        i === currentIdx
+                          ? "w-6 bg-brand"
+                          : "w-2 bg-slate-300 dark:bg-slate-700 hover:bg-slate-400"
+                      }`}
+                      aria-label={`Ir al banner ${i + 1}`}
+                    />
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCurrentIdx((prev) => (prev + 1) % activeBanners.length)}
+                  className="p-1 rounded-lg border border-slate-300 dark:border-line bg-white/70 dark:bg-card/70 text-slate-700 dark:text-slate-300 hover:text-brand transition-colors"
+                  aria-label="Siguiente banner"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Tarjetas de Beneficios Laterales */}

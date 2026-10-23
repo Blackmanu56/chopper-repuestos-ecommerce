@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import fs from "fs/promises";
 import path from "path";
+import { requireStaffSession, StaffRole } from "@/lib/session";
+import { validateUploadedFile } from "@/lib/uploadValidation";
 
 export interface TiendaConfig {
   nombre_tienda: string;
@@ -19,6 +21,10 @@ export interface TiendaConfig {
   mostrar_banner_promocion: boolean;
   mostrar_ahorro: boolean;
   ocultar_ahorro_cero: boolean;
+  cuotas_habilitadas: boolean;
+  cuotas_cantidad: number;
+  cuotas_sin_interes: boolean;
+  cuotas_recargo_porcentaje: number;
 }
 
 const DEFAULT_CONFIG: TiendaConfig = {
@@ -35,29 +41,18 @@ const DEFAULT_CONFIG: TiendaConfig = {
   mostrar_banner_promocion: true,
   mostrar_ahorro: true,
   ocultar_ahorro_cero: true,
+  cuotas_habilitadas: true,
+  cuotas_cantidad: 3,
+  cuotas_sin_interes: true,
+  cuotas_recargo_porcentaje: 0,
 };
 
-async function verifyStaff(userId: number): Promise<{ authorized: boolean; error?: string }> {
-  try {
-    const user = await prisma.usuario.findUnique({
-      where: { id: userId },
-      include: { rol: true },
-    });
-
-    if (!user || !user.activo) {
-      return { authorized: false, error: "Usuario inactivo o no encontrado." };
-    }
-
-    const rolName = (user.rol?.nombre || "").toUpperCase();
-    if (rolName !== "ADMINISTRADOR" && rolName !== "ENCARGADO_VENTAS") {
-      return { authorized: false, error: "Solo los administradores pueden modificar la configuración de la tienda." };
-    }
-
-    return { authorized: true };
-  } catch (e) {
-    console.error("Error verificando staff:", e);
-    return { authorized: false, error: "Error de verificación de permisos." };
-  }
+async function verifyStaff(
+  _ignoredUserId?: number,
+  allowedRoles: StaffRole[] = ["ADMINISTRADOR", "ENCARGADO_VENTAS"]
+): Promise<{ authorized: boolean; error?: string }> {
+  const res = await requireStaffSession(allowedRoles);
+  return { authorized: res.authorized, error: res.error };
 }
 
 /**
@@ -75,6 +70,16 @@ export async function getConfiguracionAction(): Promise<TiendaConfig> {
         result.mostrar_ahorro = item.valor === "true";
       } else if (item.clave === "ocultar_ahorro_cero") {
         result.ocultar_ahorro_cero = item.valor === "true";
+      } else if (item.clave === "cuotas_habilitadas") {
+        result.cuotas_habilitadas = item.valor === "true";
+      } else if (item.clave === "cuotas_sin_interes") {
+        result.cuotas_sin_interes = item.valor === "true";
+      } else if (item.clave === "cuotas_cantidad") {
+        const parsed = parseInt(item.valor, 10);
+        result.cuotas_cantidad = !isNaN(parsed) && parsed > 0 ? parsed : 3;
+      } else if (item.clave === "cuotas_recargo_porcentaje") {
+        const parsed = parseFloat(item.valor);
+        result.cuotas_recargo_porcentaje = !isNaN(parsed) && parsed >= 0 ? parsed : 0;
       } else if (item.clave in result) {
         (result as unknown as Record<string, string>)[item.clave] = item.valor;
       }
@@ -88,20 +93,20 @@ export async function getConfiguracionAction(): Promise<TiendaConfig> {
 }
 
 /**
- * Guarda o actualiza los datos de identidad y contacto de la tienda
+ * Guarda o actualiza los datos de identidad y contacto de la tienda (Solo ADMINISTRADOR)
  */
 export async function updateConfiguracionAction(
-  userId: number,
+  _ignoredUserId: number,
   values: Partial<TiendaConfig>
 ): Promise<{ success: boolean; config?: TiendaConfig; error?: string }> {
-  const auth = await verifyStaff(userId);
+  const auth = await verifyStaff(_ignoredUserId, ["ADMINISTRADOR", "ENCARGADO_VENTAS"]);
   if (!auth.authorized) {
     return { success: false, error: auth.error };
   }
 
   try {
     for (const [key, val] of Object.entries(values)) {
-      if (val !== undefined && val !== null) {
+      if (val !== undefined && val !== null && key in DEFAULT_CONFIG) {
         const stringVal = typeof val === "boolean" ? (val ? "true" : "false") : String(val);
         await prisma.configuracionEcommerce.upsert({
           where: { clave: key },
@@ -112,6 +117,7 @@ export async function updateConfiguracionAction(
     }
 
     try {
+      revalidatePath("/", "layout");
       revalidatePath("/");
       revalidatePath("/ofertas");
       revalidatePath("/combos");
@@ -129,36 +135,33 @@ export async function updateConfiguracionAction(
 }
 
 /**
- * Sube un nuevo logo institucional
+ * Sube un nuevo logo institucional (Solo ADMINISTRADOR)
  */
 export async function uploadLogoAction(
-  userId: number,
+  _ignoredUserId: number,
   formData: FormData
 ): Promise<{ success: boolean; logoUrl?: string; error?: string }> {
-  const auth = await verifyStaff(userId);
+  const auth = await verifyStaff(_ignoredUserId, ["ADMINISTRADOR", "ENCARGADO_VENTAS"]);
   if (!auth.authorized) {
     return { success: false, error: auth.error };
   }
 
   try {
     const file = formData.get("logo") as File | null;
-    if (!file) {
-      return { success: false, error: "No se seleccionó ningún archivo de logo." };
-    }
-
-    const ext = path.extname(file.name).toLowerCase();
-    const allowed = [".png", ".jpg", ".jpeg", ".webp", ".svg"];
-    if (!allowed.includes(ext)) {
-      return { success: false, error: "Formato no válido. Use PNG, JPG, WEBP o SVG." };
+    const validation = await validateUploadedFile(file, {
+      allowPdf: false,
+      allowSvg: true,
+    });
+    if (!validation.valid || !validation.buffer || !validation.ext) {
+      return { success: false, error: validation.error || "Archivo de logo no válido." };
     }
 
     const brandingDir = path.join(process.cwd(), "public", "uploads", "branding");
     await fs.mkdir(brandingDir, { recursive: true });
 
-    const filename = `logo-${Date.now()}${ext}`;
+    const filename = `logo-${Date.now()}${validation.ext}`;
     const filePath = path.join(brandingDir, filename);
-    const buffer = Buffer.from(await file.arrayBuffer());
-    await fs.writeFile(filePath, buffer);
+    await fs.writeFile(filePath, validation.buffer);
 
     const logoUrl = `/uploads/branding/${filename}`;
 
@@ -169,6 +172,7 @@ export async function uploadLogoAction(
     });
 
     try {
+      revalidatePath("/", "layout");
       revalidatePath("/");
       revalidatePath("/panel");
     } catch {}
@@ -180,39 +184,40 @@ export async function uploadLogoAction(
 }
 
 /**
- * Sube una imagen para productos, combos o branding
+ * Sube una imagen para productos, combos, branding o banners
  */
 export async function uploadMediaAction(
-  userId: number,
+  _ignoredUserId: number,
   formData: FormData,
-  folder: "productos" | "combos" | "branding" | "marcas" = "productos"
+  folder: "productos" | "combos" | "branding" | "marcas" | "banners" = "productos"
 ): Promise<{ success: boolean; url?: string; error?: string }> {
-  const auth = await verifyStaff(userId);
+  const allowedRoles: StaffRole[] = ["ADMINISTRADOR", "ENCARGADO_VENTAS"];
+  const auth = await verifyStaff(_ignoredUserId, allowedRoles);
   if (!auth.authorized) {
     return { success: false, error: auth.error };
   }
 
+  const allowedFolders = ["productos", "combos", "branding", "marcas", "banners"];
+  const safeFolder = allowedFolders.includes(folder) ? folder : "productos";
+
   try {
     const file = formData.get("file") as File | null;
-    if (!file) {
-      return { success: false, error: "No se seleccionó ningún archivo." };
+    const validation = await validateUploadedFile(file, {
+      allowPdf: false,
+      allowSvg: true,
+    });
+    if (!validation.valid || !validation.buffer || !validation.ext) {
+      return { success: false, error: validation.error || "Archivo no válido." };
     }
 
-    const ext = path.extname(file.name).toLowerCase();
-    const allowed = [".png", ".jpg", ".jpeg", ".webp", ".svg"];
-    if (!allowed.includes(ext)) {
-      return { success: false, error: "Formato no válido. Usá PNG, JPG, WEBP o SVG." };
-    }
-
-    const targetDir = path.join(process.cwd(), "public", "uploads", folder);
+    const targetDir = path.join(process.cwd(), "public", "uploads", safeFolder);
     await fs.mkdir(targetDir, { recursive: true });
 
-    const filename = `${folder}-${Date.now()}-${Math.floor(Math.random() * 1000)}${ext}`;
+    const filename = `${safeFolder}-${Date.now()}-${Math.floor(Math.random() * 1000)}${validation.ext}`;
     const filePath = path.join(targetDir, filename);
-    const buffer = Buffer.from(await file.arrayBuffer());
-    await fs.writeFile(filePath, buffer);
+    await fs.writeFile(filePath, validation.buffer);
 
-    const url = `/uploads/${folder}/${filename}`;
+    const url = `/uploads/${safeFolder}/${filename}`;
     return { success: true, url };
   } catch (error) {
     console.error("Error al subir archivo de media:", error);
@@ -221,20 +226,15 @@ export async function uploadMediaAction(
 }
 
 // ══════════════════ ETIQUETAS DE OFERTA ══════════════════
-
-export interface EtiquetaOferta {
-  id: string;
-  nombre: string;
-  activa: boolean;
-  count?: number;
-}
+export type { EtiquetaOferta } from "@/lib/etiquetas";
+import { EtiquetaOferta } from "@/lib/etiquetas";
 
 const DEFAULT_ETIQUETAS: EtiquetaOferta[] = [
-  { id: "primavera", nombre: "Mes de la Primavera", activa: true },
-  { id: "super-promo", nombre: "Super Promo", activa: true },
-  { id: "liquidacion", nombre: "Liquidación", activa: true },
-  { id: "relampago", nombre: "Oferta Relámpago", activa: false },
-  { id: "recomendado", nombre: "Recomendado Posadas", activa: true },
+  { id: "primavera", nombre: "Mes de la Primavera", emoji: "🎉", activa: true },
+  { id: "super-promo", nombre: "Super Promo", emoji: "🔥", activa: true },
+  { id: "liquidacion", nombre: "Liquidación", emoji: "💸", activa: true },
+  { id: "relampago", nombre: "Oferta Relámpago", emoji: "⚡", activa: false },
+  { id: "recomendado", nombre: "Recomendado Posadas", emoji: "⭐", activa: true },
 ];
 
 export async function getEtiquetasOfertaAction(): Promise<EtiquetaOferta[]> {
@@ -247,20 +247,41 @@ export async function getEtiquetasOfertaAction(): Promise<EtiquetaOferta[]> {
       if (Array.isArray(parsed) && parsed.length > 0) {
         return parsed;
       }
+    } else {
+      // Si aún no existe en la base de datos, lo persistimos inicialmente
+      try {
+        await prisma.configuracionEcommerce.create({
+          data: {
+            clave: "etiquetas_oferta",
+            valor: JSON.stringify(DEFAULT_ETIQUETAS),
+          },
+        });
+      } catch {}
     }
   } catch {}
   return DEFAULT_ETIQUETAS;
 }
 
+/**
+ * Retorna la lista de nombres de etiquetas actualmente activas
+ */
+export async function getEtiquetasActivasAction(): Promise<string[]> {
+  const etiquetas = await getEtiquetasOfertaAction();
+  return etiquetas.filter((e) => e.activa).map((e) => e.nombre.toLowerCase().trim());
+}
+
 export async function crearEtiquetaOfertaAction(
   userId: number,
-  nombre: string
+  nombre: string,
+  emoji?: string | null
 ): Promise<{ success: boolean; etiquetas?: EtiquetaOferta[]; error?: string }> {
   const auth = await verifyStaff(userId);
   if (!auth.authorized) return { success: false, error: auth.error };
 
   const clean = nombre.trim();
   if (!clean) return { success: false, error: "Ingresá un nombre para la etiqueta." };
+
+  const cleanEmoji = emoji?.trim() || null;
 
   const actuales = await getEtiquetasOfertaAction();
   if (actuales.some((e) => e.nombre.toLowerCase() === clean.toLowerCase())) {
@@ -270,17 +291,30 @@ export async function crearEtiquetaOfertaAction(
   const nueva: EtiquetaOferta = {
     id: `tag-${Date.now()}`,
     nombre: clean,
+    emoji: cleanEmoji,
     activa: true,
   };
   const actualizadas = [...actuales, nueva];
 
-  await prisma.configuracionEcommerce.upsert({
-    where: { clave: "etiquetas_oferta" },
-    update: { valor: JSON.stringify(actualizadas) },
-    create: { clave: "etiquetas_oferta", valor: JSON.stringify(actualizadas) },
-  });
+  try {
+    await prisma.configuracionEcommerce.upsert({
+      where: { clave: "etiquetas_oferta" },
+      update: { valor: JSON.stringify(actualizadas) },
+      create: { clave: "etiquetas_oferta", valor: JSON.stringify(actualizadas) },
+    });
 
-  return { success: true, etiquetas: actualizadas };
+    try {
+      revalidatePath("/panel");
+      revalidatePath("/ofertas");
+      revalidatePath("/combos");
+      revalidatePath("/", "layout");
+    } catch {}
+
+    return { success: true, etiquetas: actualizadas };
+  } catch (err) {
+    console.error("Error al crear etiqueta:", err);
+    return { success: false, error: "Error al guardar la etiqueta en la base de datos." };
+  }
 }
 
 export async function toggleEtiquetaOfertaAction(
@@ -294,19 +328,32 @@ export async function toggleEtiquetaOfertaAction(
   const actuales = await getEtiquetasOfertaAction();
   const actualizadas = actuales.map((e) => (e.id === id ? { ...e, activa } : e));
 
-  await prisma.configuracionEcommerce.upsert({
-    where: { clave: "etiquetas_oferta" },
-    update: { valor: JSON.stringify(actualizadas) },
-    create: { clave: "etiquetas_oferta", valor: JSON.stringify(actualizadas) },
-  });
+  try {
+    await prisma.configuracionEcommerce.upsert({
+      where: { clave: "etiquetas_oferta" },
+      update: { valor: JSON.stringify(actualizadas) },
+      create: { clave: "etiquetas_oferta", valor: JSON.stringify(actualizadas) },
+    });
 
-  return { success: true, etiquetas: actualizadas };
+    try {
+      revalidatePath("/panel");
+      revalidatePath("/ofertas");
+      revalidatePath("/combos");
+      revalidatePath("/", "layout");
+    } catch {}
+
+    return { success: true, etiquetas: actualizadas };
+  } catch (err) {
+    console.error("Error al pausar/reactivar etiqueta:", err);
+    return { success: false, error: "Error al actualizar el estado de la etiqueta." };
+  }
 }
 
 export async function editarEtiquetaOfertaAction(
   userId: number,
   id: string,
-  nuevoNombre: string
+  nuevoNombre: string,
+  nuevoEmoji?: string | null
 ): Promise<{ success: boolean; etiquetas?: EtiquetaOferta[]; error?: string }> {
   const auth = await verifyStaff(userId);
   if (!auth.authorized) return { success: false, error: auth.error };
@@ -314,20 +361,57 @@ export async function editarEtiquetaOfertaAction(
   const clean = nuevoNombre.trim();
   if (!clean) return { success: false, error: "El nombre de la etiqueta no puede estar vacío." };
 
+  const cleanEmoji = nuevoEmoji !== undefined ? (nuevoEmoji?.trim() || null) : undefined;
+
   const actuales = await getEtiquetasOfertaAction();
   if (actuales.some((e) => e.id !== id && e.nombre.toLowerCase() === clean.toLowerCase())) {
     return { success: false, error: "Ya existe otra etiqueta con ese nombre." };
   }
 
-  const actualizadas = actuales.map((e) => (e.id === id ? { ...e, nombre: clean } : e));
-
-  await prisma.configuracionEcommerce.upsert({
-    where: { clave: "etiquetas_oferta" },
-    update: { valor: JSON.stringify(actualizadas) },
-    create: { clave: "etiquetas_oferta", valor: JSON.stringify(actualizadas) },
+  const anterior = actuales.find((e) => e.id === id);
+  const actualizadas = actuales.map((e) => {
+    if (e.id === id) {
+      return {
+        ...e,
+        nombre: clean,
+        emoji: cleanEmoji !== undefined ? cleanEmoji : (e.emoji || null),
+      };
+    }
+    return e;
   });
 
-  return { success: true, etiquetas: actualizadas };
+  try {
+    await prisma.configuracionEcommerce.upsert({
+      where: { clave: "etiquetas_oferta" },
+      update: { valor: JSON.stringify(actualizadas) },
+      create: { clave: "etiquetas_oferta", valor: JSON.stringify(actualizadas) },
+    });
+
+    // Cascada: si la etiqueta cambió de nombre, actualizamos los productos y combos asignados
+    if (anterior && anterior.nombre !== clean) {
+      await prisma.productoEcommerce.updateMany({
+        where: { badgePromo: anterior.nombre },
+        data: { badgePromo: clean },
+      });
+
+      await prisma.comboEcommerce.updateMany({
+        where: { badge: anterior.nombre },
+        data: { badge: clean },
+      });
+    }
+
+    try {
+      revalidatePath("/panel");
+      revalidatePath("/ofertas");
+      revalidatePath("/combos");
+      revalidatePath("/", "layout");
+    } catch {}
+
+    return { success: true, etiquetas: actualizadas };
+  } catch (err) {
+    console.error("Error al editar etiqueta:", err);
+    return { success: false, error: "Error al actualizar la etiqueta en la base de datos." };
+  }
 }
 
 // ══════════════════ AUDITORÍA DE CAMBIOS ══════════════════
@@ -377,7 +461,16 @@ const DEFAULT_AUDITORIA: AuditoriaLog[] = [
   },
 ];
 
-export async function getAuditoriaLogsAction(): Promise<AuditoriaLog[]> {
+export async function getAuditoriaLogsAction(_ignoredUserId?: number): Promise<AuditoriaLog[]> {
+  const auth = await requireStaffSession([
+    "ADMINISTRADOR",
+    "ENCARGADO_VENTAS",
+    "ENCARGADO_STOCK",
+  ]);
+  if (!auth.authorized) {
+    return [];
+  }
+
   try {
     const config = await prisma.configuracionEcommerce.findUnique({
       where: { clave: "historial_auditoria" },
@@ -396,19 +489,29 @@ export async function getAuditoriaLogsAction(): Promise<AuditoriaLog[]> {
 }
 
 export async function registrarAuditoriaAction(
-  usuario: string,
+  _ignoredUsuario: string,
   accion: string,
   modulo: string,
   detalle?: string
 ): Promise<void> {
+  const auth = await requireStaffSession([
+    "ADMINISTRADOR",
+    "ENCARGADO_VENTAS",
+    "ENCARGADO_STOCK",
+  ]);
+  if (!auth.authorized || !auth.user) {
+    return;
+  }
+
   try {
     const actuales = await getAuditoriaLogsAction();
     const now = new Date();
     const fecha = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")} hs (${now.toLocaleDateString("es-AR")})`;
+    const verifiedUsuario = auth.user.nombreCompleto || auth.user.username;
     const nuevoLog: AuditoriaLog = {
       id: `aud-${Date.now()}`,
       fecha,
-      usuario,
+      usuario: verifiedUsuario,
       accion,
       modulo: sanitizeModulo(modulo),
       detalle,
@@ -423,3 +526,215 @@ export async function registrarAuditoriaAction(
     console.error("Error al registrar log de auditoría:", err);
   }
 }
+
+// ══════════════════ BANNERS DEL INICIO (HERO Y TEMPORADA) ══════════════════
+
+export interface BannerHome {
+  id: string;
+  titulo: string;
+  descripcion: string;
+  enlace?: string;
+  imagenUrl?: string;
+  badge?: string;
+  activo: boolean;
+  orden: number;
+}
+
+const DEFAULT_BANNERS_HOME: BannerHome[] = [
+  {
+    id: "banner-1",
+    titulo: "Hacé tu pedido y retiralo en el local",
+    descripcion:
+      "Buscá tu repuesto, armá el pedido online y pasá a retirarlo por nuestro local, o pedí envío con Motomandado / Moto Uber. Pagás en efectivo o transferencia al recibir tu mercadería.",
+    enlace: "/ofertas",
+    imagenUrl: "",
+    badge: "CHOPPER REPUESTOS · POSADAS, MISIONES",
+    activo: true,
+    orden: 1,
+  },
+  {
+    id: "banner-2",
+    titulo: "Especial Temporada de Mantenimiento",
+    descripcion:
+      "Aprovechá ofertas destacadas en lubricantes, filtros, transmisión y frenos para tener tu moto en óptimas condiciones.",
+    enlace: "/ofertas",
+    imagenUrl: "",
+    badge: "Promoción de Temporada",
+    activo: true,
+    orden: 2,
+  },
+];
+
+/**
+ * Obtiene todos los banners configurados para la página de inicio
+ */
+export async function getBannersHomeAction(): Promise<BannerHome[]> {
+  try {
+    const config = await prisma.configuracionEcommerce.findUnique({
+      where: { clave: "banners_home" },
+    });
+    if (config?.valor) {
+      const parsed = JSON.parse(config.valor);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.sort((a: BannerHome, b: BannerHome) => (a.orden || 0) - (b.orden || 0));
+      }
+    } else {
+      try {
+        await prisma.configuracionEcommerce.create({
+          data: {
+            clave: "banners_home",
+            valor: JSON.stringify(DEFAULT_BANNERS_HOME),
+          },
+        });
+      } catch {}
+    }
+  } catch (e) {
+    console.error("Error al obtener banners home:", e);
+  }
+  return DEFAULT_BANNERS_HOME;
+}
+
+/**
+ * Crea un nuevo banner para el inicio
+ */
+export async function crearBannerHomeAction(
+  userId: number,
+  banner: Omit<BannerHome, "id">
+): Promise<{ success: boolean; banners?: BannerHome[]; error?: string }> {
+  const auth = await verifyStaff(userId, ["ADMINISTRADOR", "ENCARGADO_VENTAS"]);
+  if (!auth.authorized) return { success: false, error: auth.error };
+
+  const titulo = banner.titulo?.trim();
+  if (!titulo) return { success: false, error: "El banner debe tener un título." };
+
+  const actuales = await getBannersHomeAction();
+  const nuevo: BannerHome = {
+    ...banner,
+    id: `banner-${Date.now()}`,
+    titulo,
+    descripcion: banner.descripcion?.trim() || "",
+    enlace: banner.enlace?.trim() || "",
+    imagenUrl: banner.imagenUrl?.trim() || "",
+    badge: banner.badge?.trim() || "",
+    activo: banner.activo ?? true,
+    orden: banner.orden ?? (actuales.length + 1),
+  };
+  const actualizados = [...actuales, nuevo].sort((a, b) => (a.orden || 0) - (b.orden || 0));
+
+  try {
+    await prisma.configuracionEcommerce.upsert({
+      where: { clave: "banners_home" },
+      update: { valor: JSON.stringify(actualizados) },
+      create: { clave: "banners_home", valor: JSON.stringify(actualizados) },
+    });
+
+    try {
+      revalidatePath("/", "layout");
+      revalidatePath("/");
+      revalidatePath("/panel");
+    } catch {}
+
+    return { success: true, banners: actualizados };
+  } catch (err) {
+    console.error("Error al crear banner:", err);
+    return { success: false, error: "Error al guardar el banner en la base de datos." };
+  }
+}
+
+/**
+ * Modifica un banner existente
+ */
+export async function editarBannerHomeAction(
+  userId: number,
+  id: string,
+  datos: Partial<BannerHome>
+): Promise<{ success: boolean; banners?: BannerHome[]; error?: string }> {
+  const auth = await verifyStaff(userId, ["ADMINISTRADOR", "ENCARGADO_VENTAS"]);
+  if (!auth.authorized) return { success: false, error: auth.error };
+
+  const actuales = await getBannersHomeAction();
+  const index = actuales.findIndex((b) => b.id === id);
+  if (index === -1) return { success: false, error: "Banner no encontrado." };
+
+  const bannerPrevio = actuales[index];
+  const actualizado: BannerHome = {
+    ...bannerPrevio,
+    ...datos,
+    titulo: datos.titulo !== undefined ? datos.titulo.trim() : bannerPrevio.titulo,
+    descripcion: datos.descripcion !== undefined ? datos.descripcion.trim() : bannerPrevio.descripcion,
+    enlace: datos.enlace !== undefined ? datos.enlace.trim() : bannerPrevio.enlace,
+    imagenUrl: datos.imagenUrl !== undefined ? datos.imagenUrl.trim() : bannerPrevio.imagenUrl,
+    badge: datos.badge !== undefined ? datos.badge.trim() : bannerPrevio.badge,
+  };
+
+  if (!actualizado.titulo) {
+    return { success: false, error: "El banner debe tener un título." };
+  }
+
+  actuales[index] = actualizado;
+  const actualizados = [...actuales].sort((a, b) => (a.orden || 0) - (b.orden || 0));
+
+  try {
+    await prisma.configuracionEcommerce.upsert({
+      where: { clave: "banners_home" },
+      update: { valor: JSON.stringify(actualizados) },
+      create: { clave: "banners_home", valor: JSON.stringify(actualizados) },
+    });
+
+    try {
+      revalidatePath("/", "layout");
+      revalidatePath("/");
+      revalidatePath("/panel");
+    } catch {}
+
+    return { success: true, banners: actualizados };
+  } catch (err) {
+    console.error("Error al editar banner:", err);
+    return { success: false, error: "Error al actualizar el banner." };
+  }
+}
+
+/**
+ * Activa o pausa un banner
+ */
+export async function toggleBannerHomeAction(
+  userId: number,
+  id: string,
+  activo: boolean
+): Promise<{ success: boolean; banners?: BannerHome[]; error?: string }> {
+  return editarBannerHomeAction(userId, id, { activo });
+}
+
+/**
+ * Elimina un banner
+ */
+export async function eliminarBannerHomeAction(
+  userId: number,
+  id: string
+): Promise<{ success: boolean; banners?: BannerHome[]; error?: string }> {
+  const auth = await verifyStaff(userId, ["ADMINISTRADOR", "ENCARGADO_VENTAS"]);
+  if (!auth.authorized) return { success: false, error: auth.error };
+
+  const actuales = await getBannersHomeAction();
+  const actualizados = actuales.filter((b) => b.id !== id);
+
+  try {
+    await prisma.configuracionEcommerce.upsert({
+      where: { clave: "banners_home" },
+      update: { valor: JSON.stringify(actualizados) },
+      create: { clave: "banners_home", valor: JSON.stringify(actualizados) },
+    });
+
+    try {
+      revalidatePath("/", "layout");
+      revalidatePath("/");
+      revalidatePath("/panel");
+    } catch {}
+
+    return { success: true, banners: actualizados };
+  } catch (err) {
+    console.error("Error al eliminar banner:", err);
+    return { success: false, error: "Error al eliminar el banner." };
+  }
+}
+
