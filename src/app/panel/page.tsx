@@ -590,7 +590,15 @@ export default function PanelPage() {
         return false;
       }
       // Filtro de estado
-      if (filtroEstadoPedido === "LISTO_ENTREGA") {
+      if (filtroEstadoPedido === "CANCELACION_SOLICITADA") {
+        const notas = p.notas || "";
+        const tieneCancelacion =
+          p.estado === "CANCELACION_SOLICITADA" ||
+          (notas.includes("Cancelación solicitada por el cliente") &&
+            !notas.includes("[CANCELACION_METADATA:") &&
+            p.estado !== "CANCELADO");
+        if (!tieneCancelacion) return false;
+      } else if (filtroEstadoPedido === "LISTO_ENTREGA") {
         if (p.estado !== "LISTO_ENTREGA" && p.estado !== "LISTO_PARA_RETIRAR") {
           return false;
         }
@@ -640,6 +648,19 @@ export default function PanelPage() {
   );
   const countEntregados = useMemo(() => pedidos.filter((p) => p.estado === "ENTREGADO").length, [pedidos]);
   const countCancelados = useMemo(() => pedidos.filter((p) => p.estado === "CANCELADO").length, [pedidos]);
+  const countCancelacionesPendientes = useMemo(
+    () =>
+      pedidos.filter((p) => {
+        const notas = p.notas || "";
+        return (
+          p.estado === "CANCELACION_SOLICITADA" ||
+          (notas.includes("Cancelación solicitada por el cliente") &&
+            !notas.includes("[CANCELACION_METADATA:") &&
+            p.estado !== "CANCELADO")
+        );
+      }).length,
+    [pedidos]
+  );
   const countConComprobante = useMemo(() => pedidos.filter((p) => !!p.comprobanteUrl).length, [pedidos]);
   const totalMontoPedidos = useMemo(() => pedidos.reduce((acc, p) => acc + (p.total || 0), 0), [pedidos]);
 
@@ -1770,9 +1791,15 @@ export default function PanelPage() {
   ) => {
     setActiveView(modulo);
     if (modulo === "pedidos") {
+      setBusquedaPedido("");
+      setFiltroModalidadPedido("TODOS");
+      setFiltroEmpleadoPedido("TODOS");
+      setFiltroSoloComprobante(false);
+      setModoVisualizacionPedidos("listado");
       if (filtroEstado) setFiltroEstadoPedido(filtroEstado);
     } else if (modulo === "entrega") {
-      if (filtroEstado) setFiltroEstadoEntrega(filtroEstado as any);
+      setBusquedaEntrega("");
+      setFiltroEstadoEntrega(filtroEstado === "ENTREGADOS" ? "ENTREGADOS" : "POR_ENTREGAR");
     }
   };
 
@@ -2112,12 +2139,9 @@ export default function PanelPage() {
 
         {/* Barra superior de escritorio */}
         <div className="hidden lg:flex items-center justify-between pb-4 mb-6 border-b border-[#26272e]">
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-[#9a9ba3]">
-              Panel Staff · <span className="font-semibold text-white">{user?.nombreCompleto || user?.correo}</span>
-            </span>
-            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-[#1b1c22] border border-[#30313b] text-[#c5c6cf]">
-              {user?.rol ? user.rol.replace(/_/g, " ") : role.toUpperCase()}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-white">
+              {user?.nombreCompleto || user?.correo}
             </span>
           </div>
           <div className="flex items-center gap-3">
@@ -2331,6 +2355,9 @@ export default function PanelPage() {
                     { id: "PREPARANDO", label: "Preparando", count: countPreparando },
                     { id: "LISTO_ENTREGA", label: "Listos", count: countListos },
                     { id: "ENTREGADO", label: "Entregados", count: countEntregados },
+                    ...(countCancelacionesPendientes > 0 || filtroEstadoPedido === "CANCELACION_SOLICITADA"
+                      ? [{ id: "CANCELACION_SOLICITADA", label: "Cancelaciones", count: countCancelacionesPendientes }]
+                      : []),
                   ].map((item) => (
                     <button
                       key={item.id}

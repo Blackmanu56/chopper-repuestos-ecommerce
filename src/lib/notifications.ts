@@ -40,6 +40,7 @@ export interface GrupoNotificacionOperativa {
   icono: "CreditCard" | "Package" | "Truck" | "AlertTriangle" | "Clock";
   colorBadge: "amber" | "indigo" | "blue" | "emerald" | "red";
   pedidosIds: number[];
+  fechaUltimoEvento?: string;
 }
 
 export interface NotificacionStaff {

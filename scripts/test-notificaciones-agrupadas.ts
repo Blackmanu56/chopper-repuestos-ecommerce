@@ -59,16 +59,25 @@ async function main() {
     console.log(`    - [${g.clave}] "${g.titulo}" -> ${g.cantidad} órdenes (Módulo: ${g.moduloDestino})`);
   });
 
-  // Comprobar coherencia con la tabla real pedidoEcommerce
-  const pedidosEnPreparacionDb = await prisma.pedidoEcommerce.count({
-    where: { estado: "PREPARANDO" },
-  });
-  const grupoPrep = resAdmin.grupos.find((g) => g.clave === "EN_PREPARACION");
-  const countPrepGrupo = grupoPrep ? grupoPrep.cantidad : 0;
-  if (countPrepGrupo !== pedidosEnPreparacionDb) {
-    throw new Error(`Discrepancia en pedidos en preparación: BD=${pedidosEnPreparacionDb}, Grupo=${countPrepGrupo}`);
+  // Comprobar que EN_PREPARACION NO se incluye en avisos activos de acción
+  const tieneEnPreparacion = resAdmin.grupos.some((g) => g.clave === "EN_PREPARACION");
+  if (tieneEnPreparacion) {
+    throw new Error("Fallo: 'EN_PREPARACION' no debe figurar en los avisos principales porque ya está siendo atendido en depósito.");
   }
-  console.log(`  ✓ Coherencia verificada: ${countPrepGrupo} pedidos en preparación en BD coinciden exactamente con el grupo.`);
+  console.log("  ✓ Correcto: 'EN_PREPARACION' no figura en avisos activos porque ya está en atención en depósito.");
+
+  // Comprobar coherencia con la tabla real pedidoEcommerce para pagos pendientes
+  const pedidosPendientesPagoDb = await prisma.pedidoEcommerce.count({
+    where: {
+      estado: "PENDIENTE",
+    },
+  });
+  const grupoPagos = resAdmin.grupos.find((g) => g.clave === "PAGOS_PENDIENTES");
+  const countPagosGrupo = grupoPagos ? grupoPagos.cantidad : 0;
+  if (countPagosGrupo !== pedidosPendientesPagoDb) {
+    throw new Error(`Discrepancia: grupoPagos (${countPagosGrupo}) !== pedidosPendientesPagoDb (${pedidosPendientesPagoDb})`);
+  }
+  console.log(`  ✓ Coherencia verificada: ${countPagosGrupo} pedidos pendientes en BD coinciden exactamente con el grupo.`);
 
   // ─── 2. FILTRADO POR ROL: VENTAS ───
   console.log("\n2. Verificando filtrado estricto para rol Ventas...");

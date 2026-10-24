@@ -166,13 +166,8 @@ export async function getNotificacionesStaffAction(
     });
 
     // Subconjuntos operativos reales
-    const pagosPendientes = pedidosActivos.filter((p) => {
-      if (p.estado === "CANCELADO") return false;
-      return (
-        p.estado === "PENDIENTE" ||
-        (p.estadoPago === "PENDIENTE" && p.metodoPago === "TRANSFERENCIA")
-      );
-    });
+    // Un pedido pendiente de verificar pago es estrictamente aquel con estado === "PENDIENTE"
+    const pagosPendientes = pedidosActivos.filter((p) => p.estado === "PENDIENTE");
 
     const pendientesArmar = pedidosActivos.filter((p) => p.estado === "CONFIRMADO");
 
@@ -187,7 +182,7 @@ export async function getNotificacionesStaffAction(
       const tieneMetadataResuelta = notas.includes("[CANCELACION_METADATA:");
       return (
         p.estado === "CANCELACION_SOLICITADA" ||
-        (notas.includes("Cancelación solicitada por el cliente") && !tieneMetadataResuelta)
+        (notas.includes("Cancelación solicitada por el cliente") && !tieneMetadataResuelta && p.estado !== "CANCELADO")
       );
     });
 
@@ -209,6 +204,9 @@ export async function getNotificacionesStaffAction(
         icono: "CreditCard",
         colorBadge: "amber",
         pedidosIds: pagosPendientes.map((p) => p.id),
+        fechaUltimoEvento: pagosPendientes[0]?.creadoEn
+          ? new Date(pagosPendientes[0].creadoEn).toISOString()
+          : new Date().toISOString(),
       });
     }
 
@@ -228,28 +226,13 @@ export async function getNotificacionesStaffAction(
         icono: "Package",
         colorBadge: "indigo",
         pedidosIds: pendientesArmar.map((p) => p.id),
+        fechaUltimoEvento: pendientesArmar[0]?.creadoEn
+          ? new Date(pendientesArmar[0].creadoEn).toISOString()
+          : new Date().toISOString(),
       });
     }
 
-    // Grupo 3: En preparación (Stock / Admin)
-    if (enPreparacion.length > 0) {
-      const count = enPreparacion.length;
-      todosLosGrupos.push({
-        id: "en_preparacion",
-        clave: "EN_PREPARACION",
-        rolDestino: "STOCK",
-        titulo: `${count} ${count === 1 ? "pedido" : "pedidos"} en preparación`,
-        descripcion: "Control de repuestos y checklist de depósito en curso por los preparadores",
-        cantidad: count,
-        moduloDestino: "preparacion",
-        filtroDestino: "PREPARANDO",
-        icono: "Clock",
-        colorBadge: "blue",
-        pedidosIds: enPreparacion.map((p) => p.id),
-      });
-    }
-
-    // Grupo 4: Listos para entregar (Ventas / Admin)
+    // Grupo 3: Listos para entregar (Ventas / Admin)
     if (listosEntrega.length > 0) {
       const count = listosEntrega.length;
       todosLosGrupos.push({
@@ -260,14 +243,17 @@ export async function getNotificacionesStaffAction(
         descripcion: "Paquetes preparados para entrega en mostrador o despacho por motomandado",
         cantidad: count,
         moduloDestino: "entrega",
-        filtroDestino: "LISTO_ENTREGA",
+        filtroDestino: "POR_ENTREGAR",
         icono: "Truck",
         colorBadge: "emerald",
         pedidosIds: listosEntrega.map((p) => p.id),
+        fechaUltimoEvento: listosEntrega[0]?.creadoEn
+          ? new Date(listosEntrega[0].creadoEn).toISOString()
+          : new Date().toISOString(),
       });
     }
 
-    // Grupo 5: Solicitudes de cancelación pendientes (Ventas / Admin)
+    // Grupo 4: Solicitudes de cancelación pendientes (Ventas / Admin)
     if (cancelacionesPendientes.length > 0) {
       const count = cancelacionesPendientes.length;
       todosLosGrupos.push({
@@ -283,6 +269,9 @@ export async function getNotificacionesStaffAction(
         icono: "AlertTriangle",
         colorBadge: "red",
         pedidosIds: cancelacionesPendientes.map((p) => p.id),
+        fechaUltimoEvento: cancelacionesPendientes[0]?.creadoEn
+          ? new Date(cancelacionesPendientes[0].creadoEn).toISOString()
+          : new Date().toISOString(),
       });
     }
 
@@ -552,6 +541,7 @@ export async function marcarTodasNotificacionesLeidasAction(
   rolOperativo?: "admin" | "venta" | "stock" | "todos"
 ): Promise<{
   success: boolean;
+  noLeidasCount?: number;
   contadores?: ContadoresAvisos;
   grupos?: GrupoNotificacionOperativa[];
   error?: string;
@@ -579,6 +569,7 @@ export async function marcarTodasNotificacionesLeidasAction(
     const fresh = await getNotificacionesStaffAction(realUserId, rolOperativo);
     return {
       success: true,
+      noLeidasCount: fresh.noLeidasCount,
       contadores: fresh.contadores,
       grupos: fresh.grupos,
     };
