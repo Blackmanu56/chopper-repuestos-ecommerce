@@ -398,9 +398,11 @@ export async function crearPedidoOnlineAction(
     }
 
     // 4. Determinar estado inicial y notas automáticas de pago
-    // REGLA OPERATIVA ESTRICTA: Ningún pedido se aprueba automáticamente al crearse.
-    // Todos los pedidos inician en estado PENDIENTE ("Por verificar pago").
-    const initialEstado = "PENDIENTE";
+    // Flujo operativo: Los pedidos con pago en efectivo al retirar en local inician en CONFIRMADO,
+    // con stock reservado, listos en "Pendientes de armar" para que Stock inicie la preparación,
+    // manteniendo estadoPago = "PENDIENTE" y fechaPago = null hasta el cobro en mostrador.
+    // Los pedidos con transferencia bancaria u otros medios inician en PENDIENTE ("Por verificar pago").
+    const initialEstado = input.metodoPago === "EFECTIVO_LOCAL" ? "CONFIRMADO" : "PENDIENTE";
     const extraNotas: string[] = [];
     if (input.notas?.trim()) {
       extraNotas.push(input.notas.trim());
@@ -611,16 +613,30 @@ export async function crearPedidoOnlineAction(
       evento: "PEDIDO_CREADO",
     }).catch((err) => console.error("Error al disparar correo de pedido creado:", err));
 
-    // Notificación interna para el personal de Ventas
-    crearNotificacionStaffInternal({
-      tipo: "NUEVO_PEDIDO_PENDIENTE_PAGO",
-      rolDestino: "VENTAS",
-      titulo: `Nuevo pedido #ORD-${nuevoPedido.numero}`,
-      mensaje: `${nuevoPedido.nombreCliente} (${nuevoPedido.modalidadEntrega === "MOTOMANDADO" ? "Motomandado" : "Retiro"}) por $${nuevoPedido.total.toLocaleString("es-AR")}. Pago pendiente de verificación.`,
-      pedidoId: nuevoPedido.id,
-      pedidoNumero: nuevoPedido.numero,
-      moduloDestino: "pedidos",
-    }).catch((err) => console.error("Error al disparar notificación de staff:", err));
+    // Notificación interna según circuito operativo:
+    // Si es Efectivo al retirar (CONFIRMADO): notifica a STOCK para iniciar el armado en depósito.
+    // Si es Transferencia (PENDIENTE): notifica a VENTAS para verificar el comprobante de pago.
+    if (nuevoPedido.estado === "CONFIRMADO") {
+      crearNotificacionStaffInternal({
+        tipo: "PEDIDO_CONFIRMADO_ARMAR",
+        rolDestino: "STOCK",
+        titulo: `Pedido #ORD-${nuevoPedido.numero} confirmado`,
+        mensaje: `${nuevoPedido.nombreCliente} (Retiro en local) por $${nuevoPedido.total.toLocaleString("es-AR")}. Pago en efectivo al retirar. Listo para iniciar armado en depósito.`,
+        pedidoId: nuevoPedido.id,
+        pedidoNumero: nuevoPedido.numero,
+        moduloDestino: "preparacion",
+      }).catch((err) => console.error("Error al disparar notificación de staff:", err));
+    } else {
+      crearNotificacionStaffInternal({
+        tipo: "NUEVO_PEDIDO_PENDIENTE_PAGO",
+        rolDestino: "VENTAS",
+        titulo: `Nuevo pedido #ORD-${nuevoPedido.numero}`,
+        mensaje: `${nuevoPedido.nombreCliente} (${nuevoPedido.modalidadEntrega === "MOTOMANDADO" ? "Motomandado" : "Retiro"}) por $${nuevoPedido.total.toLocaleString("es-AR")}. Pago pendiente de verificación.`,
+        pedidoId: nuevoPedido.id,
+        pedidoNumero: nuevoPedido.numero,
+        moduloDestino: "pedidos",
+      }).catch((err) => console.error("Error al disparar notificación de staff:", err));
+    }
 
     return {
       success: true,

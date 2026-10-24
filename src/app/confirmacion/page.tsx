@@ -32,8 +32,8 @@ export default function ConfirmacionPage() {
         </div>
         <div className="flex justify-between">
           <span className="text-slate-400">Estado</span>
-          <span className="font-semibold text-amber-400">
-            {pedido?.estado || "PENDIENTE"}
+          <span className={`font-semibold ${pedido?.estado === "CONFIRMADO" ? "text-emerald-400" : "text-amber-400"}`}>
+            {pedido?.estado === "CONFIRMADO" ? "CONFIRMADO (EN COLA DE ARMADO)" : (pedido?.estado || "PENDIENTE")}
           </span>
         </div>
         <div className="flex justify-between">
@@ -45,12 +45,12 @@ export default function ConfirmacionPage() {
         <div className="flex justify-between">
           <span className="text-slate-400">Medio de pago</span>
           <span className="font-medium text-slate-300">
-            {pedido?.pago === "EFECTIVO" ? "Efectivo al retirar" : "Transferencia al retirar"}
+            {pedido?.pago === "EFECTIVO" || pedido?.pago === "EFECTIVO_LOCAL" ? "Efectivo al retirar" : "Transferencia"}
           </span>
         </div>
         <div className="flex justify-between">
           <span className="text-slate-400">Punto de retiro</span>
-          <span className="font-semibold text-white">Av. Colón 1540, Córdoba</span>
+          <span className="font-semibold text-white">Av. Roque Sáenz Peña 1500, Posadas, Misiones</span>
         </div>
       </div>
 
