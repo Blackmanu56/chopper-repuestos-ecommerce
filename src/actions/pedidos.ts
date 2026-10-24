@@ -1659,6 +1659,16 @@ export async function subirComprobantePedidoAction(
       },
     });
 
+    crearNotificacionStaffInternal({
+      tipo: "NUEVO_PEDIDO_PENDIENTE_PAGO",
+      rolDestino: "VENTAS",
+      titulo: `Comprobante adjuntado #ORD-${pedidoNumero}`,
+      mensaje: `El cliente ${pedido.nombreCliente} cargó o actualizó el comprobante de transferencia para la orden #${pedidoNumero}. Pendiente de verificación.`,
+      pedidoId: pedido.id,
+      pedidoNumero: pedido.numero,
+      moduloDestino: "pedidos",
+    }).catch((err) => console.error("Error al notificar comprobante a staff:", err));
+
     try {
       revalidatePath("/mis-pedidos");
       revalidatePath("/panel");

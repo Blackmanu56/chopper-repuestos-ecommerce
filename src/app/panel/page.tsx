@@ -2689,19 +2689,19 @@ export default function PanelPage() {
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2">
-                        {/* Botón directo si tiene comprobante para pasar a preparación */}
-                        {p.comprobanteUrl && p.estado !== "PREPARANDO" && p.estado !== "ENTREGADO" && p.estado !== "LISTO_ENTREGA" && p.estado !== "LISTO_PARA_RETIRAR" && p.estado !== "CANCELADO" && (
+                        {/* Acciones comerciales para pedidos PENDIENTES */}
+                        {p.estado === "PENDIENTE" && p.comprobanteUrl && (
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleCambiarEstadoPedido(p.id, "PREPARANDO");
+                              handleCambiarEstadoPedido(p.id, "CONFIRMADO", "Pago por transferencia verificado y aprobado por Ventas");
                             }}
                             disabled={saving}
-                            className="px-3.5 py-1.5 bg-[#3b82f6] hover:bg-blue-600 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow"
+                            className="px-3.5 py-1.5 bg-[#16a34a] hover:bg-green-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow cursor-pointer"
                           >
                             <CheckCircle2 className="w-3.5 h-3.5" />
-                            Comprobante verificado · Enviar a Stock
+                            Aprobar comprobante · Confirmar pedido
                           </button>
                         )}
 
@@ -2710,31 +2710,33 @@ export default function PanelPage() {
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              const stockWorker = staffPreparadores.find((s) => s.rol === "ENCARGADO_STOCK")?.id || null;
-                              handleCambiarEstadoPedido(p.id, "PREPARANDO", "Ventas verificó pedido y envió orden a Stock", stockWorker);
+                              handleCambiarEstadoPedido(p.id, "CONFIRMADO", "Ventas verificó pedido y confirmó orden");
                             }}
                             disabled={saving}
-                            className="px-3.5 py-1.5 bg-[#16a34a] hover:bg-green-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow"
+                            className="px-3.5 py-1.5 bg-[#16a34a] hover:bg-green-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow cursor-pointer"
                           >
                             <CheckCircle2 className="w-3.5 h-3.5" />
-                            Verificar pedido · Enviar a Stock
+                            Verificar pedido · Confirmar orden
                           </button>
                         )}
 
-                        {p.estado === "CONFIRMADO" && !p.comprobanteUrl && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const stockWorker = staffPreparadores.find((s) => s.rol === "ENCARGADO_STOCK")?.id || null;
-                              handleCambiarEstadoPedido(p.id, "PREPARANDO", "Ventas envió orden confirmada a Stock", stockWorker);
-                            }}
-                            disabled={saving}
-                            className="px-4 py-1.5 bg-[#3b82f6] hover:bg-blue-600 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow"
-                          >
-                            <Package className="w-3.5 h-3.5" />
-                            Enviar a Stock para preparar
-                          </button>
+                        {/* Acciones de depósito para pedidos CONFIRMADOS */}
+                        {p.estado === "CONFIRMADO" && (
+                          (user.rol === "ENCARGADO_STOCK" || user.rol === "ADMINISTRADOR") && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const stockWorker = staffPreparadores.find((s) => s.rol === "ENCARGADO_STOCK")?.id || null;
+                                handleCambiarEstadoPedido(p.id, "PREPARANDO", "Stock inició la preparación del pedido", stockWorker);
+                              }}
+                              disabled={saving}
+                              className="px-4 py-1.5 bg-[#3b82f6] hover:bg-blue-600 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow cursor-pointer"
+                            >
+                              <Package className="w-3.5 h-3.5" />
+                              Iniciar preparación en Stock
+                            </button>
+                          )
                         )}
 
                         {p.estado === "PREPARANDO" && (
@@ -7152,30 +7154,27 @@ export default function PanelPage() {
                       </div>
 
                       {/* Botón de Aprobación */}
-                      {(selectedPedido.estado === "PENDIENTE" || selectedPedido.estado === "CONFIRMADO") ? (
+                      {selectedPedido.estado === "PENDIENTE" ? (
                         <div className="flex flex-col gap-2">
                           <button
                             type="button"
                             onClick={() => {
-                              const targetStock = selectedPedido.preparadorUsuarioId || staffPreparadores.find((s) => s.rol === "ENCARGADO_STOCK")?.id || null;
-                              handleCambiarEstadoPedido(selectedPedido.id, "PREPARANDO", "Ventas verificó comprobante y envió orden a Stock", targetStock);
+                              handleCambiarEstadoPedido(selectedPedido.id, "CONFIRMADO", "Ventas verificó comprobante y aprobó pago por transferencia");
                             }}
                             disabled={saving}
-                            className="w-full py-2 bg-[#3b82f6] hover:bg-blue-600 text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow"
+                            className="w-full py-2 bg-[#16a34a] hover:bg-green-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow cursor-pointer"
                           >
                             <CheckCircle2 className="w-3.5 h-3.5" />
-                            {selectedPedido.estadoPago === "PAGADO"
-                              ? "Orden verificada · Enviar a Stock para preparar"
-                              : "Comprobante y pedido verificado · Enviar a Stock para preparar"}
+                            Aprobar comprobante y confirmar pedido
                           </button>
-                          {selectedPedido.estadoPago !== "PAGADO" && (
+                          {selectedPedido.comprobanteUrl && (
                             <button
                               type="button"
                               onClick={async () => {
-                                if (!confirm("¿Rechazar el comprobante? El pedido vuelve a PENDIENTE y se le informará al cliente.")) return;
+                                if (!confirm("¿Rechazar el comprobante? El pedido permanece en PENDIENTE y se le informará al cliente.")) return;
                                 const res = await rechazarComprobantePedidoAction(selectedPedido.id, user.id, "Comprobante rechazado por Ventas");
                                 if (res.success) {
-                                  showFeedback("success", "Comprobante rechazado. El pedido volvió a PENDIENTE.");
+                                  showFeedback("success", "Comprobante rechazado. El pedido permanece en PENDIENTE.");
                                   setPedidos((prev) => prev.map((p) => p.id === selectedPedido.id ? { ...p, estado: "PENDIENTE", comprobanteUrl: null } : p));
                                   setSelectedPedido(null);
                                 } else {
@@ -7183,11 +7182,33 @@ export default function PanelPage() {
                                 }
                               }}
                               disabled={saving}
-                              className="w-full py-2 bg-transparent border border-red-500/40 text-red-400 hover:bg-red-500/10 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5"
+                              className="w-full py-2 bg-transparent border border-red-500/40 text-red-400 hover:bg-red-500/10 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
                             >
                               <XCircle className="w-3.5 h-3.5" />
                               Rechazar comprobante
                             </button>
+                          )}
+                        </div>
+                      ) : selectedPedido.estado === "CONFIRMADO" ? (
+                        <div className="flex flex-col gap-2">
+                          {(user.rol === "ADMINISTRADOR" || user.rol === "ENCARGADO_STOCK") ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const targetStock = selectedPedido.preparadorUsuarioId || staffPreparadores.find((s) => s.rol === "ENCARGADO_STOCK")?.id || null;
+                                handleCambiarEstadoPedido(selectedPedido.id, "PREPARANDO", "Stock inició la preparación del pedido", targetStock);
+                              }}
+                              disabled={saving}
+                              className="w-full py-2 bg-[#3b82f6] hover:bg-blue-600 text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow cursor-pointer"
+                            >
+                              <Package className="w-3.5 h-3.5" />
+                              Iniciar preparación en Stock
+                            </button>
+                          ) : (
+                            <div className="p-2.5 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-300 text-xs flex items-center gap-2">
+                              <CheckCircle2 className="w-4 h-4 text-sky-400 shrink-0" />
+                              <span>Pago acreditado y orden confirmada. En espera de preparación por Stock.</span>
+                            </div>
                           )}
                         </div>
                       ) : null}
@@ -7199,20 +7220,19 @@ export default function PanelPage() {
                         <span>Comprobante pendiente del cliente</span>
                       </div>
                       <p className="text-[11px] text-[#9a9ba3] leading-relaxed">
-                        El comprobante lo adjunta el cliente directamente desde la tienda web al pagar o en &quot;Mis Pedidos&quot;. Como empleado de ventas o administrador, podés verificar los repuestos y enviar la orden a Stock:
+                        El comprobante lo adjunta el cliente directamente desde la tienda web al pagar o en &quot;Mis Pedidos&quot;. Como empleado de ventas o administrador, podés verificar y confirmar la orden para Stock:
                       </p>
                       {selectedPedido.estado === "PENDIENTE" && (
                         <button
                           type="button"
                           onClick={() => {
-                            const targetStock = selectedPedido.preparadorUsuarioId || staffPreparadores.find((s) => s.rol === "ENCARGADO_STOCK")?.id || null;
-                            handleCambiarEstadoPedido(selectedPedido.id, "PREPARANDO", "Ventas verificó pedido y autorizó preparación en Stock", targetStock);
+                            handleCambiarEstadoPedido(selectedPedido.id, "CONFIRMADO", "Ventas verificó pedido y confirmó orden para Stock");
                           }}
                           disabled={saving}
-                          className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow"
+                          className="w-full py-2 bg-[#16a34a] hover:bg-green-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow cursor-pointer"
                         >
                           <CheckCircle2 className="w-3.5 h-3.5" />
-                          Pedido verificado · Enviar a Stock para preparar
+                          Confirmar pedido para Stock
                         </button>
                       )}
                     </div>
