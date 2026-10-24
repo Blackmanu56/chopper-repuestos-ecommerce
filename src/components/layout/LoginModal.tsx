@@ -14,6 +14,8 @@ import {
   CheckCircle,
   Mail,
   Phone,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import Image from "next/image";
 
@@ -36,6 +38,9 @@ export default function LoginModal() {
   // Form states
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showRegisterPassword, setShowRegisterPassword] = useState(false);
+  const [showStaffPassword, setShowStaffPassword] = useState(false);
   const [nombreCompleto, setNombreCompleto] = useState("");
   const [telefono, setTelefono] = useState("");
   const [email, setEmail] = useState("");
@@ -50,6 +55,9 @@ export default function LoginModal() {
     if (isLoginOpen) {
       setUsername("");
       setPassword("");
+      setShowPassword(false);
+      setShowRegisterPassword(false);
+      setShowStaffPassword(false);
       setNombreCompleto("");
       setTelefono("");
       setEmail("");
@@ -225,12 +233,9 @@ export default function LoginModal() {
         </div>
 
         {sessionExpiredNotice && (
-          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-400 flex items-start gap-2.5">
-            <Lock size={16} className="shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold">Sesión finalizada</p>
-              <p className="text-[11px] text-amber-300/90 mt-0.5">{sessionExpiredNotice}</p>
-            </div>
+          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-400 flex items-center gap-2.5">
+            <Lock size={16} className="shrink-0 text-amber-400" />
+            <p className="font-semibold text-amber-300">{sessionExpiredNotice}</p>
           </div>
         )}
 
@@ -269,7 +274,7 @@ export default function LoginModal() {
 
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="text-slate-300 font-semibold">Contraseña</label>
+                <label className="text-slate-700 dark:text-slate-300 font-semibold">Contraseña</label>
                 <button
                   type="button"
                   onClick={() => setMode("RECOVERY")}
@@ -280,15 +285,24 @@ export default function LoginModal() {
               </div>
               <div className="relative">
                 <input
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   required
                   autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full rounded-xl border border-line bg-surface px-3 py-2.5 pl-9 text-white placeholder-slate-500 outline-none focus:border-brand"
+                  className="w-full rounded-xl border border-line bg-surface px-3 py-2.5 pl-9 pr-10 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 outline-none focus:border-brand"
                 />
-                <Lock size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <Lock size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 p-0.5 rounded transition-colors"
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
               </div>
             </div>
 
@@ -346,17 +360,28 @@ export default function LoginModal() {
             </div>
 
             <div>
-              <label className="block text-slate-300 font-semibold mb-1">
+              <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1">
                 Crear Contraseña *
               </label>
-              <input
-                required
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Mínimo 6 caracteres"
-                className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-white placeholder-slate-500 outline-none focus:border-brand"
-              />
+              <div className="relative">
+                <input
+                  required
+                  type={showRegisterPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Mínimo 6 caracteres"
+                  className="w-full rounded-xl border border-line bg-surface px-3 py-2 pr-10 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 outline-none focus:border-brand"
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => setShowRegisterPassword((prev) => !prev)}
+                  aria-label={showRegisterPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 p-0.5 rounded transition-colors"
+                >
+                  {showRegisterPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </div>
 
             <button
@@ -462,14 +487,23 @@ export default function LoginModal() {
               <div className="relative">
                 <input
                   required
-                  type="password"
+                  type={showStaffPassword ? "text" : "password"}
                   autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full rounded-xl border border-line bg-surface px-3 py-2.5 pl-9 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 outline-none focus:border-brand"
+                  className="w-full rounded-xl border border-line bg-surface px-3 py-2.5 pl-9 pr-10 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 outline-none focus:border-brand"
                 />
                 <Lock size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => setShowStaffPassword((prev) => !prev)}
+                  aria-label={showStaffPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 p-0.5 rounded transition-colors"
+                >
+                  {showStaffPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
               </div>
             </div>
 

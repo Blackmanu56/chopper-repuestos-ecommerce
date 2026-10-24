@@ -19,6 +19,8 @@ import {
   AtSign,
   Trash2,
   ChevronRight,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
 const AVATAR_PRESETS = [
@@ -53,6 +55,8 @@ export default function UserProfileModal() {
   const [avatar, setAvatar] = useState("");
   const [password, setPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [showPasswordFields, setShowPasswordFields] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -71,6 +75,8 @@ export default function UserProfileModal() {
       setAvatar(user.avatar || "");
       setPassword("");
       setNewPassword("");
+      setShowCurrentPassword(false);
+      setShowNewPassword(false);
       setSavedSuccess(false);
       setErrorMsg("");
     }
@@ -417,25 +423,47 @@ export default function UserProfileModal() {
                   <label className="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">
                     Contraseña actual
                   </label>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full rounded-xl border border-slate-300 dark:border-line bg-white dark:bg-surface py-1.5 px-3 text-xs text-slate-900 dark:text-white outline-none focus:border-brand"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showCurrentPassword ? "text" : "password"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full rounded-xl border border-slate-300 dark:border-line bg-white dark:bg-surface py-1.5 pl-3 pr-9 text-xs text-slate-900 dark:text-white outline-none focus:border-brand"
+                    />
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={() => setShowCurrentPassword((prev) => !prev)}
+                      aria-label={showCurrentPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 p-0.5 rounded transition-colors"
+                    >
+                      {showCurrentPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </button>
+                  </div>
                 </div>
                 <div>
                   <label className="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">
                     Nueva contraseña
                   </label>
-                  <input
-                    type="password"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="Mínimo 6 caracteres"
-                    className="w-full rounded-xl border border-slate-300 dark:border-line bg-white dark:bg-surface py-1.5 px-3 text-xs text-slate-900 dark:text-white outline-none focus:border-brand"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showNewPassword ? "text" : "password"}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="Mínimo 6 caracteres"
+                      className="w-full rounded-xl border border-slate-300 dark:border-line bg-white dark:bg-surface py-1.5 pl-3 pr-9 text-xs text-slate-900 dark:text-white outline-none focus:border-brand"
+                    />
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={() => setShowNewPassword((prev) => !prev)}
+                      aria-label={showNewPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 p-0.5 rounded transition-colors"
+                    >
+                      {showNewPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
