@@ -1,6 +1,7 @@
 import React from "react";
 import { notFound } from "next/navigation";
 import { getComboByIdAction, getPublicCombosAction } from "@/actions/combos";
+import { getServerSession } from "@/lib/session";
 import ComboDetailClient from "./ComboDetailClient";
 
 interface PageProps {
@@ -21,6 +22,14 @@ export default async function ComboDetailPage({ params }: PageProps) {
 
   if (!combo) {
     notFound();
+  }
+
+  // Si el combo no está activo (pausado/no publicado), solo el personal autorizado puede previsualizarlo
+  if (!combo.activo) {
+    const session = await getServerSession();
+    if (!session || session.kind !== "STAFF") {
+      notFound();
+    }
   }
 
   const allCombos = await getPublicCombosAction();

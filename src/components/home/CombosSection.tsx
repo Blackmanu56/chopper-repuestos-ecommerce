@@ -37,24 +37,29 @@ export default function CombosSection({ initialCombos }: CombosSectionProps) {
             setCombos(data);
           } else {
             // Fallback a los estáticos si la base de datos estuviera vacía
-            const fallback: ComboDTO[] = COMBOS_DATA.map((c) => ({
-              id: c.id,
-              nombre: c.nombre,
-              slug: c.codigo,
-              descripcion: c.descripcion,
-              badge: c.badge,
-              precio: c.precio,
-              precioRegular: c.precioOriginal,
-              ahorro: c.ahorro,
-              descuentoPorcentaje: Math.round((c.ahorro / c.precioOriginal) * 100),
-              enOferta: Boolean(c.precioOriginal && c.precioOriginal > c.precio),
-              imagen: c.imagen,
-              activo: true,
-              destacado: true,
-              orden: 0,
-              stockCalculado: c.stock,
-              items: [],
-            }));
+            const fallback: ComboDTO[] = COMBOS_DATA.map((c) => {
+              const imgs = (c.imagen || "").split(",").map((s) => s.trim()).filter(Boolean);
+              const allImgs = imgs.length > 0 ? imgs : ["/combos/combo-service-motul.jpg"];
+              return {
+                id: c.id,
+                nombre: c.nombre,
+                slug: c.codigo,
+                descripcion: c.descripcion,
+                badge: c.badge,
+                precio: c.precio,
+                precioRegular: c.precioOriginal,
+                ahorro: c.ahorro,
+                descuentoPorcentaje: Math.round((c.ahorro / c.precioOriginal) * 100),
+                enOferta: Boolean(c.precioOriginal && c.precioOriginal > c.precio),
+                imagen: allImgs[0],
+                imagenes: allImgs,
+                activo: true,
+                destacado: true,
+                orden: 0,
+                stockCalculado: c.stock,
+                items: [],
+              };
+            });
             setCombos(fallback);
           }
         })
@@ -172,11 +177,15 @@ export default function CombosSection({ initialCombos }: CombosSectionProps) {
                     AHORRÁ {formatPrice(combo.ahorro)}
                   </span>
                 ) : <span />}
-                {combo.badge && (
+                {combo.badge ? (
                   <span className="rounded-md border border-brand/40 bg-brand/10 px-2 py-0.5 text-[10px] font-bold text-brand">
                     {combo.badge}
                   </span>
-                )}
+                ) : combo.destacado ? (
+                  <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                    ⭐ Destacado
+                  </span>
+                ) : null}
               </div>
 
               {/* Imagen del Combo con enlace */}
@@ -187,6 +196,9 @@ export default function CombosSection({ initialCombos }: CombosSectionProps) {
                 <img
                   src={combo.imagen || "/combos/combo-service-motul.jpg"}
                   alt={combo.nombre}
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src = "/combos/combo-service-motul.jpg";
+                  }}
                   className="h-full w-full object-contain rounded-lg group-hover:scale-105 transition-transform duration-300"
                 />
               </Link>

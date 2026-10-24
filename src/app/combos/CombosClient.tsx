@@ -76,8 +76,8 @@ export default function CombosClient({ initialCombos }: CombosClientProps) {
     } else if (orden === "ahorro") {
       result.sort((a, b) => b.ahorro - a.ahorro);
     } else {
-      // Relevancia: orden definido en admin
-      result.sort((a, b) => a.orden - b.orden);
+      // Relevancia: primero los destacados, luego por orden
+      result.sort((a, b) => (b.destacado ? 1 : 0) - (a.destacado ? 1 : 0) || a.orden - b.orden);
     }
 
     return result;
@@ -327,11 +327,15 @@ export default function CombosClient({ initialCombos }: CombosClientProps) {
                         ) : (
                           <span />
                         )}
-                        {combo.badge && (
+                        {combo.badge ? (
                           <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-500 dark:text-amber-400">
                             {combo.badge}
                           </span>
-                        )}
+                        ) : combo.destacado ? (
+                          <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-500 dark:text-amber-400">
+                            ⭐ Destacado
+                          </span>
+                        ) : null}
                       </div>
 
                       {/* Imagen del Combo */}
@@ -342,6 +346,9 @@ export default function CombosClient({ initialCombos }: CombosClientProps) {
                         <img
                           src={combo.imagen || "/combos/combo-service-motul.jpg"}
                           alt={combo.nombre}
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).src = "/combos/combo-service-motul.jpg";
+                          }}
                           className="h-full w-full object-contain group-hover:scale-105 transition-transform duration-300"
                         />
                         {!hasStock && (
