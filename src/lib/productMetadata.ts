@@ -28,7 +28,11 @@ export function parseProductMetadata(rawDescripcion?: string | null): ProductCom
   if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
     try {
       const parsed = JSON.parse(trimmed);
-      if (typeof parsed === "object" && parsed !== null) {
+      if (
+        typeof parsed === "object" &&
+        parsed !== null &&
+        ("texto" in parsed || "descripcion" in parsed || "especificaciones" in parsed || "motosCompatibles" in parsed)
+      ) {
         const texto =
           typeof parsed.texto === "string"
             ? parsed.texto
@@ -103,7 +107,11 @@ export function serializeProductMetadata(metadata: {
     return null;
   }
 
-  // Si solo hay texto y nada de specs ni motos, podemos guardar JSON uniforme para consistencia
+  // Si solo hay texto y nada de specs ni motos, guardar como texto plano directamente
+  if (especificaciones.length === 0 && motosCompatibles.length === 0) {
+    return texto;
+  }
+
   return JSON.stringify({
     texto,
     especificaciones,
