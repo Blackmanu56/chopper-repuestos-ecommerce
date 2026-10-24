@@ -319,7 +319,7 @@ export default function Header() {
                 <button
                   type="button"
                   onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-                  className="flex items-center gap-2 rounded-xl border border-line bg-surface px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:border-brand hover:text-brand transition-all active:scale-95 shadow-sm"
+                  className="flex items-center gap-2 rounded-xl border border-line bg-surface px-2.5 sm:px-3.5 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:border-brand hover:text-brand transition-all active:scale-95 shadow-sm"
                   title="Menú de usuario"
                   aria-expanded={isUserMenuOpen}
                 >
@@ -334,7 +334,7 @@ export default function Header() {
                       <span>{user.nombreCompleto ? user.nombreCompleto.charAt(0).toUpperCase() : user.username.charAt(0).toUpperCase()}</span>
                     )}
                   </div>
-                  <span className="hidden sm:inline font-bold text-xs truncate max-w-[110px]">
+                  <span className="hidden sm:inline font-bold text-xs truncate max-w-[170px] md:max-w-[220px]">
                     {user.nombreCompleto || user.username}
                   </span>
                   <ChevronDown size={13} className={`text-slate-400 transition-transform ${isUserMenuOpen ? "rotate-180" : ""}`} />

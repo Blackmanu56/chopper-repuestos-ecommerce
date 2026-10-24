@@ -1842,72 +1842,54 @@ export default function PanelPage() {
           </button>
         </div>
 
-        {/* Tarjeta de Usuario / Sesión activa */}
-        <div className="p-3 mx-3 mt-3 mb-1 bg-[#121316] border border-[#26272e] rounded-xl space-y-2 shadow-xs">
-          <div className="flex items-center justify-between px-0.5">
-            <p className="text-xs font-bold text-white truncate" title={user.nombreCompleto}>
-              {user.nombreCompleto || "Usuario Staff"}
-            </p>
-            <span className="text-[10px] font-semibold text-[#8e8f96]">
-              {user.rol === "ADMINISTRADOR"
-                ? "Admin"
-                : user.rol === "ENCARGADO_VENTAS"
-                ? "Ventas"
-                : user.rol === "ENCARGADO_STOCK"
-                ? "Stock"
-                : user.rol}
-            </span>
-          </div>
-
-          {/* Switcher de Vista Operativa para Administrador */}
-          {user.rol === "ADMINISTRADOR" && (
-            <div className="pt-2 border-t border-[#26272e]">
-              <div className="flex items-center justify-between mb-1.5 px-0.5">
-                <span className="text-[10px] text-[#6b6c75] font-semibold uppercase tracking-wider">
-                  Vista operativa:
-                </span>
-              </div>
-              <div className="grid grid-cols-3 gap-1 bg-[#0f1012] p-0.5 rounded-lg border border-[#26272e]">
-                <button
-                  type="button"
-                  onClick={() => handleSetRole("admin")}
-                  className={`text-[10px] font-bold py-1 rounded transition-colors ${
-                    role === "admin"
-                      ? "bg-red-600 text-white shadow-xs"
-                      : "text-[#8e8f96] hover:text-white"
-                  }`}
-                  title="Menú completo de Administrador"
-                >
-                  Admin
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSetRole("venta")}
-                  className={`text-[10px] font-bold py-1 rounded transition-colors ${
-                    role === "venta"
-                      ? "bg-emerald-600 text-white shadow-xs"
-                      : "text-[#8e8f96] hover:text-white"
-                  }`}
-                  title="Navegación de Ventas"
-                >
-                  Ventas
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSetRole("stock")}
-                  className={`text-[10px] font-bold py-1 rounded transition-colors ${
-                    role === "stock"
-                      ? "bg-sky-600 text-white shadow-xs"
-                      : "text-[#8e8f96] hover:text-white"
-                  }`}
-                  title="Navegación de Stock"
-                >
-                  Stock
-                </button>
-              </div>
+        {/* Switcher de Vista Operativa (Exclusivo Administrador) */}
+        {user.rol === "ADMINISTRADOR" && (
+          <div className="p-3 mx-3 mt-3 mb-1 bg-[#121316] border border-[#26272e] rounded-xl space-y-1.5 shadow-xs">
+            <div className="flex items-center justify-between px-0.5">
+              <span className="text-[10px] text-[#6b6c75] font-semibold uppercase tracking-wider">
+                VISTA OPERATIVA
+              </span>
             </div>
-          )}
-        </div>
+            <div className="grid grid-cols-3 gap-1 bg-[#0f1012] p-0.5 rounded-lg border border-[#26272e]">
+              <button
+                type="button"
+                onClick={() => handleSetRole("admin")}
+                className={`text-[10px] font-bold py-1 rounded transition-colors ${
+                  role === "admin"
+                    ? "bg-red-600 text-white shadow-xs"
+                    : "text-[#8e8f96] hover:text-white"
+                }`}
+                title="Menú completo de Administrador"
+              >
+                Admin
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetRole("venta")}
+                className={`text-[10px] font-bold py-1 rounded transition-colors ${
+                  role === "venta"
+                    ? "bg-emerald-600 text-white shadow-xs"
+                    : "text-[#8e8f96] hover:text-white"
+                }`}
+                title="Navegación de Ventas"
+              >
+                Ventas
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetRole("stock")}
+                className={`text-[10px] font-bold py-1 rounded transition-colors ${
+                  role === "stock"
+                    ? "bg-sky-600 text-white shadow-xs"
+                    : "text-[#8e8f96] hover:text-white"
+                }`}
+                title="Navegación de Stock"
+              >
+                Stock
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Navegación por vistas */}
         <nav className="p-3 flex-1 overflow-y-auto space-y-4">
@@ -1999,9 +1981,6 @@ export default function PanelPage() {
                   <CreditCard className={`w-4 h-4 flex-shrink-0 ${activeView === "finanzas" ? "text-red-500" : "text-emerald-400"}`} />
                   <span className="truncate">Finanzas Online</span>
                 </div>
-                <span className="bg-emerald-500/20 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-500/30">
-                  Caja 24/7
-                </span>
               </button>
             )}
           </div>
@@ -2138,12 +2117,7 @@ export default function PanelPage() {
         </div>
 
         {/* Barra superior de escritorio */}
-        <div className="hidden lg:flex items-center justify-between pb-4 mb-6 border-b border-[#26272e]">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-white">
-              {user?.nombreCompleto || user?.correo}
-            </span>
-          </div>
+        <div className="hidden lg:flex items-center justify-end pb-4 mb-6 border-b border-[#26272e]">
           <div className="flex items-center gap-3">
             <NotificationBell
               user={user}
