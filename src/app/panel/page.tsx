@@ -568,6 +568,19 @@ export default function PanelPage() {
     }
   };
 
+  // Cierre accesible con tecla Escape para el visor de comprobantes
+  useEffect(() => {
+    if (!comprobanteModalUrl) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setComprobanteModalUrl(null);
+        setComprobanteModalPedido(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [comprobanteModalUrl]);
+
   const getWhatsAppLink = (telefono: string | null | undefined, nombre: string, numero: number) => {
     if (!telefono) return null;
     let clean = telefono.replace(/\D/g, "");
@@ -7386,10 +7399,18 @@ export default function PanelPage() {
 
         {/* Modal de Comprobante Mejorado (Soporte PDF e Imágenes) */}
         {comprobanteModalUrl && (
-          <div className="fixed inset-0 z-50 overflow-y-auto bg-black/85 backdrop-blur-sm flex min-h-full items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200">
-            <div className="relative w-full max-w-4xl rounded-2xl border border-[#26272e] bg-[#16171c] p-4 sm:p-6 shadow-2xl my-auto max-h-[calc(100vh-2rem)] flex flex-col">
+          <div
+            className="fixed inset-0 z-50 overflow-hidden bg-black/85 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 md:p-6 animate-in fade-in duration-200"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                setComprobanteModalUrl(null);
+                setComprobanteModalPedido(null);
+              }
+            }}
+          >
+            <div className="relative w-full max-w-5xl xl:max-w-6xl h-[90vh] max-h-[90vh] rounded-2xl border border-[#26272e] bg-[#16171c] p-3 sm:p-5 shadow-2xl flex flex-col overflow-hidden">
               {/* Header */}
-              <div className="flex items-start justify-between pb-3.5 border-b border-[#26272e] shrink-0 gap-3">
+              <div className="flex items-center justify-between pb-3 border-b border-[#26272e] shrink-0 gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className={`p-2.5 rounded-xl border shrink-0 ${
                     comprobanteInfo?.esPdf || comprobanteModalUrl.toLowerCase().endsWith(".pdf")
@@ -7428,24 +7449,25 @@ export default function PanelPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                   <a
                     href={comprobanteModalUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-2.5 py-1.5 rounded-lg bg-[#20222a] hover:bg-[#2b2d38] text-xs font-semibold text-gray-200 hover:text-white border border-[#2e303d] flex items-center gap-1.5 transition-colors"
-                    title="Abrir en pestaña nueva"
+                    className="px-2.5 sm:px-3 py-1.5 rounded-lg bg-[#20222a] hover:bg-[#2b2d38] text-xs font-semibold text-gray-200 hover:text-white border border-[#2e303d] flex items-center gap-1.5 transition-colors cursor-pointer"
+                    title="Abrir en otra pestaña"
                   >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Pestaña nueva</span>
+                    <ExternalLink className="w-3.5 h-3.5 text-sky-400" />
+                    <span className="hidden sm:inline">Abrir en otra pestaña</span>
                   </a>
                   <a
                     href={comprobanteModalUrl}
-                    download={comprobanteInfo?.nombreArchivo || "comprobante"}
-                    className="p-1.5 rounded-lg bg-[#20222a] hover:bg-[#2b2d38] text-gray-300 hover:text-white border border-[#2e303d] transition-colors"
+                    download={comprobanteInfo?.nombreArchivo || (comprobanteModalPedido ? `comprobante-orden-${comprobanteModalPedido.numero}` : "comprobante")}
+                    className="px-2.5 sm:px-3 py-1.5 rounded-lg bg-[#20222a] hover:bg-[#2b2d38] text-xs font-semibold text-gray-200 hover:text-white border border-[#2e303d] flex items-center gap-1.5 transition-colors cursor-pointer"
                     title="Descargar archivo"
                   >
-                    <Download className="w-4 h-4" />
+                    <Download className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="hidden sm:inline">Descargar</span>
                   </a>
                   <button
                     type="button"
@@ -7453,22 +7475,24 @@ export default function PanelPage() {
                       setComprobanteModalUrl(null);
                       setComprobanteModalPedido(null);
                     }}
-                    className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-[#20222a] transition-colors cursor-pointer"
+                    className="px-2.5 sm:px-3 py-1.5 rounded-lg bg-[#20222a] hover:bg-red-500/20 text-xs font-semibold text-gray-300 hover:text-red-300 border border-[#2e303d] hover:border-red-500/30 flex items-center gap-1.5 transition-colors cursor-pointer"
+                    title="Cerrar visor"
                   >
-                    <X className="w-5 h-5" />
+                    <X className="w-4 h-4" />
+                    <span className="hidden sm:inline">Cerrar</span>
                   </button>
                 </div>
               </div>
 
               {/* Body */}
-              <div className="flex-1 overflow-hidden py-3 flex flex-col justify-center">
+              <div className="flex-1 min-h-0 w-full overflow-hidden py-2.5 flex flex-col">
                 {loadingComprobanteInfo ? (
-                  <div className="h-[60vh] flex flex-col items-center justify-center gap-3 text-gray-400">
-                    <RefreshCw className="w-6 h-6 animate-spin text-sky-400" />
+                  <div className="flex-1 flex flex-col items-center justify-center gap-3 text-gray-400">
+                    <RefreshCw className="w-7 h-7 animate-spin text-sky-400" />
                     <span className="text-xs font-medium">Verificando comprobante en el servidor...</span>
                   </div>
                 ) : comprobanteInfo && !comprobanteInfo.existe ? (
-                  <div className="h-[60vh] flex flex-col items-center justify-center p-6 text-center bg-[#101115] rounded-xl border border-red-900/30 space-y-3">
+                  <div className="flex-1 flex flex-col items-center justify-center p-6 text-center bg-[#101115] rounded-xl border border-red-900/30 space-y-3">
                     <div className="w-12 h-12 rounded-full bg-red-950/40 border border-red-800/40 flex items-center justify-center text-red-400">
                       <AlertTriangle className="w-6 h-6" />
                     </div>
@@ -7491,30 +7515,42 @@ export default function PanelPage() {
                     </div>
                   </div>
                 ) : (comprobanteInfo?.esPdf || comprobanteModalUrl.toLowerCase().endsWith(".pdf")) ? (
-                  <div className="flex-1 flex flex-col h-[65vh] min-h-[400px]">
-                    <iframe
-                      src={`${comprobanteModalUrl}#toolbar=1&navpanes=0`}
-                      className="w-full h-full rounded-xl border border-[#26272e] bg-[#0c0d10]"
-                      title="Visor de Comprobante PDF"
-                    />
-                    <div className="mt-2 text-center text-[11px] text-gray-400 flex items-center justify-center gap-1">
+                  <div className="flex-1 min-h-0 w-full flex flex-col">
+                    <div className="flex-1 min-h-0 w-full rounded-xl overflow-hidden border border-[#26272e] bg-[#0c0d10] shadow-inner flex flex-col">
+                      <iframe
+                        src={`${comprobanteModalUrl}#toolbar=1&navpanes=0&view=FitH`}
+                        className="w-full h-full flex-1 border-0 block"
+                        title="Visor de Comprobante PDF"
+                      />
+                    </div>
+                    <div className="pt-2 px-1 text-center text-[11px] text-gray-400 flex flex-wrap items-center justify-center gap-1.5 shrink-0">
                       <span>¿Tu navegador no muestra el PDF interactivo?</span>
                       <a
                         href={comprobanteModalUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-sky-400 underline font-semibold hover:text-sky-300"
+                        className="text-sky-400 underline font-semibold hover:text-sky-300 inline-flex items-center gap-0.5"
                       >
-                        Abrir o descargar el PDF completo aquí
+                        <span>Abrir en otra pestaña</span>
+                        <ExternalLink className="w-3 h-3 inline" />
+                      </a>
+                      <span>o</span>
+                      <a
+                        href={comprobanteModalUrl}
+                        download={comprobanteInfo?.nombreArchivo || (comprobanteModalPedido ? `comprobante-orden-${comprobanteModalPedido.numero}.pdf` : "comprobante.pdf")}
+                        className="text-amber-400 underline font-semibold hover:text-amber-300 inline-flex items-center gap-0.5"
+                      >
+                        <span>descargar archivo</span>
+                        <Download className="w-3 h-3 inline" />
                       </a>
                     </div>
                   </div>
                 ) : (
-                  <div className="flex-1 flex items-center justify-center max-h-[68vh] bg-black/60 rounded-xl p-3 border border-[#26272e] overflow-auto">
+                  <div className="flex-1 min-h-0 w-full flex items-center justify-center bg-black/60 rounded-xl p-3 border border-[#26272e] overflow-auto">
                     <img
                       src={comprobanteModalUrl}
-                      alt="Comprobante"
-                      className="max-w-full max-h-[64vh] object-contain rounded-lg shadow-lg"
+                      alt="Comprobante de pago"
+                      className="max-w-full max-h-full object-contain rounded-lg shadow-lg select-none"
                       onError={(e) => {
                         (e.currentTarget as HTMLElement).style.display = "none";
                         const parent = e.currentTarget.parentElement;
