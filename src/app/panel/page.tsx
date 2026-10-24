@@ -156,6 +156,55 @@ function parseImages(imgStr: string | null | undefined): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Extrae únicamente la nota humana o mensaje útil de la orden,
+ * excluyendo los logs automáticos de auditoría generados por el sistema.
+ */
+function extraerNotaUtil(notas: string | null | undefined): string | null {
+  if (!notas || !notas.trim()) return null;
+
+  const partes = notas
+    .split(" | ")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const esLogSistema = (texto: string) => {
+    const t = texto.toLowerCase();
+    return (
+      t.startsWith("transferencia bancaria") ||
+      t.startsWith("pago con tarjeta") ||
+      t.startsWith("pago en efectivo al retirar") ||
+      t.startsWith("comprobante de transferencia") ||
+      t.startsWith("comprobante cargado") ||
+      t.startsWith("pago aprobado por") ||
+      t.startsWith("preparación iniciada") ||
+      t.startsWith("preparacion iniciada") ||
+      t.includes("checklist 100% completado") ||
+      t.startsWith("paquete listo para entrega") ||
+      t.startsWith("cobro en efectivo de") ||
+      t.startsWith("cancelado por") ||
+      t.startsWith("ventas verificó") ||
+      t.startsWith("ventas verifico") ||
+      t.startsWith("entregado a") ||
+      t.startsWith("entregado en") ||
+      t.startsWith("confirmación de entrega") ||
+      (t.startsWith("[") && t.endsWith("]"))
+    );
+  };
+
+  const notasUtiles = partes.filter((p) => !esLogSistema(p));
+
+  if (notasUtiles.length > 0) {
+    const notaLimpia = notasUtiles.join(" · ").replace(/^nota:\s*/i, "").trim();
+    if (notaLimpia.length > 120) {
+      return notaLimpia.substring(0, 117) + "...";
+    }
+    return notaLimpia;
+  }
+
+  return null;
+}
+
 function EstadoChip({ estado }: { estado: string }) {
   const styles: Record<string, { bg: string; text: string; border: string }> = {
     PENDIENTE: { bg: "rgba(217,119,6,0.15)", text: "#d97706", border: "#d97706" },
@@ -192,7 +241,7 @@ export default function PanelPage() {
 
   useEffect(() => {
     if (!isHydrating && (!user || !isStaff)) {
-      window.location.href = "/?sessionExpired=true";
+      window.location.href = "/";
     }
   }, [isHydrating, user, isStaff]);
 
@@ -5922,26 +5971,61 @@ export default function PanelPage() {
             {/* Grid de Pedidos para Entrega */}
             {pedidosEntrega.length === 0 ? (
               <div className="bg-[#16171c] border border-[#26272e] rounded-xl p-8 text-center text-[#9a9ba3] text-xs">
-                No hay pedidos en cola para entrega bajo estos filtros.
+                {busquedaEntrega.trim() ? (
+                  <span>
+                    No se encontraron pedidos que coincidan con &ldquo;
+                    <span className="text-white font-semibold">{busquedaEntrega.trim()}</span>
+                    &rdquo; en la pestaña{" "}
+                    <span className="text-white font-semibold">
+                      {filtroEstadoEntrega === "POR_ENTREGAR"
+                        ? "Por Entregar"
+                        : filtroEstadoEntrega === "ENTREGADOS"
+                        ? "Entregados"
+                        : "Todos"}
+                    </span>
+                    .
+                  </span>
+                ) : (
+                  <span>No hay pedidos en cola para entrega bajo estos filtros.</span>
+                )}
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {pedidosEntrega.map((p) => {
                   const waLink = getWhatsAppLink(p.telefonoCliente, p.nombreCliente, p.numero);
+                  const notaUtil = extraerNotaUtil(p.notas);
                   return (
                     <div
                       key={p.id}
-                      className="bg-[#1a1b20] border border-[#26272e] hover:border-[#35363d] rounded-xl p-5 space-y-4 flex flex-col justify-between transition-colors"
+                      onClick={() => setSelectedPedido(p)}
+                      className="bg-[#1a1b20] border border-[#26272e] hover:border-[#454652] rounded-xl p-5 space-y-4 flex flex-col justify-between transition-all cursor-pointer group hover:shadow-xl hover:shadow-black/50"
                     >
                       <div className="space-y-3">
+                        {/* Header de la tarjeta con #ORD clickeable */}
                         <div className="flex justify-between items-center pb-2 border-b border-[#26272e]">
                           <div className="flex items-center gap-2">
-                            <b className="text-base text-[#dc2626]">#ORD-{p.numero}</b>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedPedido(p);
+                              }}
+                              className="text-base font-bold text-[#dc2626] group-hover:text-red-400 hover:underline flex items-center gap-1.5 transition-colors cursor-pointer text-left"
+                              title="Consultar detalle de la orden"
+                            >
+                              <span>#ORD-{p.numero}</span>
+                              <ExternalLink className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100" />
+                            </button>
                             <EstadoChip estado={p.estado} />
                           </div>
-                          <span className="text-xs text-[#6b6c75]">
-                            {new Date(p.creadoEn).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })} hs
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-[#6b6c75]">
+                              {new Date(p.creadoEn).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })} hs
+                            </span>
+                            <span className="text-[10px] text-[#6b6c75] group-hover:text-[#9a9ba3] hidden sm:inline-flex items-center gap-1 border border-[#26272e] bg-[#141519] px-2 py-0.5 rounded">
+                              <Eye className="w-3 h-3 text-red-500/80" /> Consultar
+                            </span>
+                          </div>
                         </div>
 
                         {/* Datos del Cliente y WhatsApp */}
@@ -5983,7 +6067,8 @@ export default function PanelPage() {
                               href={waLink}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                              onClick={(e) => e.stopPropagation()}
+                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                             >
                               <MessageCircle className="w-3.5 h-3.5" /> Escribir WhatsApp
                             </a>
@@ -6001,6 +6086,7 @@ export default function PanelPage() {
                                   href={`https://maps.google.com/?q=${encodeURIComponent(p.direccionEnvio + ", Posadas, Misiones")}`}
                                   target="_blank"
                                   rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
                                   className="text-[10px] text-red-400 underline hover:text-red-300"
                                 >
                                   Ver mapa
@@ -6028,24 +6114,69 @@ export default function PanelPage() {
                           ))}
                         </div>
 
-                        {/* Notas registradas */}
-                        {p.notas && (
-                          <div className="text-[11px] text-[#9a9ba3] bg-[#0f1012] p-2 rounded border border-[#26272e] italic">
-                            Nota: {p.notas}
+                        {/* Nota breve y útil (si existe nota humana o del cliente) */}
+                        {notaUtil ? (
+                          <div className="text-[11px] text-[#b8b9c0] bg-[#141519] p-2.5 rounded-lg border border-[#26272e] flex items-start gap-2">
+                            <FileText className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                            <div className="flex-1 leading-snug">
+                              <span className="text-amber-400 font-semibold mr-1">Nota:</span>
+                              <span>{notaUtil}</span>
+                            </div>
                           </div>
-                        )}
+                        ) : null}
+
+                        {/* Indicador de consulta de orden */}
+                        <div className="flex items-center justify-between text-[11px] text-[#6b6c75] pt-0.5">
+                          <span className="flex items-center gap-1 group-hover:text-[#9a9ba3] transition-colors">
+                            <Eye className="w-3.5 h-3.5 text-red-500/80" />
+                            <span>Clic para ver detalle e historial</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedPedido(p);
+                            }}
+                            className="text-red-400 hover:text-red-300 font-semibold flex items-center gap-0.5 hover:underline cursor-pointer"
+                          >
+                            <span>Ver orden</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </button>
+                        </div>
                       </div>
 
-                      {/* Botones Operativos con Apertura de Modal */}
-                      <div className="pt-2 border-t border-[#26272e] flex flex-col gap-2">
+                      {/* Botones Operativos con Apertura de Modal de Entrega */}
+                      <div
+                        className="pt-2 border-t border-[#26272e] flex flex-col gap-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         {p.modalidadEntrega === "RETIRO_LOCAL" ? (
                           p.estado === "ENTREGADO" ? (
                             <button
-                              disabled
-                              className="w-full py-2.5 rounded-lg text-xs font-bold bg-zinc-800 text-[#6b6c75] cursor-not-allowed flex items-center justify-center gap-2"
+                              type="button"
+                              onClick={() => setSelectedPedido(p)}
+                              className="w-full py-2.5 rounded-lg text-xs font-bold bg-zinc-800 hover:bg-zinc-700/80 text-zinc-300 flex items-center justify-center gap-2 transition-colors cursor-pointer"
                             >
                               <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                              <span>Orden entregada en mostrador</span>
+                              <span>Orden entregada en mostrador · Consultar detalle</span>
+                            </button>
+                          ) : p.estado === "PREPARANDO" ? (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedPedido(p)}
+                              className="w-full py-2.5 rounded-lg text-xs font-bold bg-indigo-950/40 hover:bg-indigo-900/50 border border-indigo-700/40 text-indigo-300 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                            >
+                              <Package className="w-4 h-4 text-indigo-400" />
+                              <span>En preparación por Stock ({p.preparadorNombre || "Stock"}) · Ver</span>
+                            </button>
+                          ) : (p.estado === "CONFIRMADO" || p.estado === "PENDIENTE") ? (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedPedido(p)}
+                              className="w-full py-2.5 rounded-lg text-xs font-bold bg-zinc-800/80 hover:bg-zinc-700/80 border border-zinc-700 text-zinc-300 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                            >
+                              <Clock className="w-4 h-4 text-amber-400" />
+                              <span>Pendiente de armado en Stock · Ver</span>
                             </button>
                           ) : p.metodoPago === "EFECTIVO_LOCAL" && p.estadoPago !== "PAGADO" ? (
                             <button
@@ -6063,17 +6194,36 @@ export default function PanelPage() {
                               className="w-full py-2.5 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2 bg-[#16a34a] hover:bg-green-700 text-white shadow-lg shadow-green-900/20 cursor-pointer"
                             >
                               <Store className="w-4 h-4" />
-                              <span>Completar entrega en mostrador (por {user.nombreCompleto || "Carlos López"})</span>
+                              <span>Completar entrega en mostrador (por {user?.nombreCompleto || "Carlos López"})</span>
                             </button>
                           )
                         ) : (
                           p.estado === "ENTREGADO" ? (
                             <button
-                              disabled
-                              className="w-full py-2.5 rounded-lg text-xs font-bold bg-zinc-800 text-[#6b6c75] cursor-not-allowed flex items-center justify-center gap-2"
+                              type="button"
+                              onClick={() => setSelectedPedido(p)}
+                              className="w-full py-2.5 rounded-lg text-xs font-bold bg-zinc-800 hover:bg-zinc-700/80 text-zinc-300 flex items-center justify-center gap-2 transition-colors cursor-pointer"
                             >
                               <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                              <span>Orden entregada al chofer de Moto Uber</span>
+                              <span>Orden entregada al chofer · Consultar detalle</span>
+                            </button>
+                          ) : p.estado === "PREPARANDO" ? (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedPedido(p)}
+                              className="w-full py-2.5 rounded-lg text-xs font-bold bg-indigo-950/40 hover:bg-indigo-900/50 border border-indigo-700/40 text-indigo-300 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                            >
+                              <Package className="w-4 h-4 text-indigo-400" />
+                              <span>En preparación por Stock ({p.preparadorNombre || "Stock"}) · Ver</span>
+                            </button>
+                          ) : (p.estado === "CONFIRMADO" || p.estado === "PENDIENTE") ? (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedPedido(p)}
+                              className="w-full py-2.5 rounded-lg text-xs font-bold bg-zinc-800/80 hover:bg-zinc-700/80 border border-zinc-700 text-zinc-300 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                            >
+                              <Clock className="w-4 h-4 text-amber-400" />
+                              <span>Pendiente de armado en Stock · Ver</span>
                             </button>
                           ) : (
                             <button
@@ -6082,7 +6232,7 @@ export default function PanelPage() {
                               className="w-full py-2.5 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2 bg-[#16a34a] hover:bg-green-700 text-white shadow-lg shadow-green-900/20 cursor-pointer"
                             >
                               <Bike className="w-4 h-4" />
-                              <span>Confirmar salida a Moto Uber (por {user.nombreCompleto || "Carlos López"})</span>
+                              <span>Confirmar salida a Moto Uber (por {user?.nombreCompleto || "Carlos López"})</span>
                             </button>
                           )
                         )}
@@ -7239,23 +7389,86 @@ export default function PanelPage() {
                   )}
                 </div>
 
-                {/* Preparador + Notas */}
-                <div className="bg-[#1a1b20] border border-[#26272e] rounded-xl p-4 space-y-3 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[#6b6c75]">Preparado por:</span>
-                    <span className="text-white font-semibold">
-                      {selectedPedido.preparadorNombre || <span className="text-[#6b6c75] italic">Sin asignar</span>}
-                    </span>
-                  </div>
-                  {selectedPedido.notas && (
-                    <div className="pt-2 border-t border-[#26272e]">
-                      <span className="text-[#6b6c75] block mb-1">Notas:</span>
-                      <div className="text-[11px] text-white bg-[#141519] p-2 rounded border border-[#26272e] italic">
-                        {selectedPedido.notas}
+                {/* Preparador + Observaciones / Historial */}
+                {(() => {
+                  const isEntregaView = activeView === "entrega";
+                  const obsUtil = extraerNotaUtil(selectedPedido.notas);
+                  return (
+                    <div className="bg-[#1a1b20] border border-[#26272e] rounded-xl p-4 space-y-3 text-xs flex flex-col justify-between">
+                      <div className="space-y-2.5">
+                        <div className="flex items-center justify-between pb-2 border-b border-[#26272e]">
+                          <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                            <UserCheck className="w-3.5 h-3.5 text-indigo-400" /> Preparación y Control
+                          </span>
+                          <span className="text-[11px] text-[#9a9ba3]">Stock</span>
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <span className="text-[#6b6c75]">Preparado por:</span>
+                          <span className="text-white font-semibold">
+                            {selectedPedido.preparadorNombre || <span className="text-[#6b6c75] italic">Sin asignar</span>}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <span className="text-[#6b6c75]">Estado de preparación:</span>
+                          <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            {selectedPedido.estado === "ENTREGADO"
+                              ? "Entregado al cliente"
+                              : selectedPedido.estado === "LISTO_ENTREGA" || selectedPedido.estado === "LISTO_PARA_RETIRAR"
+                              ? "Paquete listo y controlado"
+                              : selectedPedido.estado === "PREPARANDO"
+                              ? "En preparación en depósito"
+                              : "Pendiente de armado"}
+                          </span>
+                        </div>
+
+                        {/* En vista Entrega de pedidos: mostrar ÚNICAMENTE observaciones útiles (si existen) */}
+                        {isEntregaView ? (
+                          obsUtil ? (
+                            <div className="pt-2.5 border-t border-[#26272e]">
+                              <span className="text-xs font-semibold text-amber-400 flex items-center gap-1.5 mb-1.5">
+                                <FileText className="w-3.5 h-3.5 text-amber-400" /> Observaciones
+                              </span>
+                              <div className="text-xs text-[#d1d2dc] bg-[#141519] p-2.5 rounded-lg border border-amber-500/20 leading-relaxed">
+                                {obsUtil}
+                              </div>
+                            </div>
+                          ) : null
+                        ) : (
+                          /* En otras vistas: mantener historial completo y notas */
+                          selectedPedido.notas && (
+                            <div className="pt-2 border-t border-[#26272e] space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-semibold text-white flex items-center gap-1.5">
+                                  <FileText className="w-3.5 h-3.5 text-red-500" /> Notas e Historial de Movimientos
+                                </span>
+                              </div>
+                              {obsUtil && (
+                                <div className="text-[11px] bg-amber-500/10 border border-amber-500/30 p-2 rounded text-amber-200">
+                                  <span className="text-amber-400 font-semibold block mb-0.5">Nota registrada:</span>
+                                  {obsUtil}
+                                </div>
+                              )}
+                              <div className="bg-[#141519] p-2.5 rounded-lg border border-[#26272e] max-h-36 overflow-y-auto space-y-1.5 text-[11px]">
+                                <span className="text-[10px] uppercase tracking-wider text-[#6b6c75] font-semibold block">
+                                  Historial de auditoría completo
+                                </span>
+                                {selectedPedido.notas.split(" | ").map((movimiento, mIdx) => (
+                                  <div key={mIdx} className="flex items-start gap-1.5 text-[#b8b9c0] leading-snug">
+                                    <span className="text-red-500 font-bold shrink-0">•</span>
+                                    <span>{movimiento.trim()}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )
+                        )}
                       </div>
                     </div>
-                  )}
-                </div>
+                  );
+                })()}
               </div>
 
               {/* Tabla de Repuestos del Pedido */}
@@ -8072,21 +8285,22 @@ export default function PanelPage() {
                       </button>
                     )}
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const targetStock = comprobanteModalPedido.preparadorUsuarioId || staffPreparadores.find((s) => s.rol === "ENCARGADO_STOCK")?.id || null;
-                        handleCambiarEstadoPedido(comprobanteModalPedido.id, "PREPARANDO", "Ventas verificó comprobante en visor y envió orden a Stock", targetStock);
-                        setComprobanteModalUrl(null);
-                        setComprobanteModalPedido(null);
-                        setSelectedPedido(null);
-                      }}
-                      disabled={saving}
-                      className="px-4 py-1.5 bg-[#3b82f6] hover:bg-blue-600 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow cursor-pointer"
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>{comprobanteModalPedido.estadoPago === "PAGADO" ? "Enviar a Stock" : "Comprobante verificado · Enviar a Stock"}</span>
-                    </button>
+                    {comprobanteModalPedido.estado === "PENDIENTE" && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleCambiarEstadoPedido(comprobanteModalPedido.id, "CONFIRMADO", "Ventas verificó comprobante en visor y aprobó pago por transferencia");
+                          setComprobanteModalUrl(null);
+                          setComprobanteModalPedido(null);
+                          setSelectedPedido(null);
+                        }}
+                        disabled={saving}
+                        className="px-4 py-1.5 bg-[#16a34a] hover:bg-green-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow cursor-pointer"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Aprobar comprobante y confirmar</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
