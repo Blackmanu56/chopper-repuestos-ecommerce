@@ -381,6 +381,7 @@ html.light .panel-root a[class*="bg-[#0f1012]"]:hover {
 /* Contenedores y tarjetas principales */
 html.light .panel-root div[class*="bg-[#16171c]"]:not(.keep-dark),
 html.light .panel-root section[class*="bg-[#16171c]"],
+html.light .panel-root div[class*="bg-[#121316]"]:not(.keep-dark),
 html.light .panel-root div[class*="bg-[#1a1b20]"]:not(
   button[class*="bg-red"],
   button[class*="bg-emerald"],
@@ -785,6 +786,7 @@ html.light .fixed.inset-0 {
 }
 
 html.light .fixed.inset-0 [class*="bg-[#16171c]"],
+html.light .fixed.inset-0 [class*="bg-[#121316]"],
 html.light .fixed.inset-0 [class*="bg-[#1a1b20]"] {
   background-color: #ffffff !important;
   border-color: #cbd5e1 !important;
@@ -793,6 +795,12 @@ html.light .fixed.inset-0 [class*="bg-[#1a1b20]"] {
 }
 
 html.light .fixed.inset-0 [class*="bg-[#141519]"] {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+html.light .fixed.inset-0 div[class*="bg-[#0f1012]"]:not(input, select, textarea, .keep-dark) {
   background-color: #f8fafc !important;
   border-color: #e2e8f0 !important;
   color: #0f172a !important;

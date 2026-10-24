@@ -5187,13 +5187,13 @@ export default function PanelPage() {
               </div>
 
               {bannersHome.length === 0 ? (
-                <div className="text-center py-10 bg-[#121316] rounded-xl border border-dashed border-[#26272e] p-6 space-y-3">
-                  <ImageIcon className="w-10 h-10 text-[#6b6c75] mx-auto" />
-                  <p className="text-xs text-[#9a9ba3]">No hay banners configurados en la tienda.</p>
+                <div className="text-center py-10 bg-slate-50 dark:bg-[#121316] rounded-xl border border-dashed border-slate-300 dark:border-[#26272e] p-6 space-y-3">
+                  <ImageIcon className="w-10 h-10 text-slate-400 dark:text-[#6b6c75] mx-auto" />
+                  <p className="text-xs text-slate-600 dark:text-[#9a9ba3]">No hay banners configurados en la tienda.</p>
                   <button
                     type="button"
                     onClick={handleOpenCrearBanner}
-                    className="px-3 py-1.5 bg-red-600/20 text-red-400 border border-red-500/30 rounded-lg text-xs font-semibold hover:bg-red-600/30 transition-colors"
+                    className="px-3 py-1.5 bg-red-600/10 dark:bg-red-600/20 text-red-600 dark:text-red-400 border border-red-500/30 rounded-lg text-xs font-semibold hover:bg-red-600/20 dark:hover:bg-red-600/30 transition-colors cursor-pointer"
                   >
                     Crear el primer banner
                   </button>
@@ -5203,48 +5203,48 @@ export default function PanelPage() {
                   {bannersHome.map((b, idx) => (
                     <div
                       key={b.id || idx}
-                      className="bg-[#121316] border border-[#26272e] hover:border-[#35363d] rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-colors"
+                      className="bg-slate-50/80 dark:bg-[#121316] border border-slate-200 dark:border-[#26272e] hover:border-slate-300 dark:hover:border-[#35363d] rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-colors shadow-2xs"
                     >
                       <div className="space-y-2 flex-1 min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#1a1b20] border border-[#26272e] text-[#8e8f96]">
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-200/80 dark:bg-[#1a1b20] border border-slate-300 dark:border-[#26272e] text-slate-700 dark:text-[#8e8f96] font-bold">
                             #{b.orden || idx + 1}
                           </span>
                           <span
                             className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                               b.activo
-                                ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
-                                : "bg-zinc-800 text-zinc-400 border-zinc-700"
+                                ? "bg-emerald-500/15 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
+                                : "bg-slate-200 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 border-slate-300 dark:border-zinc-700"
                             }`}
                           >
                             {b.activo ? "Activo en tienda" : "Pausado"}
                           </span>
                           {b.badge && (
-                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20">
                               {b.badge}
                             </span>
                           )}
                           {b.imagenUrl && (
-                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center gap-1">
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-purple-500/10 text-purple-700 dark:text-purple-400 border border-purple-500/20 flex items-center gap-1">
                               <ImageIcon className="w-3 h-3" /> Con imagen
                             </span>
                           )}
                         </div>
 
-                        <h3 className="text-sm font-bold text-white truncate">{b.titulo}</h3>
-                        <p className="text-xs text-[#9a9ba3] line-clamp-2 leading-relaxed">
+                        <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate">{b.titulo}</h3>
+                        <p className="text-xs text-slate-600 dark:text-[#9a9ba3] line-clamp-2 leading-relaxed">
                           {b.descripcion}
                         </p>
 
-                        <div className="flex flex-wrap items-center gap-4 text-[11px] text-[#8e8f96]">
+                        <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-500 dark:text-[#8e8f96]">
                           {b.enlace && (
-                            <div className="flex items-center gap-1.5 text-blue-400 font-mono">
+                            <div className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400 font-mono">
                               <ExternalLink className="w-3 h-3" />
                               <span>Enlace: {b.enlace}</span>
                             </div>
                           )}
                           {b.imagenUrl && (
-                            <div className="flex items-center gap-1.5 text-purple-400 font-mono truncate max-w-xs">
+                            <div className="flex items-center gap-1.5 text-purple-600 dark:text-purple-400 font-mono truncate max-w-xs">
                               <span>Foto: {b.imagenUrl}</span>
                             </div>
                           )}
@@ -5255,10 +5255,10 @@ export default function PanelPage() {
                         <button
                           type="button"
                           onClick={() => handleToggleBanner(b.id, !b.activo)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
                             b.activo
-                              ? "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
-                              : "bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/30"
+                              ? "bg-slate-200 hover:bg-slate-300 text-slate-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700 border border-slate-300/80 dark:border-transparent"
+                              : "bg-emerald-50 dark:bg-emerald-600/20 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-500/30 hover:bg-emerald-100 dark:hover:bg-emerald-600/30"
                           }`}
                           title={b.activo ? "Pausar banner" : "Activar banner"}
                         >
@@ -5269,7 +5269,7 @@ export default function PanelPage() {
                         <button
                           type="button"
                           onClick={() => handleOpenEditarBanner(b)}
-                          className="p-2 bg-[#1a1b20] hover:bg-[#26272e] border border-[#26272e] text-slate-300 hover:text-white rounded-lg text-xs transition-colors"
+                          className="p-2 bg-white dark:bg-[#1a1b20] hover:bg-slate-100 dark:hover:bg-[#26272e] border border-slate-300 dark:border-[#26272e] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white rounded-lg text-xs transition-colors cursor-pointer shadow-2xs"
                           title="Editar banner"
                         >
                           <Edit className="w-4 h-4" />
@@ -5278,7 +5278,7 @@ export default function PanelPage() {
                         <button
                           type="button"
                           onClick={() => handleEliminarBanner(b.id)}
-                          className="p-2 bg-red-950/20 hover:bg-red-950/40 border border-red-900/30 text-red-400 hover:text-red-300 rounded-lg text-xs transition-colors"
+                          className="p-2 bg-red-50 dark:bg-red-950/20 hover:bg-red-100 dark:hover:bg-red-950/40 border border-red-200 dark:border-red-900/30 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 rounded-lg text-xs transition-colors cursor-pointer shadow-2xs"
                           title="Eliminar banner"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -5293,17 +5293,17 @@ export default function PanelPage() {
             {/* Modal para Crear / Editar Banner del Inicio */}
             {showBannerModal && (
               <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in overflow-y-auto">
-                <div className="w-full max-w-lg bg-[#141519] border border-[#26272e] rounded-2xl shadow-2xl overflow-hidden space-y-4 p-6 my-8">
-                  <div className="flex items-start justify-between pb-3 border-b border-[#26272e]">
+                <div className="w-full max-w-lg bg-white dark:bg-[#141519] border border-slate-200 dark:border-[#26272e] rounded-2xl shadow-2xl overflow-hidden space-y-4 p-6 my-8">
+                  <div className="flex items-start justify-between pb-3 border-b border-slate-200 dark:border-[#26272e]">
                     <div className="flex items-center gap-2.5">
-                      <div className="p-2 rounded-xl bg-red-500/10 text-red-500 border border-red-500/20">
+                      <div className="p-2 rounded-xl bg-red-500/10 text-red-600 dark:text-red-500 border border-red-500/20">
                         <ImageIcon className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className="text-sm font-bold text-white">
+                        <h3 className="text-sm font-bold text-slate-900 dark:text-white">
                           {editingBanner ? "Editar Banner del Inicio" : "Crear Nuevo Banner del Inicio"}
                         </h3>
-                        <p className="text-[11px] text-[#9a9ba3]">
+                        <p className="text-[11px] text-slate-500 dark:text-[#9a9ba3]">
                           Configurá los textos, subtítulo, imagen y enlace para la página principal.
                         </p>
                       </div>
@@ -5311,7 +5311,7 @@ export default function PanelPage() {
                     <button
                       type="button"
                       onClick={() => setShowBannerModal(false)}
-                      className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-[#1f2026] transition-colors"
+                      className="text-slate-400 hover:text-slate-700 dark:hover:text-white p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-[#1f2026] transition-colors cursor-pointer"
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -5319,7 +5319,7 @@ export default function PanelPage() {
 
                   <div className="space-y-3.5 text-xs">
                     <div>
-                      <label className="block text-[#b8b9c0] font-semibold mb-1">
+                      <label className="block text-slate-700 dark:text-[#b8b9c0] font-semibold mb-1">
                         Título principal del banner:
                       </label>
                       <input
@@ -5327,12 +5327,12 @@ export default function PanelPage() {
                         value={bannerTitulo}
                         onChange={(e) => setBannerTitulo(e.target.value)}
                         placeholder="Ej: Hacé tu pedido y retiralo en el local"
-                        className="w-full bg-[#0f1012] border border-[#35363d] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-red-600 text-xs"
+                        className="w-full bg-slate-50 dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-xl px-3 py-2 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-red-600 text-xs"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[#b8b9c0] font-semibold mb-1">
+                      <label className="block text-slate-700 dark:text-[#b8b9c0] font-semibold mb-1">
                         Etiqueta / Subtítulo superior (Badge):
                       </label>
                       <input
@@ -5340,12 +5340,12 @@ export default function PanelPage() {
                         value={bannerBadge}
                         onChange={(e) => setBannerBadge(e.target.value)}
                         placeholder="Ej: CHOPPER REPUESTOS · POSADAS o Promoción de Temporada"
-                        className="w-full bg-[#0f1012] border border-[#35363d] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-red-600 text-xs"
+                        className="w-full bg-slate-50 dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-xl px-3 py-2 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-red-600 text-xs"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[#b8b9c0] font-semibold mb-1">
+                      <label className="block text-slate-700 dark:text-[#b8b9c0] font-semibold mb-1">
                         Descripción / Texto secundario:
                       </label>
                       <textarea
@@ -5353,16 +5353,16 @@ export default function PanelPage() {
                         value={bannerDescripcion}
                         onChange={(e) => setBannerDescripcion(e.target.value)}
                         placeholder="Ej: Buscá tu repuesto, armá el pedido online y pasá a retirarlo por nuestro local..."
-                        className="w-full bg-[#0f1012] border border-[#35363d] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-red-600 text-xs resize-none"
+                        className="w-full bg-slate-50 dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-xl px-3 py-2 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-red-600 text-xs resize-none"
                       />
                     </div>
 
                     {/* Imagen de fondo del Banner */}
-                    <div className="space-y-1.5 p-3 rounded-xl border border-[#26272e] bg-[#0f1012]">
-                      <label className="block text-[#b8b9c0] font-semibold">
+                    <div className="space-y-1.5 p-3 rounded-xl border border-slate-200 dark:border-[#26272e] bg-slate-50/80 dark:bg-[#0f1012]">
+                      <label className="block text-slate-700 dark:text-[#b8b9c0] font-semibold">
                         Imagen de fondo del banner (opcional):
                       </label>
-                      <p className="text-[10px] text-[#8e8f96] leading-relaxed">
+                      <p className="text-[10px] text-slate-500 dark:text-[#8e8f96] leading-relaxed">
                         Podés subir un archivo o ingresar su URL. Si la dejás vacía, se usará el degradado temático original adaptativo.
                       </p>
                       <div className="flex flex-col sm:flex-row gap-2 pt-1">
@@ -5371,9 +5371,9 @@ export default function PanelPage() {
                           value={bannerImagenUrl}
                           onChange={(e) => setBannerImagenUrl(e.target.value)}
                           placeholder="/uploads/banners/... o ruta directa"
-                          className="flex-1 bg-[#16171c] border border-[#35363d] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-red-600 text-xs font-mono"
+                          className="flex-1 bg-white dark:bg-[#16171c] border border-slate-300 dark:border-[#35363d] rounded-xl px-3 py-2 text-slate-900 dark:text-white focus:outline-none focus:border-red-600 text-xs font-mono"
                         />
-                        <label className="px-3 py-2 bg-[#22232a] hover:bg-[#2c2d36] text-white border border-[#35363d] rounded-xl text-xs font-semibold cursor-pointer flex items-center justify-center gap-1.5 shrink-0 transition-colors">
+                        <label className="px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-[#22232a] dark:hover:bg-[#2c2d36] text-slate-700 dark:text-white border border-slate-300 dark:border-[#35363d] rounded-xl text-xs font-semibold cursor-pointer flex items-center justify-center gap-1.5 shrink-0 transition-colors">
                           <Upload className="w-3.5 h-3.5 text-red-500" />
                           <span>{uploadingBannerImage ? "Subiendo..." : "Subir archivo"}</span>
                           <input
@@ -5391,7 +5391,7 @@ export default function PanelPage() {
                           <button
                             type="button"
                             onClick={() => setBannerImagenUrl("")}
-                            className="px-2.5 py-2 bg-red-950/20 hover:bg-red-950/40 text-red-400 border border-red-900/30 rounded-xl text-xs font-semibold transition-colors"
+                            className="px-2.5 py-2 bg-red-50 hover:bg-red-100 dark:bg-red-950/20 dark:hover:bg-red-950/40 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900/30 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
                             title="Quitar imagen (usar degradado)"
                           >
                             Quitar
@@ -5402,7 +5402,7 @@ export default function PanelPage() {
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-[#b8b9c0] font-semibold mb-1">
+                        <label className="block text-slate-700 dark:text-[#b8b9c0] font-semibold mb-1">
                           Enlace de destino (opcional):
                         </label>
                         <input
@@ -5410,12 +5410,12 @@ export default function PanelPage() {
                           value={bannerEnlace}
                           onChange={(e) => setBannerEnlace(e.target.value)}
                           placeholder="/ofertas"
-                          className="w-full bg-[#0f1012] border border-[#35363d] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-red-600 text-xs font-mono"
+                          className="w-full bg-slate-50 dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-xl px-3 py-2 text-slate-900 dark:text-white focus:outline-none focus:border-red-600 text-xs font-mono"
                         />
                       </div>
 
                       <div>
-                        <label className="block text-[#b8b9c0] font-semibold mb-1">
+                        <label className="block text-slate-700 dark:text-[#b8b9c0] font-semibold mb-1">
                           Orden de prioridad:
                         </label>
                         <input
@@ -5424,7 +5424,7 @@ export default function PanelPage() {
                           max={99}
                           value={bannerOrden}
                           onChange={(e) => setBannerOrden(parseInt(e.target.value, 10) || 1)}
-                          className="w-full bg-[#0f1012] border border-[#35363d] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-red-600 text-xs"
+                          className="w-full bg-slate-50 dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-xl px-3 py-2 text-slate-900 dark:text-white focus:outline-none focus:border-red-600 text-xs"
                         />
                       </div>
                     </div>
@@ -5435,34 +5435,34 @@ export default function PanelPage() {
                           type="checkbox"
                           checked={bannerActivo}
                           onChange={(e) => setBannerActivo(e.target.checked)}
-                          className="rounded bg-[#0f1012] border-[#35363d] text-red-600 focus:ring-0 cursor-pointer"
+                          className="rounded bg-white dark:bg-[#0f1012] border-slate-300 dark:border-[#35363d] text-red-600 focus:ring-0 cursor-pointer"
                         />
-                        <span className="text-white font-medium">Banner activo (visible en la página de inicio)</span>
+                        <span className="text-slate-800 dark:text-white font-medium">Banner activo (visible en la página de inicio)</span>
                       </label>
                     </div>
 
                     {/* Previsualización rápida */}
-                    <div className="pt-2 border-t border-[#26272e] space-y-1">
-                      <span className="text-[10px] text-[#6b6c75] font-semibold uppercase tracking-wider block">
+                    <div className="pt-2 border-t border-slate-200 dark:border-[#26272e] space-y-1">
+                      <span className="text-[10px] text-slate-500 dark:text-[#6b6c75] font-semibold uppercase tracking-wider block">
                         Previsualización aproximada:
                       </span>
-                      <div className="relative overflow-hidden p-3.5 rounded-xl border border-red-500/20 bg-gradient-to-r from-red-950/30 to-[#16171c] space-y-1.5">
+                      <div className="relative overflow-hidden p-3.5 rounded-xl border border-red-500/25 bg-gradient-to-r from-red-50 via-white to-slate-50 dark:from-red-950/30 dark:to-[#16171c] shadow-xs space-y-1.5">
                         {bannerImagenUrl && (
                           <div
-                            className="absolute inset-0 bg-cover bg-center opacity-20 pointer-events-none"
+                            className="absolute inset-0 bg-cover bg-center opacity-15 dark:opacity-25 pointer-events-none"
                             style={{ backgroundImage: `url(${bannerImagenUrl})` }}
                           />
                         )}
                         <div className="relative z-10 space-y-1">
                           {bannerBadge && (
-                            <span className="text-[9px] font-bold uppercase tracking-wider text-red-400 block">
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400 block">
                               {bannerBadge}
                             </span>
                           )}
-                          <h4 className="text-xs font-bold text-white leading-tight">
+                          <h4 className="text-xs font-bold text-slate-900 dark:text-white leading-tight">
                             {bannerTitulo || "Título de ejemplo"}
                           </h4>
-                          <p className="text-[11px] text-[#9a9ba3] line-clamp-2">
+                          <p className="text-[11px] text-slate-600 dark:text-[#9a9ba3] line-clamp-2">
                             {bannerDescripcion || "Descripción de ejemplo del banner..."}
                           </p>
                         </div>
@@ -5470,12 +5470,12 @@ export default function PanelPage() {
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#26272e]">
+                  <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-200 dark:border-[#26272e]">
                     <button
                       type="button"
                       onClick={() => setShowBannerModal(false)}
                       disabled={saving}
-                      className="px-4 py-2 bg-transparent border border-[#35363d] text-[#b8b9c0] hover:text-white rounded-xl text-xs font-semibold transition-colors"
+                      className="px-4 py-2 bg-white dark:bg-transparent border border-slate-300 dark:border-[#35363d] text-slate-700 dark:text-[#b8b9c0] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#1a1b20] rounded-xl text-xs font-semibold transition-colors cursor-pointer"
                     >
                       Cancelar
                     </button>
@@ -5483,7 +5483,7 @@ export default function PanelPage() {
                       type="button"
                       onClick={handleGuardarBanner}
                       disabled={saving}
-                      className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-all shadow flex items-center gap-1.5"
+                      className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-all shadow flex items-center gap-1.5 cursor-pointer"
                     >
                       {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                       <span>{editingBanner ? "Guardar cambios" : "Crear banner"}</span>
