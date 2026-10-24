@@ -262,11 +262,12 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     if (esCombo && product.componentes && product.componentes.length > 0) {
       const demand = computeCartDemand(items);
       const possibleAdditions = product.componentes.map((comp) => {
+        const reqQty = Math.max(1, comp.cantidad || 1);
         const compStock =
-          comp.stockProducto !== undefined ? comp.stockProducto : comp.cantidad * product.stock;
+          comp.stockProducto !== undefined ? comp.stockProducto : reqQty * product.stock;
         const alreadyUsed = demand.get(comp.productoId) || 0;
         const remainingCompStock = Math.max(0, compStock - alreadyUsed);
-        return Math.floor(remainingCompStock / comp.cantidad);
+        return Math.floor(remainingCompStock / reqQty);
       });
       return Math.max(0, Math.min(product.stock, ...possibleAdditions));
     }
@@ -320,11 +321,12 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
       if (esCombo && product.componentes && product.componentes.length > 0) {
         const possibleAdditions = product.componentes.map((comp) => {
+          const reqQty = Math.max(1, comp.cantidad || 1);
           const compStock =
-            comp.stockProducto !== undefined ? comp.stockProducto : comp.cantidad * product.stock;
+            comp.stockProducto !== undefined ? comp.stockProducto : reqQty * product.stock;
           const alreadyUsed = demand.get(comp.productoId) || 0;
           const remainingCompStock = Math.max(0, compStock - alreadyUsed);
-          return Math.floor(remainingCompStock / comp.cantidad);
+          return Math.floor(remainingCompStock / reqQty);
         });
         remaining = Math.max(0, Math.min(product.stock, ...possibleAdditions));
       } else {
@@ -409,11 +411,12 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         let remaining = 0;
         if (item.esCombo && item.componentes && item.componentes.length > 0) {
           const possible = item.componentes.map((comp) => {
+            const reqQty = Math.max(1, comp.cantidad || 1);
             const compStock =
-              comp.stockProducto !== undefined ? comp.stockProducto : comp.cantidad * item.stock;
+              comp.stockProducto !== undefined ? comp.stockProducto : reqQty * item.stock;
             const alreadyUsed = demand.get(comp.productoId) || 0;
             const remainingComp = Math.max(0, compStock - alreadyUsed);
-            return Math.floor(remainingComp / comp.cantidad);
+            return Math.floor(remainingComp / reqQty);
           });
           remaining = Math.max(0, Math.min(item.stock, ...possible));
         } else {
