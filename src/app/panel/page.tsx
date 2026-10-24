@@ -1512,7 +1512,8 @@ export default function PanelPage() {
   // ════════════════════════════════════════════════════════════
   const handleOpenEntregaModal = (p: PedidoDTO) => {
     setSelectedEntregaPedido(p);
-    setCodigoRetiroVerificado(p.dniCliente || "");
+    // El campo de verificación de DNI inicia siempre vacío para exigir ingreso manual de Ventas
+    setCodigoRetiroVerificado("");
     const initialChecked: Record<string, boolean> = {};
     p.items?.forEach((it) => {
       initialChecked[String(it.id)] = false;
@@ -1537,6 +1538,20 @@ export default function PanelPage() {
     const dniIngresado = (codigoRetiroVerificado || "").trim();
     if (!dniIngresado) {
       setCobroError("Ingresá el DNI del cliente en el Paso 1 para verificar su identidad antes de registrar el cobro.");
+      return;
+    }
+
+    // Validar DNI ingresado contra el registrado en la orden
+    const dniRegNorm = (selectedEntregaPedido.dniCliente || "").replace(/\D/g, "").trim();
+    const dniIngNorm = dniIngresado.replace(/\D/g, "").trim();
+    const isMatch = dniRegNorm
+      ? dniIngNorm === dniRegNorm
+      : dniIngresado.toLowerCase() === (selectedEntregaPedido.dniCliente || "").trim().toLowerCase();
+
+    if (!isMatch) {
+      setCobroError(
+        `El DNI ingresado (${dniIngresado}) no coincide con el DNI registrado en el pedido (${selectedEntregaPedido.dniCliente || "sin DNI"}). Verificá el documento del cliente antes de registrar el cobro.`
+      );
       return;
     }
 
@@ -1601,9 +1616,24 @@ export default function PanelPage() {
     // Guard 3: validar DNI presentado para retiro en mostrador
     const isRetiro = selectedEntregaPedido.modalidadEntrega === "RETIRO_LOCAL";
     const dniIngresado = (codigoRetiroVerificado || "").trim();
-    if (isRetiro && !dniIngresado) {
-      setCobroError("Ingresá el DNI del cliente que retira para confirmar la entrega.");
-      return;
+    if (isRetiro) {
+      if (!dniIngresado) {
+        setCobroError("Ingresá el DNI del cliente que retira en el Paso 1 para confirmar la entrega.");
+        return;
+      }
+
+      const dniRegNorm = (selectedEntregaPedido.dniCliente || "").replace(/\D/g, "").trim();
+      const dniIngNorm = dniIngresado.replace(/\D/g, "").trim();
+      const isMatch = dniRegNorm
+        ? dniIngNorm === dniRegNorm
+        : dniIngresado.toLowerCase() === (selectedEntregaPedido.dniCliente || "").trim().toLowerCase();
+
+      if (!isMatch) {
+        setCobroError(
+          `El DNI ingresado (${dniIngresado}) no coincide con el DNI registrado en el pedido (${selectedEntregaPedido.dniCliente || "sin DNI"}). No se puede autorizar la entrega.`
+        );
+        return;
+      }
     }
 
     setIsSubmittingEntrega(true);
@@ -1644,20 +1674,45 @@ export default function PanelPage() {
   // ════════════════════════════════════════════════════════════
   const pedidosEntrega = useMemo(() => {
     return pedidos.filter((p) => {
-      if (p.modalidadEntrega !== entregaTab) return false;
       if (p.estado === "CANCELADO") return false;
-      // La vista Entrega nunca muestra pedidos que todavía no fueron marcados listos por Stock
-      if (p.estado === "PREPARANDO" || p.estado === "PENDIENTE" || p.estado === "CONFIRMADO") return false;
-      if (filtroEstadoEntrega === "POR_ENTREGAR" && p.estado !== "LISTO_PARA_RETIRAR" && p.estado !== "LISTO_ENTREGA") return false;
-      if (filtroEstadoEntrega === "ENTREGADOS" && p.estado !== "ENTREGADO") return false;
-      if (busquedaEntrega.trim()) {
-        const q = busquedaEntrega.toLowerCase().trim();
-        const matchesOrd = `#ORD-${p.numero}`.toLowerCase().includes(q) || String(p.numero).includes(q);
-        const matchesDni = (p.dniCliente || "").toLowerCase().includes(q);
-        const matchesName = (p.nombreCliente || "").toLowerCase().includes(q);
-        if (!matchesOrd && !matchesDni && !matchesName) return false;
+      if (p.modalidadEntrega !== entregaTab) return false;
+
+      // Respetar estrictamente el filtro activo por estado de entrega
+      if (filtroEstadoEntrega === "POR_ENTREGAR") {
+        if (p.estado !== "LISTO_PARA_RETIRAR" && p.estado !== "LISTO_ENTREGA") return false;
+      } else if (filtroEstadoEntrega === "ENTREGADOS") {
+        if (p.estado !== "ENTREGADO") return false;
+      } else if (filtroEstadoEntrega === "TODOS") {
+        if (
+          p.estado !== "LISTO_PARA_RETIRAR" &&
+          p.estado !== "LISTO_ENTREGA" &&
+          p.estado !== "ENTREGADO"
+        ) {
+          return false;
+        }
       }
-      return true;
+
+      // Si no hay texto de búsqueda, pasa el filtro
+      if (!busquedaEntrega.trim()) return true;
+
+      // Con búsqueda activa: filtrar por número de orden, DNI o cliente
+      const rawQ = busquedaEntrega.trim().toLowerCase();
+      const cleanDigits = busquedaEntrega.replace(/\D/g, "");
+
+      const matchesOrd =
+        `#ord-${p.numero}`.includes(rawQ) ||
+        `ord-${p.numero}`.includes(rawQ) ||
+        String(p.numero).includes(rawQ) ||
+        (cleanDigits.length > 0 && String(p.numero) === cleanDigits);
+
+      const pDniClean = (p.dniCliente || "").replace(/\D/g, "");
+      const matchesDni =
+        (p.dniCliente || "").toLowerCase().includes(rawQ) ||
+        (cleanDigits.length >= 3 && pDniClean.includes(cleanDigits));
+
+      const matchesName = (p.nombreCliente || "").toLowerCase().includes(rawQ);
+
+      return matchesOrd || matchesDni || matchesName;
     });
   }, [pedidos, entregaTab, filtroEstadoEntrega, busquedaEntrega]);
 
@@ -5777,16 +5832,42 @@ export default function PanelPage() {
                   </button>
                 </div>
 
-                {/* Búsqueda rápida */}
-                <div className="relative flex-1 md:max-w-md">
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#6b6c75]" />
-                  <input
-                    type="text"
-                    placeholder="Buscar por #ORD, DNI o cliente..."
-                    value={busquedaEntrega}
-                    onChange={(e) => setBusquedaEntrega(e.target.value)}
-                    className="w-full bg-[#0f1012] border border-[#35363d] rounded-lg pl-9 pr-3 py-2 text-sm text-white focus:outline-none focus:border-red-600 placeholder:text-[#6b6c75]"
-                  />
+                {/* Búsqueda rápida + Botón Limpiar */}
+                <div className="flex items-center gap-2 flex-1 md:max-w-md">
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#6b6c75]" />
+                    <input
+                      type="text"
+                      placeholder="Buscar por #ORD, DNI o cliente..."
+                      value={busquedaEntrega}
+                      onChange={(e) => setBusquedaEntrega(e.target.value)}
+                      className="w-full bg-[#0f1012] border border-[#35363d] rounded-lg pl-9 pr-9 py-2 text-sm text-white focus:outline-none focus:border-red-600 placeholder:text-[#6b6c75]"
+                    />
+                    {busquedaEntrega && (
+                      <button
+                        type="button"
+                        onClick={() => setBusquedaEntrega("")}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6b6c75] hover:text-white transition-colors"
+                        title="Borrar texto"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setBusquedaEntrega("")}
+                    disabled={!busquedaEntrega}
+                    className={`px-3 py-2 border rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 shrink-0 ${
+                      busquedaEntrega
+                        ? "bg-[#1a1b20] hover:bg-[#26272e] border-[#35363d] text-[#e7e7ea] hover:text-white cursor-pointer shadow-sm"
+                        : "bg-[#16171c]/60 border-[#26272e] text-[#6b6c75] cursor-not-allowed opacity-50"
+                    }`}
+                    title="Limpiar búsqueda"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Limpiar</span>
+                  </button>
                 </div>
               </div>
 
@@ -6315,24 +6396,41 @@ export default function PanelPage() {
                 </p>
               </div>
 
-              {/* Búsqueda rápida */}
-              <div className="relative w-full sm:w-72">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#6b6c75]" />
-                <input
-                  type="text"
-                  placeholder="Buscar por #ORD, DNI o cliente..."
-                  value={busquedaEstadoPedidos}
-                  onChange={(e) => setBusquedaEstadoPedidos(e.target.value)}
-                  className="w-full bg-[#16171c] border border-[#35363d] rounded-xl pl-9 pr-8 py-2 text-xs text-white focus:outline-none focus:border-red-600 placeholder:text-[#6b6c75]"
-                />
-                {busquedaEstadoPedidos && (
-                  <button
-                    onClick={() => setBusquedaEstadoPedidos("")}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#6b6c75] hover:text-white"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
+              {/* Búsqueda rápida + Botón Limpiar */}
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <div className="relative w-full sm:w-72">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#6b6c75]" />
+                  <input
+                    type="text"
+                    placeholder="Buscar por #ORD, DNI o cliente..."
+                    value={busquedaEstadoPedidos}
+                    onChange={(e) => setBusquedaEstadoPedidos(e.target.value)}
+                    className="w-full bg-[#16171c] border border-[#35363d] rounded-xl pl-9 pr-8 py-2 text-xs text-white focus:outline-none focus:border-red-600 placeholder:text-[#6b6c75]"
+                  />
+                  {busquedaEstadoPedidos && (
+                    <button
+                      onClick={() => setBusquedaEstadoPedidos("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#6b6c75] hover:text-white"
+                      title="Borrar texto"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setBusquedaEstadoPedidos("")}
+                  disabled={!busquedaEstadoPedidos}
+                  className={`px-3 py-2 border rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 shrink-0 ${
+                    busquedaEstadoPedidos
+                      ? "bg-[#1a1b20] hover:bg-[#26272e] border-[#35363d] text-[#e7e7ea] hover:text-white cursor-pointer shadow-sm"
+                      : "bg-[#16171c]/60 border-[#26272e] text-[#6b6c75] cursor-not-allowed opacity-50"
+                  }`}
+                  title="Limpiar búsqueda"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Limpiar</span>
+                </button>
               </div>
             </div>
 
@@ -7345,10 +7443,11 @@ export default function PanelPage() {
                     )}
                   </div>
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="text-base font-black text-white">
                         #ORD-{selectedEntregaPedido.numero}
                       </h3>
+                      <EstadoChip estado={selectedEntregaPedido.estado} />
                       <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-[#1f2029] text-gray-300 border border-[#2e303d]">
                         {selectedEntregaPedido.modalidadEntrega === "RETIRO_LOCAL" ? "Retiro en local" : "Envío a domicilio"}
                       </span>
@@ -7364,6 +7463,9 @@ export default function PanelPage() {
                     </div>
                     <p className="text-xs text-gray-400 mt-0.5">
                       Cliente: <span className="text-gray-200 font-semibold">{selectedEntregaPedido.nombreCliente || "Consumidor Final"}</span>
+                      {selectedEntregaPedido.dniCliente && (
+                        <span> · DNI registrado: <strong className="text-gray-200">{selectedEntregaPedido.dniCliente}</strong></span>
+                      )}
                     </p>
                   </div>
                 </div>
@@ -7392,6 +7494,21 @@ export default function PanelPage() {
                   </div>
                 )}
 
+                {/* Banner informativo de estado si todavía está en depósito */}
+                {(selectedEntregaPedido.estado === "CONFIRMADO" || selectedEntregaPedido.estado === "PREPARANDO" || selectedEntregaPedido.estado === "PENDIENTE") && (
+                  <div className="p-3.5 rounded-xl bg-amber-950/30 border border-amber-600/40 text-amber-300 text-xs flex items-start gap-2.5">
+                    <Package className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+                    <div className="leading-relaxed">
+                      <strong className="block text-white font-semibold mb-0.5">
+                        {selectedEntregaPedido.estado === "PREPARANDO"
+                          ? `En preparación por Stock (${selectedEntregaPedido.preparadorNombre || "Personal de depósito"})`
+                          : "Pedido en espera de preparación por Stock"}
+                      </strong>
+                      <span>Este pedido todavía no fue marcado como &apos;Listo para entregar&apos;. Stock debe completar el control y armado antes de autorizar la entrega en mostrador.</span>
+                    </div>
+                  </div>
+                )}
+
                 {/* Resumen de orden y montos */}
                 <div className="p-3.5 rounded-xl bg-[#1a1b22] border border-[#26272e] flex flex-wrap items-center justify-between gap-3">
                   <div>
@@ -7403,8 +7520,8 @@ export default function PanelPage() {
                     <span className="text-xs font-bold text-gray-200">
                       {selectedEntregaPedido.metodoPago === "EFECTIVO_LOCAL"
                         ? "Efectivo en mostrador"
-                        : selectedEntregaPedido.metodoPago === "TRANSFERENCIA_BANCARIA"
-                        ? "Transferencia previa"
+                        : selectedEntregaPedido.metodoPago === "TRANSFERENCIA" || selectedEntregaPedido.metodoPago === "TRANSFERENCIA_BANCARIA"
+                        ? "Transferencia bancaria previa"
                         : selectedEntregaPedido.metodoPago || "No especificado"}
                     </span>
                   </div>
@@ -7425,39 +7542,71 @@ export default function PanelPage() {
                 </div>
 
                 {/* Paso 1: Verificación de Identidad */}
-                <div className="p-4 rounded-xl bg-[#14151a] border border-[#26272e] space-y-3">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-blue-400" />
-                    <h4 className="text-xs font-bold text-gray-200 uppercase tracking-wider">
-                      Paso 1: Verificación de Identidad de quien retira
-                    </h4>
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-gray-400 mb-1.5">
-                      DNI presentado en mostrador
-                    </label>
-                    <input
-                      type="text"
-                      value={codigoRetiroVerificado}
-                      onChange={(e) => setCodigoRetiroVerificado(e.target.value)}
-                      placeholder="Ingresá el DNI de la persona que retira..."
-                      className="w-full px-3 py-2 bg-[#1b1c24] border border-[#2e303d] rounded-lg text-xs text-white focus:outline-none focus:border-amber-400"
-                    />
-                    <div className="mt-1.5 flex items-center justify-between text-[11px]">
-                      <span className="text-gray-400">
-                        DNI registrado en compra:{" "}
-                        <strong className="text-gray-300">{selectedEntregaPedido.dniCliente || "No especificado"}</strong>
-                      </span>
-                      {selectedEntregaPedido.dniCliente && codigoRetiroVerificado.trim() === selectedEntregaPedido.dniCliente.trim() ? (
-                        <span className="text-green-400 font-semibold flex items-center gap-1">
-                          <Check className="w-3.5 h-3.5" /> Coincide con cliente
-                        </span>
-                      ) : codigoRetiroVerificado.trim() ? (
-                        <span className="text-amber-400 font-medium">Tercero autorizado (se registrará)</span>
-                      ) : null}
+                {(() => {
+                  const dniRegNorm = (selectedEntregaPedido.dniCliente || "").replace(/\D/g, "");
+                  const dniIngNorm = codigoRetiroVerificado.replace(/\D/g, "");
+                  const hasDniInput = codigoRetiroVerificado.trim().length > 0;
+                  const isDniValido = Boolean(
+                    hasDniInput &&
+                    (dniRegNorm
+                      ? dniIngNorm === dniRegNorm
+                      : codigoRetiroVerificado.trim().toLowerCase() === (selectedEntregaPedido.dniCliente || "").trim().toLowerCase())
+                  );
+                  const isDniInvalido = Boolean(hasDniInput && !isDniValido);
+
+                  return (
+                    <div className="p-4 rounded-xl bg-[#14151a] border border-[#26272e] space-y-3">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="w-4 h-4 text-blue-400" />
+                        <h4 className="text-xs font-bold text-gray-200 uppercase tracking-wider">
+                          Paso 1: Verificación de Identidad de quien retira
+                        </h4>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-gray-400 mb-1.5">
+                          DNI presentado en mostrador <span className="text-red-400">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          name="dni-verificacion-entrega"
+                          autoComplete="off"
+                          value={codigoRetiroVerificado}
+                          onChange={(e) => {
+                            setCodigoRetiroVerificado(e.target.value);
+                            setCobroError(null);
+                          }}
+                          placeholder="Ingresá manualmente el DNI informado por el cliente..."
+                          className={`w-full px-3 py-2 bg-[#1b1c24] border rounded-lg text-xs text-white focus:outline-none transition-colors ${
+                            isDniValido
+                              ? "border-emerald-500/80 focus:border-emerald-400"
+                              : isDniInvalido
+                              ? "border-red-500/80 focus:border-red-400"
+                              : "border-[#2e303d] focus:border-amber-400"
+                          }`}
+                        />
+                        <div className="mt-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-[11px]">
+                          <span className="text-gray-400">
+                            DNI registrado en compra:{" "}
+                            <strong className="text-gray-200">{selectedEntregaPedido.dniCliente || "No especificado"}</strong>
+                          </span>
+                          {!hasDniInput ? (
+                            <span className="text-amber-400/90 font-medium flex items-center gap-1">
+                              <AlertCircle className="w-3.5 h-3.5 text-amber-400" /> Solicitá e ingresá el DNI para verificar identidad
+                            </span>
+                          ) : isDniValido ? (
+                            <span className="text-emerald-400 font-bold flex items-center gap-1">
+                              <Check className="w-3.5 h-3.5 text-emerald-400" /> DNI verificado: coincide con el cliente
+                            </span>
+                          ) : (
+                            <span className="text-red-400 font-bold flex items-center gap-1">
+                              <AlertCircle className="w-3.5 h-3.5 text-red-400" /> El DNI no coincide con el registrado en el pedido
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  );
+                })()}
 
                 {/* Paso 2: Control de repuestos y combos */}
                 <div className="p-4 rounded-xl bg-[#14151a] border border-[#26272e] space-y-3">
@@ -7565,24 +7714,42 @@ export default function PanelPage() {
                         <p className="text-xs text-gray-300 leading-relaxed">
                           El cliente debe abonar <strong className="text-amber-400 font-bold">{formatPrice(selectedEntregaPedido.total)}</strong> en efectivo al retirar los repuestos.
                         </p>
-                        <button
-                          type="button"
-                          onClick={handleRegistrarCobroMostradorModal}
-                          disabled={isSubmittingCobro}
-                          className="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-[0.99] transition-all cursor-pointer"
-                        >
-                          {isSubmittingCobro ? (
-                            <>
-                              <RefreshCw className="w-4 h-4 animate-spin" />
-                              <span>Registrando cobro en mostrador...</span>
-                            </>
-                          ) : (
-                            <>
-                              <CreditCard className="w-4 h-4" />
-                              <span>Registrar cobro en mostrador ({formatPrice(selectedEntregaPedido.total)})</span>
-                            </>
-                          )}
-                        </button>
+                        {(() => {
+                          const dniRegNorm = (selectedEntregaPedido.dniCliente || "").replace(/\D/g, "");
+                          const dniIngNorm = codigoRetiroVerificado.replace(/\D/g, "");
+                          const isDniValido = Boolean(
+                            codigoRetiroVerificado.trim().length > 0 &&
+                            (dniRegNorm
+                              ? dniIngNorm === dniRegNorm
+                              : codigoRetiroVerificado.trim().toLowerCase() === (selectedEntregaPedido.dniCliente || "").trim().toLowerCase())
+                          );
+
+                          return (
+                            <button
+                              type="button"
+                              onClick={handleRegistrarCobroMostradorModal}
+                              disabled={isSubmittingCobro || !isDniValido}
+                              className="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-[0.99] transition-all cursor-pointer"
+                            >
+                              {isSubmittingCobro ? (
+                                <>
+                                  <RefreshCw className="w-4 h-4 animate-spin" />
+                                  <span>Registrando cobro en mostrador...</span>
+                                </>
+                              ) : !isDniValido ? (
+                                <>
+                                  <ShieldCheck className="w-4 h-4" />
+                                  <span>Validá el DNI en Paso 1 para habilitar cobro</span>
+                                </>
+                              ) : (
+                                <>
+                                  <CreditCard className="w-4 h-4" />
+                                  <span>Registrar cobro en mostrador ({formatPrice(selectedEntregaPedido.total)})</span>
+                                </>
+                              )}
+                            </button>
+                          );
+                        })()}
                       </div>
                     )}
                   </div>
@@ -7609,37 +7776,78 @@ export default function PanelPage() {
                 >
                   Cerrar
                 </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmarEntregaModal}
-                  disabled={
-                    isSubmittingEntrega ||
-                    selectedEntregaPedido.estado === "ENTREGADO" ||
-                    (selectedEntregaPedido.metodoPago === "EFECTIVO_LOCAL" && selectedEntregaPedido.estadoPago !== "PAGADO")
-                  }
-                  className="px-5 py-2 rounded-xl bg-[#16a34a] hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold transition-all flex items-center gap-2 shadow-lg shadow-green-900/20 cursor-pointer"
-                >
-                  {isSubmittingEntrega ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Confirmando entrega...</span>
-                    </>
-                  ) : selectedEntregaPedido.estado === "ENTREGADO" ? (
-                    <>
-                      <CheckCircle className="w-4 h-4" />
-                      <span>Pedido ya entregado</span>
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span>
-                        {selectedEntregaPedido.modalidadEntrega === "RETIRO_LOCAL"
-                          ? "Confirmar entrega en mostrador"
-                          : "Confirmar salida a Motomandado"}
-                      </span>
-                    </>
-                  )}
-                </button>
+                {(() => {
+                  const isRetiro = selectedEntregaPedido.modalidadEntrega === "RETIRO_LOCAL";
+                  const dniRegNorm = (selectedEntregaPedido.dniCliente || "").replace(/\D/g, "");
+                  const dniIngNorm = codigoRetiroVerificado.replace(/\D/g, "");
+                  const isDniValido = Boolean(
+                    codigoRetiroVerificado.trim().length > 0 &&
+                    (dniRegNorm
+                      ? dniIngNorm === dniRegNorm
+                      : codigoRetiroVerificado.trim().toLowerCase() === (selectedEntregaPedido.dniCliente || "").trim().toLowerCase())
+                  );
+
+                  const isEnPreparacion =
+                    selectedEntregaPedido.estado === "PREPARANDO" ||
+                    selectedEntregaPedido.estado === "CONFIRMADO" ||
+                    selectedEntregaPedido.estado === "PENDIENTE";
+
+                  const isFaltaCobro =
+                    selectedEntregaPedido.metodoPago === "EFECTIVO_LOCAL" &&
+                    selectedEntregaPedido.estadoPago !== "PAGADO";
+
+                  const canSubmitEntrega =
+                    !isSubmittingEntrega &&
+                    selectedEntregaPedido.estado !== "ENTREGADO" &&
+                    !isEnPreparacion &&
+                    !isFaltaCobro &&
+                    (!isRetiro || isDniValido);
+
+                  return (
+                    <button
+                      type="button"
+                      onClick={handleConfirmarEntregaModal}
+                      disabled={!canSubmitEntrega}
+                      className="px-5 py-2 rounded-xl bg-[#16a34a] hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold transition-all flex items-center gap-2 shadow-lg shadow-green-900/20 cursor-pointer"
+                    >
+                      {isSubmittingEntrega ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Confirmando entrega...</span>
+                        </>
+                      ) : selectedEntregaPedido.estado === "ENTREGADO" ? (
+                        <>
+                          <CheckCircle className="w-4 h-4" />
+                          <span>Pedido ya entregado</span>
+                        </>
+                      ) : isEnPreparacion ? (
+                        <>
+                          <Package className="w-4 h-4" />
+                          <span>Esperando preparación de Stock</span>
+                        </>
+                      ) : isFaltaCobro ? (
+                        <>
+                          <CreditCard className="w-4 h-4" />
+                          <span>Cobro pendiente en Paso 3</span>
+                        </>
+                      ) : isRetiro && !isDniValido ? (
+                        <>
+                          <ShieldCheck className="w-4 h-4" />
+                          <span>Validar DNI en Paso 1</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>
+                            {isRetiro
+                              ? `Confirmar entrega en mostrador (por ${user?.nombreCompleto || "Carlos López"})`
+                              : `Confirmar despacho a Moto Uber (por ${user?.nombreCompleto || "Carlos López"})`}
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  );
+                })()}
               </div>
             </div>
           </div>
