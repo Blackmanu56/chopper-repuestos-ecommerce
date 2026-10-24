@@ -346,12 +346,9 @@ export function FinanzasOnlineView({
             <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
               Finanzas Online
             </h1>
-            <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400">
-              E-Commerce
-            </span>
           </div>
           <p className="text-xs sm:text-[13px] text-slate-500 dark:text-[#9a9ba3] mt-0.5">
-            Control de cobros reales de la tienda web, balance de caja y reintegros independientes del SGI.
+            Cobros, movimientos y reintegros
           </p>
         </div>
 
@@ -382,30 +379,33 @@ export function FinanzasOnlineView({
           <button
             type="button"
             onClick={() => setSeccionTab("OPERACIONES")}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 border ${
               seccionTab === "OPERACIONES"
-                ? "bg-slate-900 text-white dark:bg-white dark:text-black shadow-xs"
-                : "text-slate-600 dark:text-[#9a9ba3] hover:bg-slate-100 dark:hover:bg-[#1a1b20]"
+                ? "bg-red-600 text-white border-red-600 shadow-xs"
+                : "bg-white text-slate-700 hover:text-slate-900 border-slate-200 hover:bg-slate-50 dark:bg-[#16171c] dark:border-[#26272e] dark:text-[#9a9ba3] dark:hover:text-white dark:hover:bg-[#1a1b20]"
             }`}
           >
-            <DollarSign className="w-4 h-4" />
-            <span>Resumen & Operaciones</span>
+            <span>Resumen y operaciones</span>
           </button>
 
           <button
             type="button"
             onClick={() => setSeccionTab("CIERRES_DIARIOS")}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 border ${
               seccionTab === "CIERRES_DIARIOS"
-                ? "bg-slate-900 text-white dark:bg-white dark:text-black shadow-xs"
-                : "text-slate-600 dark:text-[#9a9ba3] hover:bg-slate-100 dark:hover:bg-[#1a1b20]"
+                ? "bg-red-600 text-white border-red-600 shadow-xs"
+                : "bg-white text-slate-700 hover:text-slate-900 border-slate-200 hover:bg-slate-50 dark:bg-[#16171c] dark:border-[#26272e] dark:text-[#9a9ba3] dark:hover:text-white dark:hover:bg-[#1a1b20]"
             }`}
           >
-            <CalendarDays className="w-4 h-4 text-emerald-500" />
+            <CalendarDays className={`w-4 h-4 ${seccionTab === "CIERRES_DIARIOS" ? "text-white" : "text-emerald-500"}`} />
             <span>Cierres Diarios Contables</span>
             {cierreActualHoy && (
-              <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-400">
-                Hoy: ${(cierreActualHoy.totalNeto || 0).toLocaleString("es-AR")}
+              <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${
+                seccionTab === "CIERRES_DIARIOS"
+                  ? "bg-white/20 text-white"
+                  : "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-400"
+              }`}>
+                Hoy: $ {(cierreActualHoy.totalNeto || 0).toLocaleString("es-AR")}
               </span>
             )}
           </button>
@@ -436,28 +436,18 @@ export function FinanzasOnlineView({
       {/* ─── VISTA: RESUMEN Y OPERACIONES EN VIVO ─── */}
       {seccionTab === "OPERACIONES" && (
         <>
-      {/* ─── BANNER DE CAJA ONLINE INDEPENDIENTE ─── */}
-      {/* ─── BANNER DE CAJA ONLINE 24/7 PERMANENTE ─── */}
+      {/* ─── BANNER DE RESUMEN DE CAJA ─── */}
       <div className="bg-white dark:bg-[#16171c] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 sm:p-5 shadow-xs">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex items-start sm:items-center gap-3.5">
+          <div className="flex items-center gap-3.5">
             <div className="p-3 rounded-xl border flex-shrink-0 bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20">
               <Building2 className="w-6 h-6" />
             </div>
 
             <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
-                  Caja Online del E-Commerce
-                </span>
-                <span className="px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-500/30 flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-ping"></span>
-                  OPERATIVA 24/7
-                </span>
-              </div>
-              <p className="text-xs text-slate-500 dark:text-[#9a9ba3] mt-1">
-                La tienda web opera las 24 hs de forma continua. Todos los cobros y pedidos se registran en tiempo real sin requerir apertura ni cierre manual de caja.
-              </p>
+              <span className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
+                Resumen de caja
+              </span>
             </div>
           </div>
 
@@ -468,7 +458,7 @@ export function FinanzasOnlineView({
                 Cobrado Hoy
               </span>
               <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400 font-mono">
-                ${(cajaActual?.totalCobradoHoy || 0).toLocaleString("es-AR")}
+                $ {(cajaActual?.totalCobradoHoy || 0).toLocaleString("es-AR")}
               </span>
             </div>
 
@@ -477,7 +467,7 @@ export function FinanzasOnlineView({
                 Efectivo Hoy
               </span>
               <span className="text-sm font-bold text-slate-800 dark:text-zinc-200 font-mono">
-                ${(cajaActual?.totalEfectivoHoy || 0).toLocaleString("es-AR")}
+                $ {(cajaActual?.totalEfectivoHoy || 0).toLocaleString("es-AR")}
               </span>
             </div>
 
@@ -486,7 +476,7 @@ export function FinanzasOnlineView({
                 Transf. Hoy
               </span>
               <span className="text-sm font-bold text-sky-600 dark:text-sky-400 font-mono">
-                ${(cajaActual?.totalTransferenciasHoy || 0).toLocaleString("es-AR")}
+                $ {(cajaActual?.totalTransferenciasHoy || 0).toLocaleString("es-AR")}
               </span>
             </div>
           </div>
@@ -496,92 +486,86 @@ export function FinanzasOnlineView({
       {/* ─── INDICADORES CALCULADOS (KPI CARDS) ─── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: Cobrado Efectivo */}
-        <div className="bg-white dark:bg-[#16171c] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 shadow-xs space-y-2">
+        <div className="bg-white dark:bg-[#16171c] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 sm:p-5 shadow-xs flex flex-col justify-between space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-500 dark:text-[#8e8f96] uppercase tracking-wider">
               Efectivamente Cobrado
             </span>
-            <span className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">
+            <span className="p-2 rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-500/20">
               <CheckCircle2 className="w-4 h-4" />
             </span>
           </div>
           <div>
-            <div className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono">
-              ${(resumen?.totalCobrado || 0).toLocaleString("es-AR")}
+            <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white font-mono tracking-tight">
+              $ {(resumen?.totalCobrado || 0).toLocaleString("es-AR")}
             </div>
-            <p className="text-[11px] text-slate-500 dark:text-[#9a9ba3] mt-1 flex flex-wrap gap-x-2">
+            <p className="text-[11px] text-slate-500 dark:text-[#9a9ba3] mt-1.5 flex flex-wrap items-center gap-x-2">
               <span>
-                Transf:{" "}
-                <strong className="text-slate-700 dark:text-zinc-200">
-                  ${(resumen?.ingresosPorTransferencia || 0).toLocaleString("es-AR")}
-                </strong>
+                Transf: <strong className="text-slate-700 dark:text-zinc-200">$ {(resumen?.ingresosPorTransferencia || 0).toLocaleString("es-AR")}</strong>
               </span>
               <span>&bull;</span>
               <span>
-                Efect:{" "}
-                <strong className="text-slate-700 dark:text-zinc-200">
-                  ${(resumen?.ingresosPorEfectivo || 0).toLocaleString("es-AR")}
-                </strong>
+                Efect: <strong className="text-slate-700 dark:text-zinc-200">$ {(resumen?.ingresosPorEfectivo || 0).toLocaleString("es-AR")}</strong>
               </span>
             </p>
           </div>
         </div>
 
         {/* Card 2: Ventas Online Registradas */}
-        <div className="bg-white dark:bg-[#16171c] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 shadow-xs space-y-2">
+        <div className="bg-white dark:bg-[#16171c] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 sm:p-5 shadow-xs flex flex-col justify-between space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-500 dark:text-[#8e8f96] uppercase tracking-wider">
               Ventas Online Activas
             </span>
-            <span className="p-1.5 rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
+            <span className="p-2 rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 border border-blue-100 dark:border-blue-500/20">
               <TrendingUp className="w-4 h-4" />
             </span>
           </div>
           <div>
-            <div className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono">
-              ${(resumen?.totalVentasOnline || 0).toLocaleString("es-AR")}
+            <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white font-mono tracking-tight">
+              $ {(resumen?.totalVentasOnline || 0).toLocaleString("es-AR")}
             </div>
-            <p className="text-[11px] text-slate-500 dark:text-[#9a9ba3] mt-1">
+            <p className="text-[11px] text-slate-500 dark:text-[#9a9ba3] mt-1.5">
               {resumen?.totalOperaciones || 0} operaciones registradas en tienda.
             </p>
           </div>
         </div>
 
         {/* Card 3: Pagos Pendientes */}
-        <div className="bg-white dark:bg-[#16171c] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 shadow-xs space-y-2">
+        <div className="bg-white dark:bg-[#16171c] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 sm:p-5 shadow-xs flex flex-col justify-between space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-500 dark:text-[#8e8f96] uppercase tracking-wider">
               Pagos Pendientes
             </span>
-            <span className="p-1.5 rounded-lg bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400">
+            <span className="p-2 rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400 border border-amber-100 dark:border-amber-500/20">
               <Clock className="w-4 h-4" />
             </span>
           </div>
           <div>
-            <div className="text-2xl font-extrabold text-amber-600 dark:text-amber-400 font-mono">
-              ${(resumen?.totalPendiente || 0).toLocaleString("es-AR")}
+            <div className="text-2xl sm:text-3xl font-extrabold text-amber-600 dark:text-amber-400 font-mono tracking-tight">
+              $ {(resumen?.totalPendiente || 0).toLocaleString("es-AR")}
             </div>
-            <p className="text-[11px] text-slate-500 dark:text-[#9a9ba3] mt-1">
+            <p className="text-[11px] text-slate-500 dark:text-[#9a9ba3] mt-1.5">
               Por verificar o pendientes de cobro al retirar.
             </p>
           </div>
         </div>
 
         {/* Card 4: Reintegros Pendientes */}
-        <div className="bg-white dark:bg-[#16171c] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 shadow-xs space-y-2">
+        <div className="bg-white dark:bg-[#16171c] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 sm:p-5 shadow-xs flex flex-col justify-between space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-500 dark:text-[#8e8f96] uppercase tracking-wider">
               Reintegros Pendientes
             </span>
-            <span className="p-1.5 rounded-lg bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">
+            <span className="p-2 rounded-xl bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400 border border-rose-100 dark:border-rose-500/20">
               <AlertTriangle className="w-4 h-4" />
             </span>
           </div>
           <div>
-            <div className="text-2xl font-extrabold text-rose-600 dark:text-rose-400 font-mono">
-              ${(resumen?.montoReintegrosPendientes || 0).toLocaleString("es-AR")}
+            <div className="text-2xl sm:text-3xl font-extrabold text-rose-600 dark:text-rose-400 font-mono tracking-tight">
+              $ {(resumen?.montoReintegrosPendientes || 0).toLocaleString("es-AR")}
             </div>
-            <p className="text-[11px] text-slate-500 dark:text-[#9a9ba3] mt-1">
+            <p className="text-[11px] text-slate-500 dark:text-[#9a9ba3] mt-1.5">
               {resumen?.reintegrosPendientesCount || 0} pedidos cancelados que estaban cobrados.
             </p>
           </div>
@@ -595,20 +579,20 @@ export function FinanzasOnlineView({
           <div className="flex flex-wrap items-center gap-1.5">
             <button
               onClick={() => setMetodoTab("TODOS")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border ${
                 metodoTab === "TODOS"
-                  ? "bg-slate-900 text-white dark:bg-white dark:text-black shadow-xs"
-                  : "bg-slate-100 text-slate-600 hover:text-slate-900 dark:bg-[#1a1b20] dark:text-[#9a9ba3] dark:hover:text-white"
+                  ? "bg-slate-200 text-slate-900 border-slate-300 font-bold shadow-xs dark:bg-[#2b2c34] dark:text-white dark:border-[#3d3f4b]"
+                  : "bg-white text-slate-600 hover:text-slate-900 border-slate-200 hover:bg-slate-50 dark:bg-[#16171c] dark:text-[#9a9ba3] dark:border-[#26272e] dark:hover:text-white dark:hover:bg-[#1a1b20]"
               }`}
             >
               Todos los cobros ({operaciones.length})
             </button>
             <button
               onClick={() => setMetodoTab("TRANSFERENCIA")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 border ${
                 metodoTab === "TRANSFERENCIA"
-                  ? "bg-sky-600 text-white shadow-xs"
-                  : "bg-slate-100 text-slate-600 hover:text-slate-900 dark:bg-[#1a1b20] dark:text-[#9a9ba3] dark:hover:text-white"
+                  ? "bg-sky-600 text-white border-sky-600 shadow-xs"
+                  : "bg-white text-slate-600 hover:text-slate-900 border-slate-200 hover:bg-slate-50 dark:bg-[#16171c] dark:text-[#9a9ba3] dark:border-[#26272e] dark:hover:text-white dark:hover:bg-[#1a1b20]"
               }`}
             >
               <Building2 className="w-3.5 h-3.5" />
@@ -616,10 +600,10 @@ export function FinanzasOnlineView({
             </button>
             <button
               onClick={() => setMetodoTab("EFECTIVO_LOCAL")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 border ${
                 metodoTab === "EFECTIVO_LOCAL"
-                  ? "bg-emerald-600 text-white shadow-xs"
-                  : "bg-slate-100 text-slate-600 hover:text-slate-900 dark:bg-[#1a1b20] dark:text-[#9a9ba3] dark:hover:text-white"
+                  ? "bg-emerald-600 text-white border-emerald-600 shadow-xs"
+                  : "bg-white text-slate-600 hover:text-slate-900 border-slate-200 hover:bg-slate-50 dark:bg-[#16171c] dark:text-[#9a9ba3] dark:border-[#26272e] dark:hover:text-white dark:hover:bg-[#1a1b20]"
               }`}
             >
               <Banknote className="w-3.5 h-3.5" />
@@ -627,10 +611,10 @@ export function FinanzasOnlineView({
             </button>
             <button
               onClick={() => setMetodoTab("REINTEGROS")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 border ${
                 metodoTab === "REINTEGROS"
-                  ? "bg-rose-600 text-white shadow-xs"
-                  : "bg-slate-100 text-slate-600 hover:text-slate-900 dark:bg-[#1a1b20] dark:text-[#9a9ba3] dark:hover:text-white"
+                  ? "bg-rose-600 text-white border-rose-600 shadow-xs"
+                  : "bg-white text-slate-600 hover:text-slate-900 border-slate-200 hover:bg-slate-50 dark:bg-[#16171c] dark:text-[#9a9ba3] dark:border-[#26272e] dark:hover:text-white dark:hover:bg-[#1a1b20]"
               }`}
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -664,10 +648,10 @@ export function FinanzasOnlineView({
               <button
                 key={p}
                 onClick={() => setFiltroPeriodo(p)}
-                className={`px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors border ${
                   filtroPeriodo === p
-                    ? "bg-slate-200 text-slate-900 dark:bg-[#26272e] dark:text-white font-bold"
-                    : "text-slate-500 hover:text-slate-800 dark:text-[#8e8f96] dark:hover:text-white"
+                    ? "bg-slate-200 text-slate-900 border-slate-300 font-bold dark:bg-[#26272e] dark:text-white dark:border-[#35363d]"
+                    : "text-slate-600 hover:text-slate-900 border-transparent hover:bg-slate-100 dark:text-[#8e8f96] dark:hover:text-white dark:hover:bg-[#1a1b20]"
                 }`}
               >
                 {p === "TODOS"
@@ -689,10 +673,10 @@ export function FinanzasOnlineView({
               <button
                 key={ep}
                 onClick={() => setFiltroEstadoPago(ep)}
-                className={`px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors border ${
                   filtroEstadoPago === ep
-                    ? "bg-slate-200 text-slate-900 dark:bg-[#26272e] dark:text-white font-bold"
-                    : "text-slate-500 hover:text-slate-800 dark:text-[#8e8f96] dark:hover:text-white"
+                    ? "bg-slate-200 text-slate-900 border-slate-300 font-bold dark:bg-[#26272e] dark:text-white dark:border-[#35363d]"
+                    : "text-slate-600 hover:text-slate-900 border-transparent hover:bg-slate-100 dark:text-[#8e8f96] dark:hover:text-white dark:hover:bg-[#1a1b20]"
                 }`}
               >
                 {ep === "TODOS"
@@ -900,14 +884,11 @@ export function FinanzasOnlineView({
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
-                      Cierres Contables Diarios Automáticos
-                    </span>
-                    <span className="px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-blue-100 text-blue-800 dark:bg-blue-500/20 dark:text-blue-400 border border-blue-300 dark:border-blue-500/30">
-                      ZONA HORARIA ARGENTINA (UTC-3)
+                      Cierres contables diarios
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 dark:text-[#9a9ba3] mt-1">
-                    Cada jornada abarca de 00:00:00 a 23:59:59 hs. Los ingresos se computan estrictamente por la fecha en que se confirmó efectivamente el cobro (fechaPago) y los reintegros en su fecha de asentamiento. La tienda opera 24/7 sin bloqueos de ventas ni duplicación de registros.
+                    Balance contable automático de 00:00 a 23:59 hs según fecha efectiva de cobro y reintegros asentados.
                   </p>
                 </div>
               </div>
@@ -917,24 +898,26 @@ export function FinanzasOnlineView({
           {/* Cards Resumen de Cierres Diarios */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {/* Card 1: Jornada de Hoy */}
-            <div className="bg-white dark:bg-[#16171c] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 shadow-xs space-y-2">
+            <div className="bg-white dark:bg-[#16171c] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 sm:p-5 shadow-xs flex flex-col justify-between space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-bold text-slate-500 dark:text-[#8e8f96] uppercase tracking-wider">
                   Jornada de Hoy
                 </span>
-                <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-400 flex items-center gap-1">
+                <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-400 flex items-center gap-1 border border-emerald-200 dark:border-emerald-500/30">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
                   EN CURSO
                 </span>
               </div>
-              <div className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">
-                ${(cierreActualHoy?.totalNeto || 0).toLocaleString("es-AR")}
+              <div>
+                <div className="text-2xl sm:text-3xl font-extrabold text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">
+                  $ {(cierreActualHoy?.totalNeto || 0).toLocaleString("es-AR")}
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-[#9a9ba3] mt-1">
+                  {cierreActualHoy?.pedidosCobradosCount || 0} pedidos cobrados hoy ({cierreActualHoy?.fechaFormateada || "Hoy"}).
+                </p>
               </div>
-              <p className="text-[11px] text-slate-500 dark:text-[#9a9ba3]">
-                {cierreActualHoy?.pedidosCobradosCount || 0} pedidos cobrados hoy ({cierreActualHoy?.fechaFormateada || "Hoy"}).
-              </p>
               {cierreActualHoy && (
-                <div className="pt-2 flex items-center gap-2 border-t border-slate-100 dark:border-[#26272e]">
+                <div className="pt-2 flex items-center gap-3 border-t border-slate-100 dark:border-[#26272e]">
                   <button
                     type="button"
                     onClick={() => handleVerDetalleCierre(cierreActualHoy.fechaKey)}
@@ -957,39 +940,43 @@ export function FinanzasOnlineView({
             </div>
 
             {/* Card 2: Total Neto Histórico */}
-            <div className="bg-white dark:bg-[#16171c] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 shadow-xs space-y-2">
+            <div className="bg-white dark:bg-[#16171c] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 sm:p-5 shadow-xs flex flex-col justify-between space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-bold text-slate-500 dark:text-[#8e8f96] uppercase tracking-wider">
                   Total Neto Histórico
                 </span>
-                <span className="p-1.5 rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
+                <span className="p-2 rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 border border-blue-100 dark:border-blue-500/20">
                   <TrendingUp className="w-4 h-4" />
                 </span>
               </div>
-              <div className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono">
-                ${cierresDiarios.reduce((acc, c) => acc + c.totalNeto, 0).toLocaleString("es-AR")}
+              <div>
+                <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white font-mono tracking-tight">
+                  $ {cierresDiarios.reduce((acc, c) => acc + c.totalNeto, 0).toLocaleString("es-AR")}
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-[#9a9ba3] mt-1">
+                  Acumulado en todas las jornadas registradas en la tienda web.
+                </p>
               </div>
-              <p className="text-[11px] text-slate-500 dark:text-[#9a9ba3]">
-                Acumulado en todas las jornadas registradas en la tienda web.
-              </p>
             </div>
 
             {/* Card 3: Jornadas Registradas */}
-            <div className="bg-white dark:bg-[#16171c] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 shadow-xs space-y-2">
+            <div className="bg-white dark:bg-[#16171c] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 sm:p-5 shadow-xs flex flex-col justify-between space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-bold text-slate-500 dark:text-[#8e8f96] uppercase tracking-wider">
                   Jornadas Registradas
                 </span>
-                <span className="p-1.5 rounded-lg bg-purple-50 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400">
+                <span className="p-2 rounded-xl bg-purple-50 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400 border border-purple-100 dark:border-purple-500/20">
                   <Calendar className="w-4 h-4" />
                 </span>
               </div>
-              <div className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono">
-                {cierresDiarios.length}
+              <div>
+                <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white font-mono tracking-tight">
+                  {cierresDiarios.length}
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-[#9a9ba3] mt-1">
+                  {cierresDiarios.filter((c) => c.estado === "CERRADA").length} jornadas cerradas y {cierresDiarios.filter((c) => c.estado === "EN_CURSO").length} en curso.
+                </p>
               </div>
-              <p className="text-[11px] text-slate-500 dark:text-[#9a9ba3]">
-                {cierresDiarios.filter((c) => c.estado === "CERRADA").length} jornadas cerradas y 1 en curso.
-              </p>
             </div>
           </div>
 
@@ -1006,10 +993,10 @@ export function FinanzasOnlineView({
                     key={est}
                     type="button"
                     onClick={() => setFiltroCierreEstado(est)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border ${
                       filtroCierreEstado === est
-                        ? "bg-slate-900 text-white dark:bg-white dark:text-black shadow-xs"
-                        : "bg-slate-100 text-slate-600 hover:text-slate-900 dark:bg-[#1a1b20] dark:text-[#9a9ba3] dark:hover:text-white"
+                        ? "bg-slate-200 text-slate-900 border-slate-300 font-bold shadow-xs dark:bg-[#2b2c34] dark:text-white dark:border-[#3d3f4b]"
+                        : "bg-white text-slate-600 hover:text-slate-900 border-slate-200 hover:bg-slate-50 dark:bg-[#16171c] dark:text-[#9a9ba3] dark:border-[#26272e] dark:hover:text-white dark:hover:bg-[#1a1b20]"
                     }`}
                   >
                     {est === "TODOS"
@@ -1137,23 +1124,23 @@ export function FinanzasOnlineView({
 
                           {/* Total Bruto */}
                           <td className="py-3 px-4 text-right whitespace-nowrap font-mono font-semibold text-slate-800 dark:text-zinc-200">
-                            ${c.totalBruto.toLocaleString("es-AR")}
+                            $ {c.totalBruto.toLocaleString("es-AR")}
                           </td>
 
                           {/* Devoluciones */}
                           <td className="py-3 px-4 text-right whitespace-nowrap font-mono">
                             {c.totalDevoluciones > 0 ? (
                               <span className="text-rose-600 font-semibold">
-                                -${c.totalDevoluciones.toLocaleString("es-AR")}
+                                - $ {c.totalDevoluciones.toLocaleString("es-AR")}
                               </span>
                             ) : (
-                              <span className="text-slate-400 dark:text-[#6b6c75]">$0</span>
+                              <span className="text-slate-400 dark:text-[#6b6c75]">$ 0</span>
                             )}
                           </td>
 
                           {/* Total Neto */}
                           <td className="py-3 px-4 text-right whitespace-nowrap font-mono font-bold text-sm text-emerald-600 dark:text-emerald-400">
-                            ${c.totalNeto.toLocaleString("es-AR")}
+                            $ {c.totalNeto.toLocaleString("es-AR")}
                           </td>
 
                           {/* Estado */}
@@ -1633,7 +1620,7 @@ export function FinanzasOnlineView({
                 <button
                   type="button"
                   onClick={() => handleImprimirCierre(cierreSeleccionado)}
-                  className="px-3 py-1.5 text-xs font-bold bg-slate-900 text-white dark:bg-white dark:text-black rounded-lg hover:opacity-90 flex items-center gap-1.5 shadow-xs transition-opacity"
+                  className="px-3 py-1.5 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 dark:bg-[#202127] dark:hover:bg-[#2b2c34] dark:text-white dark:border-[#35363d] rounded-lg flex items-center gap-1.5 transition-colors shadow-xs"
                 >
                   <Printer className="w-3.5 h-3.5" />
                   <span>Imprimir cierre</span>
@@ -1653,39 +1640,39 @@ export function FinanzasOnlineView({
               <div className="bg-slate-50 dark:bg-[#0f1012] border border-slate-200 dark:border-[#26272e] rounded-xl p-3">
                 <span className="text-[10px] text-slate-500 uppercase font-semibold block">Total Bruto</span>
                 <span className="text-base font-extrabold font-mono text-slate-900 dark:text-white">
-                  ${cierreSeleccionado.totalBruto.toLocaleString("es-AR")}
+                  $ {cierreSeleccionado.totalBruto.toLocaleString("es-AR")}
                 </span>
               </div>
               <div className="bg-slate-50 dark:bg-[#0f1012] border border-slate-200 dark:border-[#26272e] rounded-xl p-3">
                 <span className="text-[10px] text-slate-500 uppercase font-semibold block">Transferencias</span>
                 <span className="text-base font-extrabold font-mono text-sky-600 dark:text-sky-400">
-                  ${cierreSeleccionado.totalTransferencias.toLocaleString("es-AR")}
+                  $ {cierreSeleccionado.totalTransferencias.toLocaleString("es-AR")}
                 </span>
               </div>
               <div className="bg-slate-50 dark:bg-[#0f1012] border border-slate-200 dark:border-[#26272e] rounded-xl p-3">
                 <span className="text-[10px] text-slate-500 uppercase font-semibold block">Efectivo Mostrador</span>
                 <span className="text-base font-extrabold font-mono text-emerald-600 dark:text-emerald-400">
-                  ${cierreSeleccionado.totalEfectivo.toLocaleString("es-AR")}
+                  $ {cierreSeleccionado.totalEfectivo.toLocaleString("es-AR")}
                 </span>
               </div>
               <div className="bg-slate-50 dark:bg-[#0f1012] border border-slate-200 dark:border-[#26272e] rounded-xl p-3">
                 <span className="text-[10px] text-slate-500 uppercase font-semibold block">Tarjetas</span>
                 <span className="text-base font-extrabold font-mono text-purple-600 dark:text-purple-400">
-                  ${cierreSeleccionado.totalTarjeta.toLocaleString("es-AR")}
+                  $ {cierreSeleccionado.totalTarjeta.toLocaleString("es-AR")}
                 </span>
               </div>
               <div className="bg-slate-50 dark:bg-[#0f1012] border border-slate-200 dark:border-[#26272e] rounded-xl p-3">
                 <span className="text-[10px] text-slate-500 uppercase font-semibold block">Devoluciones</span>
                 <span className="text-base font-extrabold font-mono text-rose-600">
                   {cierreSeleccionado.totalDevoluciones > 0
-                    ? `-$${cierreSeleccionado.totalDevoluciones.toLocaleString("es-AR")}`
-                    : "$0"}
+                    ? `- $ ${cierreSeleccionado.totalDevoluciones.toLocaleString("es-AR")}`
+                    : "$ 0"}
                 </span>
               </div>
               <div className="bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/30 rounded-xl p-3">
                 <span className="text-[10px] text-emerald-700 dark:text-emerald-400 uppercase font-bold block">TOTAL NETO</span>
                 <span className="text-lg font-black font-mono text-emerald-700 dark:text-emerald-400">
-                  ${cierreSeleccionado.totalNeto.toLocaleString("es-AR")}
+                  $ {cierreSeleccionado.totalNeto.toLocaleString("es-AR")}
                 </span>
               </div>
             </div>
@@ -1805,7 +1792,7 @@ export function FinanzasOnlineView({
                 <button
                   type="button"
                   onClick={() => handleImprimirCierre(cierreSeleccionado)}
-                  className="px-4 py-2 text-xs font-bold bg-slate-900 text-white dark:bg-white dark:text-black rounded-lg hover:opacity-90 flex items-center gap-1.5 transition-opacity"
+                  className="px-4 py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 dark:bg-[#202127] dark:hover:bg-[#2b2c34] dark:text-white dark:border-[#35363d] rounded-lg flex items-center gap-1.5 transition-colors shadow-xs"
                 >
                   <Printer className="w-3.5 h-3.5" />
                   <span>Imprimir informe</span>
@@ -1813,7 +1800,7 @@ export function FinanzasOnlineView({
                 <button
                   type="button"
                   onClick={() => setModalDetalleCierre(false)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 dark:text-[#9a9ba3] dark:hover:text-white bg-slate-100 dark:bg-[#202127] rounded-lg transition-colors"
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 dark:text-[#9a9ba3] dark:hover:text-white bg-slate-100 hover:bg-slate-200 border border-slate-200 dark:border-transparent dark:bg-[#202127] rounded-lg transition-colors"
                 >
                   Cerrar
                 </button>

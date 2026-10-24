@@ -887,9 +887,9 @@ html.light .panel-root .grid[class*="sm:grid-cols"] > div[class*="bg-[#16171c]"]
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
-/* Badges y chips en modo claro */
-html.light div[class*="bg-[#141519]"] span[class*="font-mono"],
-html.light span[class*="font-mono"] {
+/* Badges y chips en modo claro (excluyendo importes monetarios y estados con color) */
+html.light div[class*="bg-[#141519]"] span[class*="font-mono"]:not([class*="text-emerald"], [class*="text-amber"], [class*="text-rose"], [class*="text-sky"], [class*="text-blue"], [class*="text-red"], [class*="text-purple"], [class*="text-slate"], [class*="text-zinc"]),
+html.light span[class*="font-mono"]:not([class*="text-emerald"], [class*="text-amber"], [class*="text-rose"], [class*="text-sky"], [class*="text-blue"], [class*="text-red"], [class*="text-purple"], [class*="text-slate"], [class*="text-zinc"]) {
   background-color: #f1f5f9 !important;
   color: #475569 !important;
   border-color: #e2e8f0 !important;
