@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ComboDTO } from "@/actions/combos";
@@ -13,7 +13,6 @@ import {
   PackageCheck,
   ShieldCheck,
   Truck,
-  MapPin,
   CheckCircle2,
   Sparkles,
   MessageCircle,
@@ -27,6 +26,8 @@ import {
   Check,
   ShieldAlert,
   Lock,
+  Store,
+  Info,
 } from "lucide-react";
 import CuotasModal from "@/components/products/CuotasModal";
 import { ProductSpec } from "@/lib/productMetadata";
@@ -44,7 +45,6 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
   const [added, setAdded] = useState(false);
   const [showCuotasModal, setShowCuotasModal] = useState(false);
   const [activeTab, setActiveTab] = useState<"descripcion" | "componentes" | "specs" | "motos" | "compra">("descripcion");
-  const [activeImage, setActiveImage] = useState<string>(combo.imagen || "/combos/combo-service-motul.jpg");
   const otherCombosScrollRef = useRef<HTMLDivElement>(null);
 
   const formatPrice = (n: number) => "$" + Number(n).toLocaleString("es-AR");
@@ -73,26 +73,47 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
     }
   };
 
-  // Galería de fotos del combo: kit principal + fotos reales de repuestos incluidos
+  // Galería de fotos del combo: Portada (Foto 1) + Galería (Fotos 2, 3, 4) + Fotos de repuestos incluidos
   const getComboGallery = () => {
-    const main = combo.imagen || "/combos/combo-service-motul.jpg";
-    const itemImages = (combo.items || [])
-      .map((it) => it.producto.imagen)
-      .filter((img): img is string => Boolean(img));
+    const rawImages = (combo.imagenes && combo.imagenes.length > 0)
+      ? combo.imagenes
+      : (combo.imagen ? combo.imagen.split(",").map((s) => s.trim()).filter(Boolean) : []);
 
-    const images = [{ id: 1, url: main, label: "Kit Completo Armado" }];
-    itemImages.forEach((url, index) => {
-      images.push({
-        id: index + 2,
+    const comboImages = rawImages.length > 0 ? rawImages : ["/combos/combo-service-motul.jpg"];
+
+    const gallery: Array<{ id: string | number; url: string; label: string; isCover?: boolean }> = [];
+
+    // 1. Fotos del combo definidas en el admin: Foto 1 es Portada, 2, 3 y 4 adicionales de galería
+    comboImages.forEach((url, idx) => {
+      gallery.push({
+        id: `combo-img-${idx}`,
         url,
-        label: combo.items?.[index]?.producto?.nombre || `Componente ${index + 1}`,
+        label: idx === 0 ? "Kit Completo (Portada)" : `Foto ${idx + 1} del Combo`,
+        isCover: idx === 0,
       });
     });
 
-    return images;
+    // 2. Componentes incluidos que tengan foto real propia
+    (combo.items || []).forEach((it, idx) => {
+      if (it.producto?.imagen && !gallery.some((g) => g.url === it.producto.imagen)) {
+        gallery.push({
+          id: `item-img-${it.producto.id}`,
+          url: it.producto.imagen,
+          label: it.producto.nombre || `Repuesto ${idx + 1}`,
+        });
+      }
+    });
+
+    return gallery;
   };
 
   const galleryImages = getComboGallery();
+  const [activeImage, setActiveImage] = useState<string>(galleryImages[0]?.url || combo.imagen || "/combos/combo-service-motul.jpg");
+  const currentIdx = Math.max(
+    0,
+    galleryImages.findIndex((g) => g.url === (activeImage || galleryImages[0]?.url))
+  );
+  const currentImg = galleryImages[currentIdx] || galleryImages[0];
 
   const handleAddToCart = () => {
     if (isStaff || !hasStock) return;
@@ -131,8 +152,29 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
   const hasOffer = Boolean(combo.enOferta && combo.precioRegular && combo.precioRegular > combo.precio);
   const regular = hasOffer && combo.precioRegular ? combo.precioRegular : combo.precio;
   const ahorro = hasOffer && combo.precioRegular ? Math.max(0, combo.precioRegular - combo.precio) : 0;
-  const especificaciones: ProductSpec[] = combo.especificaciones || [];
-  const motosCompatibles: string[] = combo.motosCompatibles || [];
+
+  const ownSpecs: ProductSpec[] = combo.especificaciones || [];
+  const compSpecs = combo.especificacionesComponentes || [];
+  const totalSpecsCount = ownSpecs.length + compSpecs.reduce((acc, c) => acc + c.specs.length, 0);
+  const hasSpecs = totalSpecsCount > 0;
+
+  const ownMotos: string[] = combo.motosCompatibles || [];
+  const compMotos = combo.motosCompatiblesComponentes || [];
+  const totalMotosCount = ownMotos.length + compMotos.reduce((acc, c) => acc + c.motos.length, 0);
+  const hasMotos = totalMotosCount > 0;
+
+  // Si la pestaña activa actual no tiene contenido, volver a la descripción
+  useEffect(() => {
+    if (activeTab === "specs" && !hasSpecs) {
+      setActiveTab("descripcion");
+    }
+    if (activeTab === "motos" && !hasMotos) {
+      setActiveTab("descripcion");
+    }
+    if (activeTab === "componentes" && (!combo.items || combo.items.length === 0)) {
+      setActiveTab("descripcion");
+    }
+  }, [activeTab, hasSpecs, hasMotos, combo.items]);
 
   return (
     <div className="space-y-8 pb-12">
@@ -151,108 +193,153 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
         </span>
       </nav>
 
-      {/* Tarjeta Principal del Combo */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 rounded-3xl border border-slate-200 dark:border-line bg-white dark:bg-card p-6 md:p-8 shadow-sm">
-        {/* Columna Izquierda: Galería Interactiva con 4 Fotos */}
-        <div className="lg:col-span-6 flex flex-col gap-4">
-          <div className="relative aspect-4/3 w-full rounded-2xl bg-white dark:bg-surface border border-slate-200 dark:border-line/60 overflow-hidden flex items-center justify-center p-4 shadow-sm group">
-            {/* Badges superiores */}
-            <div className="absolute top-4 left-4 z-10 flex flex-col gap-1.5 items-start">
-              {hasOffer && shouldShowAhorroBadge(ahorro) && (
-                <span className="rounded-lg bg-brand px-3 py-1 text-xs font-black uppercase text-white shadow-md">
-                  AHORRÁ {formatPrice(ahorro)} ({combo.descuentoPorcentaje}% OFF)
-                </span>
-              )}
-              {combo.badge && (
-                <span className="rounded-lg border border-brand/40 bg-brand/10 dark:bg-brand/20 px-2.5 py-0.5 text-xs font-bold text-brand backdrop-blur-sm">
-                  {combo.badge}
-                </span>
-              )}
-            </div>
+      {/* ═══════════ FICHA PRINCIPAL DEL COMBO (UNA SOLA TARJETA INTEGRADA) ═══════════ */}
+      <div className="rounded-3xl border border-slate-200 dark:border-line bg-white dark:bg-card p-5 sm:p-6 lg:p-7 shadow-sm">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-stretch">
+          {/* Columna Izquierda: Galería Integrada de Altura Completa */}
+          <div className="lg:col-span-5 flex flex-col justify-between h-full gap-3">
+            {/* Foto principal que se expande para aprovechar toda la altura disponible */}
+            <div className="relative flex-1 min-h-[340px] lg:min-h-0 w-full flex items-center justify-center overflow-hidden rounded-2xl group">
+              {/* Badges superiores */}
+              <div className="absolute top-2 left-2 z-10 flex flex-col gap-1.5 items-start pointer-events-none">
+                {hasOffer && shouldShowAhorroBadge(ahorro) && (
+                  <span className="rounded-lg bg-brand px-2.5 py-1 text-[11px] font-black uppercase text-white shadow-md">
+                    AHORRÁ {formatPrice(ahorro)} ({combo.descuentoPorcentaje}% OFF)
+                  </span>
+                )}
+                {combo.badge && (
+                  <span className="rounded-lg border border-brand/40 bg-brand/10 dark:bg-brand/20 px-2.5 py-0.5 text-xs font-bold text-brand backdrop-blur-sm">
+                    {combo.badge}
+                  </span>
+                )}
+              </div>
 
-            <img
-              src={activeImage || combo.imagen || "/combos/combo-service-motul.jpg"}
-              alt={combo.nombre}
-              className="h-full w-full object-contain rounded-xl transition-transform duration-300 group-hover:scale-105"
-            />
-          </div>
-
-          {/* Miniaturas Interactivas (si hay más de 1 imagen) */}
-          {galleryImages.length > 1 && (
-            <div className="flex items-center gap-3">
-              {galleryImages.map((img, idx) => {
-                const isActive = (activeImage || combo.imagen) === img.url || (!activeImage && idx === 0);
-                return (
+              {/* Flechas de navegación rápida en la imagen principal (si hay más de 1 imagen) */}
+              {galleryImages.length > 1 && (
+                <>
                   <button
-                    key={img.id}
                     type="button"
-                    onClick={() => setActiveImage(img.url)}
-                    title={img.label}
-                    className={`relative h-16 w-16 sm:h-18 sm:w-18 rounded-xl p-1 bg-white shadow-sm overflow-hidden flex items-center justify-center transition-all cursor-pointer ${
-                      isActive
-                        ? "border-2 border-brand ring-2 ring-brand/30 scale-105"
-                        : "border border-slate-200 dark:border-line opacity-75 hover:opacity-100 hover:border-slate-400"
-                    }`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const prevIdx = (currentIdx - 1 + galleryImages.length) % galleryImages.length;
+                      setActiveImage(galleryImages[prevIdx].url);
+                    }}
+                    aria-label="Foto anterior"
+                    title="Foto anterior"
+                    className="absolute left-2 top-1/2 -translate-y-1/2 z-10 h-8 w-8 rounded-full bg-slate-900/60 hover:bg-slate-900/90 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-xs cursor-pointer shadow-md"
                   >
-                    <img src={img.url} alt={img.label} className="h-full w-full object-contain" />
+                    <ChevronLeft size={18} />
                   </button>
-                );
-              })}
-            </div>
-          )}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const nextIdx = (currentIdx + 1) % galleryImages.length;
+                      setActiveImage(galleryImages[nextIdx].url);
+                    }}
+                    aria-label="Siguiente foto"
+                    title="Siguiente foto"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 z-10 h-8 w-8 rounded-full bg-slate-900/60 hover:bg-slate-900/90 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-xs cursor-pointer shadow-md"
+                  >
+                    <ChevronRight size={18} />
+                  </button>
+                </>
+              )}
 
-          {/* Garantías de compra en Posadas */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2">
-            <div className="flex items-center gap-2 rounded-xl bg-slate-50 dark:bg-surface p-2.5 border border-slate-100 dark:border-line/40 text-xs">
-              <MapPin size={16} className="text-emerald-500 shrink-0" />
-              <span className="font-medium text-slate-700 dark:text-slate-300">Retiro en local Posadas</span>
+              <img
+                src={activeImage || galleryImages[0]?.url || combo.imagen || "/combos/combo-service-motul.jpg"}
+                alt={currentImg?.label || combo.nombre}
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src = "/combos/combo-service-motul.jpg";
+                }}
+                className="max-h-full max-w-full object-contain transition-transform duration-300 group-hover:scale-105"
+              />
             </div>
-            <div className="flex items-center gap-2 rounded-xl bg-slate-50 dark:bg-surface p-2.5 border border-slate-100 dark:border-line/40 text-xs">
-              <Truck size={16} className="text-brand shrink-0" />
-              <span className="font-medium text-slate-700 dark:text-slate-300">Envíos Motomandado</span>
-            </div>
-            <div className="flex items-center gap-2 rounded-xl bg-slate-50 dark:bg-surface p-2.5 border border-slate-100 dark:border-line/40 text-xs">
-              <ShieldCheck size={16} className="text-amber-500 shrink-0" />
-              <span className="font-medium text-slate-700 dark:text-slate-300">Garantía oficial Chopper</span>
-            </div>
+
+            {/* Miniaturas en la base de la galería */}
+            {galleryImages.length > 1 && (
+              <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-100 dark:border-line/60 shrink-0">
+                <div className="flex items-center gap-2 overflow-x-auto pb-0.5 scrollbar-thin">
+                  {galleryImages.map((img) => {
+                    const isActive = (activeImage || galleryImages[0]?.url) === img.url;
+                    return (
+                      <button
+                        key={img.id}
+                        type="button"
+                        onClick={() => setActiveImage(img.url)}
+                        title={img.label}
+                        className={`relative h-14 w-14 sm:h-16 sm:w-16 rounded-xl p-1 bg-slate-50 dark:bg-surface overflow-hidden flex items-center justify-center transition-all cursor-pointer shrink-0 ${
+                          isActive
+                            ? "border-2 border-brand ring-2 ring-brand/20 shadow-xs opacity-100"
+                            : "border border-slate-200 dark:border-line/70 opacity-60 hover:opacity-100 hover:border-slate-400 dark:hover:border-slate-500"
+                        }`}
+                      >
+                        <img
+                          src={img.url}
+                          alt={img.label}
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).src = "/combos/combo-service-motul.jpg";
+                          }}
+                          className="max-h-full max-w-full object-contain"
+                        />
+                        {img.isCover && (
+                          <span className="absolute bottom-0 inset-x-0 bg-slate-950/80 backdrop-blur-[1px] text-[8px] text-white text-center font-bold py-0.5 leading-none">
+                            Portada
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Pie de foto limpio con contador */}
+                <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-0.5">
+                  <span className="font-medium truncate max-w-[240px] sm:max-w-[300px]">
+                    {currentImg?.label || combo.nombre}
+                  </span>
+                  <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 shrink-0">
+                    {currentIdx + 1} de {galleryImages.length}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
 
-        {/* Columna Derecha: Título, Precios y Acciones */}
-        <div className="lg:col-span-6 flex flex-col justify-between space-y-6">
-          <div className="space-y-3">
+          {/* Columna Derecha: Tarjeta Comercial de Compra y Entrega */}
+          <div className="lg:col-span-7 flex flex-col space-y-3.5">
+          <div className="space-y-1.5">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-600 dark:text-emerald-400">
-                <Sparkles size={13} />
-                <span>Kit de Repuestos con Descuento Especial</span>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                <Sparkles size={12} />
+                <span>Kit de Repuestos con Descuento</span>
               </span>
 
               {/* Badge de verificación oficial */}
-              <span className="inline-flex items-center gap-1 text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-surface px-2.5 py-1 rounded-full border border-slate-200 dark:border-line">
-                <Check size={13} className="text-emerald-500" />
+              <span className="inline-flex items-center gap-1 text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-surface px-2.5 py-0.5 rounded-full border border-slate-200 dark:border-line">
+                <Check size={12} className="text-emerald-500" />
                 <span>Kit Oficial Verificado</span>
               </span>
             </div>
 
-            <h1 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white leading-tight">
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white leading-tight">
               {combo.nombre}
             </h1>
 
-            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed line-clamp-3">
               {combo.descripcion}
             </p>
           </div>
 
           {/* Bloque de Precios y Cuotas */}
-          <div className="rounded-2xl border border-slate-200 dark:border-line bg-slate-50/70 dark:bg-surface/50 p-5 space-y-3">
+          <div className="rounded-2xl border border-slate-200 dark:border-line bg-slate-50/70 dark:bg-surface/50 p-3.5 sm:p-4 space-y-2">
             <div className="flex items-baseline justify-between gap-3">
-              <div className="flex items-baseline gap-3">
+              <div className="flex items-baseline gap-2.5">
                 {hasOffer && combo.precioRegular && (
-                  <span className="text-sm text-slate-400 line-through">
+                  <span className="text-xs sm:text-sm text-slate-400 line-through">
                     {formatPrice(combo.precioRegular)}
                   </span>
                 )}
-                <span className="text-3xl sm:text-4xl font-black text-brand tracking-tight">
+                <span className="text-2xl sm:text-3xl font-black text-brand tracking-tight">
                   {formatPrice(combo.precio)}
                 </span>
               </div>
@@ -268,15 +355,15 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
             </div>
 
             {/* Disponibilidad de stock */}
-            <div className="pt-1">
+            <div>
               {hasStock ? (
-                <div className="flex items-center gap-2 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20 w-fit">
-                  <CheckCircle2 size={15} />
+                <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-xl border border-emerald-500/20 w-fit">
+                  <CheckCircle2 size={14} />
                   <span>Stock disponible en local ({combo.stockCalculado} unidades)</span>
                 </div>
               ) : (
-                <div className="flex items-center gap-2 text-xs font-bold text-red-500 bg-red-500/10 px-3 py-1.5 rounded-xl border border-red-500/20 w-fit">
-                  <AlertTriangle size={15} />
+                <div className="flex items-center gap-1.5 text-xs font-bold text-red-500 bg-red-500/10 px-2.5 py-1 rounded-xl border border-red-500/20 w-fit">
+                  <AlertTriangle size={14} />
                   <span>Sin stock disponible en este momento</span>
                 </div>
               )}
@@ -286,7 +373,7 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
             {financiacion.habilitadas && (
               <div
                 onClick={() => setShowCuotasModal(true)}
-                className="flex items-center justify-between rounded-xl bg-amber-400 py-2.5 px-3.5 text-xs font-black text-slate-950 shadow-sm cursor-pointer hover:bg-amber-300 transition-colors"
+                className="flex items-center justify-between rounded-xl bg-amber-400 py-2 px-3 text-xs font-black text-slate-950 shadow-xs cursor-pointer hover:bg-amber-300 transition-colors"
               >
                 <div className="flex items-center gap-1.5">
                   <span>💳</span>
@@ -315,15 +402,15 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
 
           {/* Avisos de Stock para el Combo */}
           {!hasStock ? (
-            <div className="rounded-xl border border-red-500/30 bg-red-50 dark:bg-red-950/20 p-3 text-xs text-red-800 dark:text-red-300 flex items-center gap-2.5">
-              <AlertTriangle size={16} className="text-red-600 dark:text-red-400 shrink-0" />
+            <div className="rounded-xl border border-red-500/30 bg-red-50 dark:bg-red-950/20 p-2.5 text-xs text-red-800 dark:text-red-300 flex items-center gap-2">
+              <AlertTriangle size={15} className="text-red-600 dark:text-red-400 shrink-0" />
               <span>
                 <strong>SIN STOCK FÍSICO</strong> — Uno o más componentes de este kit no cuentan con existencias suficientes en Posadas.
               </span>
             </div>
           ) : isLowStock ? (
-            <div className="rounded-xl border border-amber-500/30 bg-amber-50 dark:bg-amber-950/20 p-3 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2.5">
-              <AlertTriangle size={16} className="text-amber-600 dark:text-amber-400 shrink-0" />
+            <div className="rounded-xl border border-amber-500/30 bg-amber-50 dark:bg-amber-950/20 p-2.5 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
+              <AlertTriangle size={15} className="text-amber-600 dark:text-amber-400 shrink-0" />
               <span>
                 <strong>¡ÚLTIMOS {combo.stockCalculado} KITS DISPONIBLES!</strong> — Stock limitado según disponibilidad de los repuestos en el local.
               </span>
@@ -332,8 +419,8 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
 
           {/* Aviso si ya alcanzó el límite en el carrito */}
           {isLimitReached && hasStock && (
-            <div className="rounded-xl border border-emerald-500/30 bg-emerald-50 dark:bg-emerald-950/20 p-3 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2.5">
-              <Check size={16} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-50 dark:bg-emerald-950/20 p-2.5 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+              <Check size={15} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
               <span>
                 Ya tenés todos los kits disponibles en tu carrito ({inCartQty} de {combo.stockCalculado} u.).
               </span>
@@ -341,28 +428,28 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
           )}
 
           {/* Botones de Compra y Carrito */}
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             {hasStock ? (
               <>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2.5">
                   {/* Selector de cantidad */}
                   <div className="flex items-center border border-slate-300 dark:border-line rounded-xl bg-white dark:bg-surface overflow-hidden">
                     <button
                       type="button"
                       onClick={() => setQty((q) => Math.max(1, q - 1))}
                       disabled={qty <= 1 || isLimitReached}
-                      className="px-3.5 py-3 hover:bg-slate-100 dark:hover:bg-card text-slate-800 dark:text-white font-bold text-sm transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                      className="px-3 py-2.5 hover:bg-slate-100 dark:hover:bg-card text-slate-800 dark:text-white font-bold text-sm transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
                     >
                       -
                     </button>
-                    <span className="px-4 py-3 text-sm font-bold text-slate-900 dark:text-white min-w-[40px] text-center">
+                    <span className="px-3.5 py-2.5 text-sm font-bold text-slate-900 dark:text-white min-w-[36px] text-center">
                       {qty}
                     </span>
                     <button
                       type="button"
                       onClick={() => setQty((q) => Math.min(remainingStock, q + 1))}
                       disabled={isStaff || isLimitReached || qty >= remainingStock}
-                      className="px-3.5 py-3 hover:bg-slate-100 dark:hover:bg-card text-slate-800 dark:text-white font-bold text-sm transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                      className="px-3 py-2.5 hover:bg-slate-100 dark:hover:bg-card text-slate-800 dark:text-white font-bold text-sm transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
                       title={qty >= remainingStock ? "Límite de stock disponible alcanzado" : "Aumentar cantidad"}
                     >
                       +
@@ -374,7 +461,7 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
                     <button
                       type="button"
                       onClick={handleAddToCart}
-                      className="flex-1 flex items-center justify-center gap-2 rounded-xl border border-slate-300 dark:border-line bg-slate-100 dark:bg-surface py-3 px-4 text-xs sm:text-sm font-bold text-slate-400 dark:text-slate-500 cursor-not-allowed"
+                      className="flex-1 flex items-center justify-center gap-2 rounded-xl border border-slate-300 dark:border-line bg-slate-100 dark:bg-surface py-2.5 px-4 text-xs sm:text-sm font-bold text-slate-400 dark:text-slate-500 cursor-not-allowed"
                     >
                       <Lock size={15} />
                       <span>COMPRA BLOQUEADA</span>
@@ -383,7 +470,7 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
                     <button
                       type="button"
                       onClick={handleAddToCart}
-                      className="flex-1 flex items-center justify-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-50 dark:bg-emerald-950/20 py-3 px-4 text-xs sm:text-sm font-bold text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/20 transition-all cursor-pointer shadow-xs"
+                      className="flex-1 flex items-center justify-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-50 dark:bg-emerald-950/20 py-2.5 px-4 text-xs sm:text-sm font-bold text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/20 transition-all cursor-pointer shadow-xs"
                       title="Ya tenés todas las unidades disponibles en tu carrito"
                     >
                       <Check size={16} />
@@ -393,7 +480,7 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
                     <button
                       type="button"
                       onClick={handleAddToCart}
-                      className="flex-1 flex items-center justify-center gap-2 rounded-xl border border-slate-300 dark:border-line bg-slate-100 dark:bg-surface py-3 px-4 text-xs sm:text-sm font-bold text-slate-900 dark:text-white hover:border-brand hover:text-brand shadow-sm active:scale-95 transition-all cursor-pointer"
+                      className="flex-1 flex items-center justify-center gap-2 rounded-xl border border-slate-300 dark:border-line bg-slate-100 dark:bg-surface py-2.5 px-4 text-xs sm:text-sm font-bold text-slate-900 dark:text-white hover:border-brand hover:text-brand shadow-xs active:scale-95 transition-all cursor-pointer"
                     >
                       {added ? (
                         <>
@@ -412,8 +499,8 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
 
                 {/* Aviso informativo si es personal */}
                 {isStaff && (
-                  <div className="rounded-xl border border-amber-500/40 bg-amber-50 dark:bg-amber-950/30 p-3 text-xs text-amber-900 dark:text-amber-200 flex items-center gap-2.5">
-                    <ShieldAlert size={16} className="text-amber-600 dark:text-amber-400 shrink-0" />
+                  <div className="rounded-xl border border-amber-500/40 bg-amber-50 dark:bg-amber-950/30 p-2.5 text-xs text-amber-900 dark:text-amber-200 flex items-center gap-2">
+                    <ShieldAlert size={15} className="text-amber-600 dark:text-amber-400 shrink-0" />
                     <span>Estás utilizando una cuenta de personal. Para realizar compras, ingresá con una cuenta de cliente.</span>
                   </div>
                 )}
@@ -423,7 +510,7 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
                   <button
                     type="button"
                     disabled
-                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-slate-200 dark:bg-surface py-3.5 px-6 text-sm font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider cursor-not-allowed border border-slate-300 dark:border-line"
+                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-slate-200 dark:bg-surface py-3 px-6 text-sm font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider cursor-not-allowed border border-slate-300 dark:border-line"
                   >
                     <Lock size={16} className="text-amber-500" />
                     <span>Solo consulta (Personal)</span>
@@ -432,7 +519,7 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
                   <button
                     type="button"
                     onClick={handleBuyNow}
-                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 py-3.5 px-6 text-sm font-black text-white uppercase tracking-wider shadow-lg shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer"
+                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 py-3 px-6 text-sm font-black text-white uppercase tracking-wider shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer"
                   >
                     <span>IR A FINALIZAR COMPRA</span>
                     <ChevronRight size={18} />
@@ -441,7 +528,7 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
                   <button
                     type="button"
                     onClick={handleBuyNow}
-                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-brand hover:bg-brandhover py-3.5 px-6 text-sm font-black text-white uppercase tracking-wider shadow-lg shadow-brand/20 active:scale-95 transition-all cursor-pointer"
+                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-brand hover:bg-brandhover py-3 px-6 text-sm font-black text-white uppercase tracking-wider shadow-md shadow-brand/20 active:scale-95 transition-all cursor-pointer"
                   >
                     <span>COMPRAR AHORA</span>
                     <ChevronRight size={18} />
@@ -449,10 +536,10 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
                 )}
               </>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <button
                   disabled
-                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-slate-200 dark:bg-zinc-800 text-slate-500 dark:text-zinc-500 py-3.5 px-4 text-xs sm:text-sm font-bold cursor-not-allowed"
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-slate-200 dark:bg-zinc-800 text-slate-500 dark:text-zinc-500 py-3 px-4 text-xs sm:text-sm font-bold cursor-not-allowed"
                 >
                   Combo momentáneamente sin stock
                 </button>
@@ -471,32 +558,38 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
               )}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="w-full flex items-center justify-center gap-2 rounded-xl border border-slate-300 dark:border-line bg-transparent hover:bg-slate-100 dark:hover:bg-surface py-2.5 px-3 text-xs font-bold text-slate-800 dark:text-slate-200 transition-colors"
+              className="w-full flex items-center justify-center gap-2 rounded-xl border border-slate-300 dark:border-line bg-transparent hover:bg-slate-100 dark:hover:bg-surface py-2 px-3 text-xs font-bold text-slate-800 dark:text-slate-200 transition-colors"
             >
               <MessageCircle size={15} className="text-emerald-500" />
               <span>{hasStock ? "Consultar por WhatsApp con un vendedor" : "Consultar reposición por WhatsApp"}</span>
             </a>
 
-            {/* Beneficios de entrega y retiro */}
-            <div className="pt-2 border-t border-slate-200 dark:border-line/60 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-              <div className="flex items-start gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-surface border border-slate-200/60 dark:border-line/40">
-                <MapPin size={16} className="text-red-500 shrink-0 mt-0.5" />
+            {/* Opciones de entrega */}
+            <div className="pt-2.5 border-t border-slate-200 dark:border-line/60 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <div className="flex items-start gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-surface border border-slate-200/70 dark:border-line/60">
+                <Store size={16} className="text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
                 <div>
-                  <div className="font-bold text-slate-900 dark:text-white text-[11px]">Retiro gratis en el local</div>
-                  <div className="text-[10px] text-slate-500 dark:text-slate-400">Av. Roque Sáenz Peña 1500 (Posadas)</div>
+                  <div className="font-bold text-slate-900 dark:text-white text-xs">Retiro en el Local</div>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5 leading-snug">
+                    Podés retirar tu pedido en el comercio.
+                  </p>
                 </div>
               </div>
-              <div className="flex items-start gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-surface border border-slate-200/60 dark:border-line/40">
-                <Truck size={16} className="text-emerald-500 shrink-0 mt-0.5" />
+
+              <div className="flex items-start gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-surface border border-slate-200/70 dark:border-line/60">
+                <Truck size={16} className="text-brand shrink-0 mt-0.5" />
                 <div>
-                  <div className="font-bold text-slate-900 dark:text-white text-[11px]">Envíos en el día</div>
-                  <div className="text-[10px] text-slate-500 dark:text-slate-400">Motomandado y Moto Uber en Posadas</div>
+                  <div className="font-bold text-slate-900 dark:text-white text-xs">Motomandado</div>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5 leading-snug">
+                    Entrega a domicilio según disponibilidad y zona de cobertura.
+                  </p>
                 </div>
               </div>
             </div>
           </div>
         </div>
       </div>
+    </div>
 
       {/* ═══════════ FICHA DE DETALLE DEL COMBO (5 SOLAPAS HORIZONTALES) ═══════════ */}
       <section className="space-y-4">
@@ -513,39 +606,45 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
           >
             Descripción
           </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("componentes")}
-            className={`pb-3 px-4 border-b-2 transition-colors shrink-0 cursor-pointer ${
-              activeTab === "componentes"
-                ? "border-emerald-600 text-emerald-700 dark:text-emerald-400 font-black"
-                : "border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-            }`}
-          >
-            Componentes incluidos ({combo.items?.length || 0})
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("specs")}
-            className={`pb-3 px-4 border-b-2 transition-colors shrink-0 cursor-pointer ${
-              activeTab === "specs"
-                ? "border-emerald-600 text-emerald-700 dark:text-emerald-400 font-black"
-                : "border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-            }`}
-          >
-            Especificaciones técnicas ({especificaciones.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("motos")}
-            className={`pb-3 px-4 border-b-2 transition-colors shrink-0 cursor-pointer ${
-              activeTab === "motos"
-                ? "border-emerald-600 text-emerald-700 dark:text-emerald-400 font-black"
-                : "border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-            }`}
-          >
-            Motos compatibles ({motosCompatibles.length})
-          </button>
+          {combo.items && combo.items.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setActiveTab("componentes")}
+              className={`pb-3 px-4 border-b-2 transition-colors shrink-0 cursor-pointer ${
+                activeTab === "componentes"
+                  ? "border-emerald-600 text-emerald-700 dark:text-emerald-400 font-black"
+                  : "border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              }`}
+            >
+              Componentes incluidos ({combo.items.length})
+            </button>
+          )}
+          {hasSpecs && (
+            <button
+              type="button"
+              onClick={() => setActiveTab("specs")}
+              className={`pb-3 px-4 border-b-2 transition-colors shrink-0 cursor-pointer ${
+                activeTab === "specs"
+                  ? "border-emerald-600 text-emerald-700 dark:text-emerald-400 font-black"
+                  : "border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              }`}
+            >
+              Especificaciones técnicas ({totalSpecsCount})
+            </button>
+          )}
+          {hasMotos && (
+            <button
+              type="button"
+              onClick={() => setActiveTab("motos")}
+              className={`pb-3 px-4 border-b-2 transition-colors shrink-0 cursor-pointer ${
+                activeTab === "motos"
+                  ? "border-emerald-600 text-emerald-700 dark:text-emerald-400 font-black"
+                  : "border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              }`}
+            >
+              Motos compatibles ({totalMotosCount})
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setActiveTab("compra")}
@@ -587,10 +686,10 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
                   </div>
                 </div>
                 <div className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 dark:bg-surface border border-slate-100 dark:border-line/40">
-                  <MapPin size={18} className="text-amber-500 shrink-0 mt-0.5" />
+                  <Wrench size={18} className="text-amber-500 shrink-0 mt-0.5" />
                   <div>
-                    <div className="font-bold text-slate-900 dark:text-white text-xs">Retiro o Envío Inmediato</div>
-                    <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">En Av. Roque Sáenz Peña 1500 (Posadas) o motomandado.</div>
+                    <div className="font-bold text-slate-900 dark:text-white text-xs">Asesoramiento Técnico</div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Atención especializada para despejar dudas de compatibilidad y colocación.</div>
                   </div>
                 </div>
               </div>
@@ -662,38 +761,92 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
 
           {/* TAB 3: ESPECIFICACIONES TÉCNICAS */}
           {activeTab === "specs" && (
-            <div className="space-y-4">
+            <div className="space-y-6">
               <div className="border-b border-slate-200 dark:border-line pb-3">
                 <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
                   <FileText size={20} className="text-emerald-500" />
                   <span>Especificaciones Técnicas</span>
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Ficha técnica detallada provista por el fabricante y verificada por nuestros mecánicos.
+                  Ficha técnica oficial y características de los componentes que integran este kit.
                 </p>
               </div>
 
-              {especificaciones.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                  {especificaciones.map((spec: ProductSpec, sIdx: number) => (
-                    <div
-                      key={sIdx}
-                      className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-surface border border-slate-100 dark:border-line/40"
-                    >
-                      <span className="font-semibold text-slate-500 dark:text-slate-400">{spec.caracteristica}:</span>
-                      <span className="font-bold text-slate-900 dark:text-white text-right">{spec.valor}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                  <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-surface border border-slate-100 dark:border-line/40 space-y-1">
-                    <span className="font-bold text-slate-900 dark:text-white block">Estándar de Fabricación</span>
-                    <span className="text-slate-600 dark:text-slate-400">Repuestos de reposición homologados con especificaciones y tolerancias originales OEM.</span>
+              {/* 1. Especificaciones propias del combo (si existen) */}
+              {ownSpecs.length > 0 && (
+                <div className="space-y-3">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                    <Sparkles size={14} className="text-brand" />
+                    <span>Ficha General del Kit</span>
+                  </h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    {ownSpecs.map((spec: ProductSpec, sIdx: number) => (
+                      <div
+                        key={`own-spec-${sIdx}`}
+                        className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-surface border border-slate-100 dark:border-line/40"
+                      >
+                        <span className="font-semibold text-slate-500 dark:text-slate-400">{spec.caracteristica}:</span>
+                        <span className="font-bold text-slate-900 dark:text-white text-right">{spec.valor}</span>
+                      </div>
+                    ))}
                   </div>
-                  <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-surface border border-slate-100 dark:border-line/40 space-y-1">
-                    <span className="font-bold text-slate-900 dark:text-white block">Condición</span>
-                    <span className="text-slate-600 dark:text-slate-400">100% nuevos en empaque cerrado y sellado de fábrica.</span>
+                </div>
+              )}
+
+              {/* 2. Especificaciones desglosadas por repuesto incluido */}
+              {compSpecs.length > 0 && (
+                <div className="space-y-4">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                    <Wrench size={14} className="text-emerald-500" />
+                    <span>Ficha Técnica por Repuesto Incluido</span>
+                  </h3>
+
+                  <div className="space-y-3">
+                    {compSpecs.map((cs) => (
+                      <div
+                        key={`comp-spec-${cs.productoId}`}
+                        className="rounded-2xl border border-slate-200 dark:border-line bg-slate-50/50 dark:bg-surface/50 p-4 space-y-3"
+                      >
+                        <div className="flex items-center justify-between border-b border-slate-200/70 dark:border-line/60 pb-2">
+                          <div className="flex items-center gap-2.5">
+                            {cs.imagen ? (
+                              <img
+                                src={cs.imagen}
+                                alt={cs.productoNombre}
+                                className="h-9 w-9 object-contain rounded-lg bg-white dark:bg-card border border-slate-200 dark:border-line p-0.5"
+                              />
+                            ) : (
+                              <span className="text-base">⚙️</span>
+                            )}
+                            <div>
+                              <div className="text-xs font-bold text-slate-900 dark:text-white leading-snug">
+                                {cs.productoNombre}
+                              </div>
+                              <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-0.5">
+                                {cs.marca && <span>Marca: {cs.marca}</span>}
+                                {cs.marca && cs.codigo && <span>·</span>}
+                                {cs.codigo && <span>Cód: {cs.codigo}</span>}
+                              </div>
+                            </div>
+                          </div>
+                          <span className="text-[11px] font-bold text-brand bg-brand/10 px-2.5 py-0.5 rounded-md shrink-0">
+                            {cs.cantidad} {cs.cantidad === 1 ? "unidad" : "unidades"}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                          {cs.specs.map((spec, idx) => (
+                            <div
+                              key={idx}
+                              className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-card border border-slate-200/60 dark:border-line/40"
+                            >
+                              <span className="font-medium text-slate-500 dark:text-slate-400">{spec.caracteristica}:</span>
+                              <span className="font-bold text-slate-900 dark:text-white text-right">{spec.valor}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -702,7 +855,7 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
 
           {/* TAB 4: MOTOS COMPATIBLES */}
           {activeTab === "motos" && (
-            <div className="space-y-4">
+            <div className="space-y-6">
               <div className="border-b border-slate-200 dark:border-line pb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div>
                   <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
@@ -710,7 +863,7 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
                     <span>Motos Compatibles</span>
                   </h2>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Modelos verificados compatibles con este combo o kit.
+                    Modelos verificados compatibles con este combo o sus piezas individuales.
                   </p>
                 </div>
 
@@ -727,26 +880,74 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
                 </a>
               </div>
 
-              {motosCompatibles.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {motosCompatibles.map((moto: string, mIdx: number) => (
-                    <span
-                      key={mIdx}
-                      className="inline-flex items-center gap-1.5 bg-slate-100 dark:bg-surface border border-slate-200 dark:border-line text-slate-800 dark:text-slate-200 px-3 py-1.5 rounded-xl text-xs font-bold"
-                    >
-                      <Bike size={13} className="text-brand" />
-                      <span>{moto}</span>
-                    </span>
-                  ))}
+              {/* 1. Compatibilidad General Verificada (Kit Completo) */}
+              {ownMotos.length > 0 && (
+                <div className="rounded-2xl border border-emerald-500/30 bg-emerald-50/60 dark:bg-emerald-950/20 p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck size={18} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <div>
+                      <h3 className="text-xs font-black text-emerald-900 dark:text-emerald-300 uppercase tracking-wider">
+                        Compatibilidad General Verificada (Kit Completo)
+                      </h3>
+                      <p className="text-[11px] text-emerald-800/80 dark:text-emerald-400/80">
+                        Todos los componentes del kit son compatibles en conjunto con los siguientes modelos:
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {ownMotos.map((moto: string, mIdx: number) => (
+                      <span
+                        key={`own-moto-${mIdx}`}
+                        className="inline-flex items-center gap-1.5 bg-white dark:bg-surface border border-emerald-500/30 text-emerald-900 dark:text-emerald-200 px-3 py-1.5 rounded-xl text-xs font-bold shadow-2xs"
+                      >
+                        <Bike size={13} className="text-emerald-600 dark:text-emerald-400" />
+                        <span>{moto}</span>
+                      </span>
+                    ))}
+                  </div>
                 </div>
-              ) : (
-                <div className="p-4 rounded-xl bg-slate-50 dark:bg-surface border border-slate-100 dark:border-line/40 text-xs text-slate-600 dark:text-slate-400 space-y-2">
-                  <p>
-                    Compatible con los modelos más habituales de 110cc a 250cc (Honda Wave, CG 150 Titan, XR 150/190/250, Yamaha YBR 125, FZ 16, Motomel Blitz 110, Corven Energy 110, Gilera Smash y similares).
-                  </p>
-                  <p className="font-semibold text-slate-900 dark:text-white">
-                    Ante cualquier duda con tu modelo o cilindrada exacta, consultanos por WhatsApp antes de comprar.
-                  </p>
+              )}
+
+              {/* 2. Compatibilidad Específica por Repuesto */}
+              {compMotos.length > 0 && (
+                <div className="space-y-3">
+                  <div className="rounded-xl border border-slate-200 dark:border-line bg-slate-50 dark:bg-surface/60 p-3 flex items-start gap-2.5">
+                    <Info size={16} className="text-brand shrink-0 mt-0.5" />
+                    <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                      <strong>Compatibilidad por componente:</strong> Las siguientes motos fueron informadas como compatibles para piezas individuales del kit. Si querés certificar que todos los repuestos correspondan exactamente a tu cilindrada y año, consultanos sin compromiso por WhatsApp.
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    {compMotos.map((cm) => (
+                      <div
+                        key={`comp-moto-${cm.productoId}`}
+                        className="rounded-2xl border border-slate-200 dark:border-line bg-slate-50/50 dark:bg-surface/50 p-4 space-y-2.5"
+                      >
+                        <div className="flex items-center justify-between border-b border-slate-200/70 dark:border-line/60 pb-2">
+                          <span className="text-xs font-bold text-slate-900 dark:text-white">
+                            {cm.productoNombre} ({cm.cantidad}x)
+                          </span>
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold">
+                            {cm.motos.length} {cm.motos.length === 1 ? "modelo compatible" : "modelos compatibles"}
+                          </span>
+                        </div>
+
+                        <div className="flex flex-wrap gap-1.5">
+                          {cm.motos.map((moto, idx) => (
+                            <span
+                              key={idx}
+                              className="inline-flex items-center gap-1.5 bg-white dark:bg-card border border-slate-200 dark:border-line text-slate-700 dark:text-slate-300 px-2.5 py-1 rounded-lg text-xs"
+                            >
+                              <Bike size={12} className="text-slate-400" />
+                              <span>{moto}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -801,20 +1002,20 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
                   )}
                 </div>
 
-                {/* Retiro y Envíos */}
+                {/* Opciones de Entrega */}
                 <div className="p-4 rounded-2xl bg-slate-50 dark:bg-surface border border-slate-100 dark:border-line/40 space-y-2.5">
                   <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5 text-xs uppercase tracking-wider">
                     <Truck size={15} className="text-brand" />
-                    <span>Retiro en Local y Envíos</span>
+                    <span>Opciones de Entrega</span>
                   </h3>
-                  <ul className="space-y-1.5 text-slate-700 dark:text-slate-300">
+                  <ul className="space-y-2 text-slate-700 dark:text-slate-300">
                     <li className="flex items-start gap-2">
-                      <MapPin size={14} className="text-emerald-500 shrink-0 mt-0.5" />
-                      <span><strong>Retiro sin costo:</strong> En Av. Roque Sáenz Peña 1500, Posadas. Tu pedido se prepara en menos de 1 hora.</span>
+                      <Store size={14} className="text-emerald-500 shrink-0 mt-0.5" />
+                      <span><strong>Retiro en el Local:</strong> Podés retirar tu pedido en nuestro comercio.</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <Truck size={14} className="text-brand shrink-0 mt-0.5" />
-                      <span><strong>Motomandado / Moto Uber en Posadas:</strong> Envío rápido en el día a Posadas y Garupá coordinando por WhatsApp.</span>
+                      <span><strong>Motomandado:</strong> Entrega a domicilio según disponibilidad y zona de cobertura.</span>
                     </li>
                   </ul>
                 </div>
@@ -824,12 +1025,12 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
         </div>
       </section>
 
-      {/* SECCIÓN INFORMATIVA DE BENEFICIOS Y ENTREGA */}
+      {/* SECCIÓN INFORMATIVA DE BENEFICIOS Y GARANTÍAS DEL KIT */}
       <section className="rounded-3xl border border-slate-200 dark:border-line bg-white dark:bg-card p-6 md:p-8 shadow-sm space-y-6">
         <div className="border-b border-slate-200 dark:border-line pb-4">
           <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white flex items-center gap-2.5">
             <Sparkles size={22} className="text-brand" />
-            <span>Beneficios del Kit y Entregas en Posadas</span>
+            <span>Beneficios y Garantías del Kit</span>
           </h2>
           <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
             Todo lo que necesitás saber sobre la compra de kits y combos armados en Chopper Repuestos.
@@ -859,11 +1060,11 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
 
           <div className="rounded-2xl border border-slate-200 dark:border-line bg-slate-50/50 dark:bg-surface/50 p-5 space-y-2.5">
             <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white text-sm">
-              <Truck size={18} className="text-amber-500 shrink-0" />
-              <span>Retiro Inmediato o Envío</span>
+              <ShieldCheck size={18} className="text-amber-500 shrink-0" />
+              <span>Garantía Oficial y Calidad</span>
             </div>
             <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              Retirá sin costo en mostrador de Posadas o solicitá el envío directo en el día por Motomandado a cualquier punto de Posadas y Garupá.
+              Todos los repuestos del kit son 100% nuevos en empaque original con respaldo de fábrica y atención técnica directa en mostrador.
             </p>
           </div>
         </div>
