@@ -94,6 +94,7 @@ import {
   getStaffPreparadoresAction,
   registrarCobroEfectivoAction,
   obtenerInfoComprobanteAction,
+  actualizarChecklistItemsAction,
   InfoComprobanteDTO,
   PedidoDTO,
 } from "@/actions/pedidos";
@@ -223,6 +224,7 @@ export default function PanelPage() {
   const [selectedPedido, setSelectedPedido] = useState<PedidoDTO | null>(null);
   const [filtroSoloComprobante, setFiltroSoloComprobante] = useState<boolean>(false);
   const [checkedStockItems, setCheckedStockItems] = useState<Record<string, boolean>>({});
+  const [savingChecklistItems, setSavingChecklistItems] = useState<Record<string, boolean>>({});
 
   // Catálogo & Productos
   const [products, setProducts] = useState<CommercialProductItem[]>([]);
@@ -468,7 +470,8 @@ export default function PanelPage() {
     pedidoId: number,
     nuevoEstado: string,
     notas?: string,
-    preparadorId?: number | null
+    preparadorId?: number | null,
+    checklistCompletado?: boolean
   ) => {
     if (!user?.id) return;
     setSaving(true);
@@ -479,7 +482,8 @@ export default function PanelPage() {
         pedidoId,
         nuevoEstado as any,
         targetPreparer,
-        notas
+        notas,
+        checklistCompletado
       );
 
       if (res.success) {
@@ -1661,7 +1665,7 @@ export default function PanelPage() {
   // MANEJADORES DE PREPARACIÓN KANBAN (Stock)
   // ════════════════════════════════════════════════════════════
   const kanbanPendientes = useMemo(
-    () => pedidos.filter((p) => p.estado === "PENDIENTE" || p.estado === "CONFIRMADO"),
+    () => pedidos.filter((p) => p.estado === "CONFIRMADO"),
     [pedidos]
   );
   const kanbanPreparando = useMemo(() => pedidos.filter((p) => p.estado === "PREPARANDO"), [pedidos]);
@@ -1672,6 +1676,137 @@ export default function PanelPage() {
       ),
     [pedidos]
   );
+
+  const handleToggleChecklistItem = async (pedidoId: number, itemId: number, nuevoPreparado: boolean) => {
+    if (!user?.id) return;
+    const itemKey = `${pedidoId}-${itemId}`;
+    const orderKey = `ped-${pedidoId}`;
+    setSavingChecklistItems((prev) => ({ ...prev, [itemKey]: true, [orderKey]: true }));
+
+    try {
+      const res = await actualizarChecklistItemsAction(user.id, pedidoId, [
+        { itemId, preparado: nuevoPreparado },
+      ]);
+
+      if (res.success && res.items) {
+        setPedidos((prevPedidos) =>
+          prevPedidos.map((ped) => {
+            if (ped.id !== pedidoId) return ped;
+            return {
+              ...ped,
+              items: ped.items?.map((it) => {
+                const itemActualizado = res.items?.find((upIt) => upIt.id === it.id);
+                return itemActualizado ? { ...it, ...itemActualizado } : it;
+              }),
+            };
+          })
+        );
+        if (selectedPedido && selectedPedido.id === pedidoId) {
+          setSelectedPedido((prev) => {
+            if (!prev) return null;
+            return {
+              ...prev,
+              items: prev.items?.map((it) => {
+                const itemActualizado = res.items?.find((upIt) => upIt.id === it.id);
+                return itemActualizado ? { ...it, ...itemActualizado } : it;
+              }),
+            };
+          });
+        }
+      } else {
+        showFeedback("error", res.error || "No se pudo guardar el control del repuesto.");
+      }
+    } catch (e) {
+      showFeedback("error", "Error de comunicación al actualizar el checklist.");
+    } finally {
+      setSavingChecklistItems((prev) => {
+        const next = { ...prev };
+        delete next[itemKey];
+        const quedanDelPedido = Object.keys(next).some((k) => k !== orderKey && k.startsWith(`${pedidoId}-`));
+        if (!quedanDelPedido) {
+          delete next[orderKey];
+        }
+        return next;
+      });
+    }
+  };
+
+  const handleMarcarTodosChecklist = async (pedido: PedidoDTO, marcarComo: boolean) => {
+    if (!user?.id || !pedido.items || pedido.items.length === 0) return;
+    const orderKey = `ped-${pedido.id}`;
+    setSavingChecklistItems((prev) => ({ ...prev, [orderKey]: true }));
+
+    try {
+      const itemsCheck = pedido.items.map((it) => ({
+        itemId: it.id,
+        preparado: marcarComo,
+        cantidadPreparada: marcarComo ? it.cantidad : 0,
+      }));
+
+      const res = await actualizarChecklistItemsAction(user.id, pedido.id, itemsCheck);
+      if (res.success && res.items) {
+        setPedidos((prevPedidos) =>
+          prevPedidos.map((ped) => {
+            if (ped.id !== pedido.id) return ped;
+            return {
+              ...ped,
+              items: ped.items?.map((it) => {
+                const itemActualizado = res.items?.find((upIt) => upIt.id === it.id);
+                return itemActualizado ? { ...it, ...itemActualizado } : it;
+              }),
+            };
+          })
+        );
+        if (selectedPedido && selectedPedido.id === pedido.id) {
+          setSelectedPedido((prev) => {
+            if (!prev) return null;
+            return {
+              ...prev,
+              items: prev.items?.map((it) => {
+                const itemActualizado = res.items?.find((upIt) => upIt.id === it.id);
+                return itemActualizado ? { ...it, ...itemActualizado } : it;
+              }),
+            };
+          });
+        }
+      } else {
+        showFeedback("error", res.error || "No se pudieron actualizar los controles en el servidor.");
+      }
+    } catch (e) {
+      showFeedback("error", "Error de comunicación al actualizar el checklist.");
+    } finally {
+      setSavingChecklistItems((prev) => {
+        const next = { ...prev };
+        delete next[orderKey];
+        return next;
+      });
+    }
+  };
+
+  const handleFinalizarPreparacion = async (p: PedidoDTO) => {
+    if (!user?.id || saving) return;
+    const isOrderSaving = !!savingChecklistItems[`ped-${p.id}`];
+    if (isOrderSaving) {
+      showFeedback("error", "Esperá a que se guarden los controles pendientes en el servidor.");
+      return;
+    }
+
+    const totalItems = p.items?.length || 0;
+    const checkedCount = p.items?.filter((it) => !!it.preparado && (it.cantidadPreparada ?? 0) >= it.cantidad).length || 0;
+
+    if (totalItems === 0 || checkedCount < totalItems) {
+      showFeedback("error", `No podés marcar listo para entrega: faltan ${totalItems - checkedCount} repuesto(s) por controlar en el checklist.`);
+      return;
+    }
+
+    await handleCambiarEstadoPedido(
+      p.id,
+      p.modalidadEntrega === "MOTOMANDADO" ? "LISTO_ENTREGA" : "LISTO_PARA_RETIRAR",
+      `Listo para entrega. Preparado por: ${p.preparadorNombre || user.nombreCompleto}`,
+      p.preparadorUsuarioId || user.id,
+      true
+    );
+  };
 
   // ════════════════════════════════════════════════════════════
   // MANEJADORES DE ESTADO DE PEDIDOS (Flujo Ventas & Admin)
@@ -5972,8 +6107,9 @@ export default function PanelPage() {
                   ) : (
                     kanbanPreparando.map((p) => {
                       const totalItems = p.items?.length || 0;
-                      const checkedCount = p.items?.filter((_, idx) => !!checkedStockItems[`${p.id}-${idx}`]).length || 0;
+                      const checkedCount = p.items?.filter((it) => !!it.preparado && (it.cantidadPreparada ?? 0) >= it.cantidad).length || 0;
                       const isAllChecked = totalItems > 0 && checkedCount === totalItems;
+                      const isOrderSaving = !!savingChecklistItems[`ped-${p.id}`];
 
                       return (
                         <div
@@ -5997,33 +6133,56 @@ export default function PanelPage() {
 
                           {/* Interactive Picking Checklist */}
                           <div className="space-y-1.5 pt-1">
-                            <div className="flex justify-between text-[11px] text-[#6b6c75] font-semibold">
-                              <span>Checklist de depósito:</span>
-                              <span className={isAllChecked ? "text-emerald-400 font-bold" : "text-[#b8b9c0]"}>
-                                {checkedCount}/{totalItems} controlados
+                            <div className="flex items-center justify-between text-[11px] text-[#6b6c75] font-semibold">
+                              <span className="flex items-center gap-1.5">
+                                <span>Checklist de depósito:</span>
+                                {isOrderSaving && (
+                                  <RefreshCw className="w-3 h-3 animate-spin text-amber-400" />
+                                )}
                               </span>
+                              <div className="flex items-center gap-2">
+                                <span className={isAllChecked ? "text-emerald-400 font-bold" : "text-[#b8b9c0]"}>
+                                  {checkedCount}/{totalItems} controlados
+                                </span>
+                                {totalItems > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMarcarTodosChecklist(p, !isAllChecked)}
+                                    disabled={isOrderSaving || saving}
+                                    className="text-[10px] text-sky-400 hover:text-sky-300 underline font-medium cursor-pointer disabled:opacity-50"
+                                  >
+                                    {isAllChecked ? "Desmarcar todos" : "Marcar todos"}
+                                  </button>
+                                )}
+                              </div>
                             </div>
 
                             {p.items?.map((it, idx) => {
-                              const key = `${p.id}-${idx}`;
-                              const isChecked = !!checkedStockItems[key];
+                              const isChecked = !!it.preparado && (it.cantidadPreparada ?? 0) >= it.cantidad;
+                              const isItemSaving = !!savingChecklistItems[`${p.id}-${it.id}`];
+
                               return (
                                 <label
-                                  key={idx}
+                                  key={it.id || idx}
                                   className={`flex items-center gap-2 p-1.5 rounded-lg border cursor-pointer transition-colors ${
                                     isChecked
                                       ? "bg-emerald-950/30 border-emerald-800/40 text-emerald-300"
                                       : "bg-[#141519] border-[#26272e] text-white hover:border-[#35363d]"
-                                  }`}
+                                  } ${isItemSaving ? "opacity-60 pointer-events-none" : ""}`}
                                 >
-                                  <input
-                                    type="checkbox"
-                                    checked={isChecked}
-                                    onChange={(e) =>
-                                      setCheckedStockItems((prev) => ({ ...prev, [key]: e.target.checked }))
-                                    }
-                                    className="rounded bg-[#0f1012] border-[#35363d] text-emerald-600 focus:ring-0 w-3.5 h-3.5 cursor-pointer"
-                                  />
+                                  {isItemSaving ? (
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400 shrink-0" />
+                                  ) : (
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={() =>
+                                        handleToggleChecklistItem(p.id, it.id, !isChecked)
+                                      }
+                                      disabled={isOrderSaving || saving}
+                                      className="rounded bg-[#0f1012] border-[#35363d] text-emerald-600 focus:ring-0 w-3.5 h-3.5 cursor-pointer disabled:opacity-50"
+                                    />
+                                  )}
                                   <span className={`flex-1 truncate ${isChecked ? "line-through opacity-75" : ""}`}>
                                     <b>{it.cantidad}x</b> {it.nombre}
                                   </span>
@@ -6033,18 +6192,37 @@ export default function PanelPage() {
                           </div>
 
                           <button
-                            onClick={() =>
-                              handleCambiarEstadoPedido(
-                                p.id,
-                                p.modalidadEntrega === "MOTOMANDADO" ? "LISTO_ENTREGA" : "LISTO_PARA_RETIRAR",
-                                `Listo para entrega. Preparado por: ${p.preparadorNombre || user.nombreCompleto}`
-                              )
+                            type="button"
+                            onClick={() => handleFinalizarPreparacion(p)}
+                            disabled={saving || isOrderSaving || !isAllChecked}
+                            className={`w-full mt-2 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow ${
+                              isAllChecked && !isOrderSaving
+                                ? "bg-[#16a34a] hover:bg-green-700 text-white cursor-pointer"
+                                : "bg-zinc-800/80 text-zinc-400 border border-zinc-700/50 cursor-not-allowed opacity-75"
+                            }`}
+                            title={
+                              isOrderSaving
+                                ? "Guardando cambios en el servidor..."
+                                : !isAllChecked
+                                ? `Faltan repuestos por controlar (${checkedCount}/${totalItems})`
+                                : "Marcar paquete como listo para entregar"
                             }
-                            disabled={saving}
-                            className="w-full mt-2 py-2 bg-[#16a34a] hover:bg-green-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow"
                           >
-                            <Check className="w-4 h-4" />
-                            Marcar paquete listo para entrega
+                            {isOrderSaving ? (
+                              <>
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                <span>Guardando checklist...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Check className="w-4 h-4" />
+                                <span>
+                                  {isAllChecked
+                                    ? "Marcar paquete listo para entrega"
+                                    : `Faltan repuestos por controlar (${checkedCount}/${totalItems})`}
+                                </span>
+                              </>
+                            )}
                           </button>
                         </div>
                       );
@@ -6783,15 +6961,22 @@ export default function PanelPage() {
                         Operación confirmada de forma inmediata por pasarela de pagos. No requiere comprobante bancario.
                       </p>
                       {selectedPedido.estado === "CONFIRMADO" && (
-                        <button
-                          type="button"
-                          onClick={() => handleCambiarEstadoPedido(selectedPedido.id, "PREPARANDO")}
-                          disabled={saving}
-                          className="w-full mt-2 py-2 bg-[#3b82f6] hover:bg-blue-600 text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow"
-                        >
-                          <Package className="w-3.5 h-3.5" />
-                          Pasar a preparación (Stock)
-                        </button>
+                        (user.rol === "ADMINISTRADOR" || user.rol === "ENCARGADO_STOCK") ? (
+                          <button
+                            type="button"
+                            onClick={() => handleCambiarEstadoPedido(selectedPedido.id, "PREPARANDO")}
+                            disabled={saving}
+                            className="w-full mt-2 py-2 bg-[#3b82f6] hover:bg-blue-600 text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow"
+                          >
+                            <Package className="w-3.5 h-3.5" />
+                            Pasar a preparación (Stock)
+                          </button>
+                        ) : (
+                          <div className="w-full mt-2 py-2 text-center text-[11px] text-sky-400 bg-sky-950/30 rounded-lg border border-sky-800/30 font-medium flex items-center justify-center gap-1">
+                            <Clock className="w-3.5 h-3.5" />
+                            <span>En cola para preparación en depósito (Stock)</span>
+                          </div>
+                        )
                       )}
                     </div>
                   ) : selectedPedido.metodoPago === "EFECTIVO_LOCAL" ? (
@@ -6804,15 +6989,22 @@ export default function PanelPage() {
                         El cliente abona en efectivo en mostrador al retirar. No requiere comprobante bancario previo.
                       </p>
                       {selectedPedido.estado === "CONFIRMADO" && (
-                        <button
-                          type="button"
-                          onClick={() => handleCambiarEstadoPedido(selectedPedido.id, "PREPARANDO")}
-                          disabled={saving}
-                          className="w-full mt-2 py-2 bg-[#3b82f6] hover:bg-blue-600 text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow"
-                        >
-                          <Package className="w-3.5 h-3.5" />
-                          Pasar a preparación (Stock)
-                        </button>
+                        (user.rol === "ADMINISTRADOR" || user.rol === "ENCARGADO_STOCK") ? (
+                          <button
+                            type="button"
+                            onClick={() => handleCambiarEstadoPedido(selectedPedido.id, "PREPARANDO")}
+                            disabled={saving}
+                            className="w-full mt-2 py-2 bg-[#3b82f6] hover:bg-blue-600 text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow"
+                          >
+                            <Package className="w-3.5 h-3.5" />
+                            Pasar a preparación (Stock)
+                          </button>
+                        ) : (
+                          <div className="w-full mt-2 py-2 text-center text-[11px] text-sky-400 bg-sky-950/30 rounded-lg border border-sky-800/30 font-medium flex items-center justify-center gap-1">
+                            <Clock className="w-3.5 h-3.5" />
+                            <span>En cola para preparación en depósito (Stock)</span>
+                          </div>
+                        )
                       )}
                     </div>
                   ) : selectedPedido.comprobanteUrl ? (
@@ -6843,37 +7035,20 @@ export default function PanelPage() {
                             />
                           )}
                         </div>
-                        <div className="text-xs space-y-1">
+                        <div className="text-xs space-y-1.5 flex-1 min-w-0">
                           <span className="text-emerald-400 font-bold block flex items-center gap-1">
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                             Comprobante de transferencia ({selectedPedido.comprobanteUrl.toLowerCase().endsWith(".pdf") ? "PDF" : "Imagen"})
                           </span>
-                          <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                          <div>
                             <button
                               type="button"
                               onClick={() => handleOpenComprobante(selectedPedido.comprobanteUrl, selectedPedido)}
-                              className="px-2.5 py-1 rounded-lg bg-[#20222a] hover:bg-[#2c2f3a] text-sky-400 hover:text-sky-300 text-[11px] font-semibold flex items-center gap-1 border border-sky-500/30 transition-colors cursor-pointer"
+                              className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
                             >
-                              <Eye className="w-3 h-3" />
-                              <span>Ver en visor</span>
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>Ver comprobante</span>
                             </button>
-                            <a
-                              href={selectedPedido.comprobanteUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="px-2.5 py-1 rounded-lg bg-[#20222a] hover:bg-[#2c2f3a] text-gray-300 hover:text-white text-[11px] font-semibold flex items-center gap-1 border border-[#35363d] transition-colors"
-                            >
-                              <ExternalLink className="w-3 h-3" />
-                              <span>Abrir completo</span>
-                            </a>
-                            <a
-                              href={selectedPedido.comprobanteUrl}
-                              download
-                              className="p-1 rounded-lg bg-[#20222a] hover:bg-[#2c2f3a] text-gray-400 hover:text-white border border-[#35363d] transition-colors"
-                              title="Descargar archivo"
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                            </a>
                           </div>
                         </div>
                       </div>
@@ -6974,6 +7149,9 @@ export default function PanelPage() {
                   <table className="w-full text-left text-xs">
                     <thead className="bg-[#0f1012] text-[#6b6c75] border-b border-[#26272e]">
                       <tr>
+                        {selectedPedido.estado === "PREPARANDO" && (user.rol === "ENCARGADO_STOCK" || user.rol === "ADMINISTRADOR") && (
+                          <th className="py-2.5 px-3 text-center w-16">Control</th>
+                        )}
                         <th className="py-2.5 px-3">Repuesto</th>
                         <th className="py-2.5 px-3 text-center">Cant</th>
                         <th className="py-2.5 px-3 text-right">Precio Unit</th>
@@ -6981,21 +7159,43 @@ export default function PanelPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#26272e]">
-                      {selectedPedido.items?.map((it, idx) => (
-                        <tr key={idx} className="hover:bg-[#1a1b20]">
-                          <td className="py-2 px-3 text-white font-medium">
-                            {it.marca && (
-                              <span className="text-[10px] text-red-400 font-bold bg-red-950/40 px-1 py-0.5 rounded mr-1.5">
-                                {it.marca}
-                              </span>
+                      {selectedPedido.items?.map((it, idx) => {
+                        const isChecked = !!it.preparado && (it.cantidadPreparada ?? 0) >= it.cantidad;
+                        const isItemSaving = !!savingChecklistItems[`${selectedPedido.id}-${it.id}`];
+
+                        return (
+                          <tr key={it.id || idx} className="hover:bg-[#1a1b20]">
+                            {selectedPedido.estado === "PREPARANDO" && (user.rol === "ENCARGADO_STOCK" || user.rol === "ADMINISTRADOR") && (
+                              <td className="py-2 px-3 text-center">
+                                {isItemSaving ? (
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400 mx-auto" />
+                                ) : (
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={() =>
+                                      handleToggleChecklistItem(selectedPedido.id, it.id, !isChecked)
+                                    }
+                                    disabled={saving || isItemSaving || !!savingChecklistItems[`ped-${selectedPedido.id}`]}
+                                    className="rounded bg-[#0f1012] border-[#35363d] text-emerald-600 focus:ring-0 w-3.5 h-3.5 cursor-pointer disabled:opacity-50"
+                                  />
+                                )}
+                              </td>
                             )}
-                            {it.nombre}
-                          </td>
-                          <td className="py-2 px-3 text-center text-white font-bold">{it.cantidad}</td>
-                          <td className="py-2 px-3 text-right text-[#9a9ba3]">{formatPrice(it.precioUnitario)}</td>
-                          <td className="py-2 px-3 text-right text-emerald-400 font-bold">{formatPrice(it.subtotal)}</td>
-                        </tr>
-                      ))}
+                            <td className="py-2 px-3 text-white font-medium">
+                              {it.marca && (
+                                <span className="text-[10px] text-red-400 font-bold bg-red-950/40 px-1 py-0.5 rounded mr-1.5">
+                                  {it.marca}
+                                </span>
+                              )}
+                              {it.nombre}
+                            </td>
+                            <td className="py-2 px-3 text-center text-white font-bold">{it.cantidad}</td>
+                            <td className="py-2 px-3 text-right text-[#9a9ba3]">{formatPrice(it.precioUnitario)}</td>
+                            <td className="py-2 px-3 text-right text-emerald-400 font-bold">{formatPrice(it.subtotal)}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -7012,41 +7212,89 @@ export default function PanelPage() {
                 </button>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  {(selectedPedido.estado === "PENDIENTE" || selectedPedido.estado === "CONFIRMADO") && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const targetStock = selectedPedido.preparadorUsuarioId || staffPreparadores.find((s) => s.rol === "ENCARGADO_STOCK")?.id || null;
-                        handleCambiarEstadoPedido(
-                          selectedPedido.id,
-                          "PREPARANDO",
-                          "Ventas/Admin verificó pedido y comprobante. Enviado a Stock",
-                          targetStock
-                        );
-                      }}
-                      disabled={saving}
-                      className="px-4 py-2 bg-[#3b82f6] hover:bg-blue-600 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow"
-                    >
-                      <CheckCircle2 className="w-4 h-4" />
-                      Verificar y enviar a Stock para preparar
-                    </button>
+                  {selectedPedido.estado === "PENDIENTE" && (
+                    (user.rol === "ADMINISTRADOR" || user.rol === "ENCARGADO_VENTAS") && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const targetStock = selectedPedido.preparadorUsuarioId || staffPreparadores.find((s) => s.rol === "ENCARGADO_STOCK")?.id || null;
+                          handleCambiarEstadoPedido(
+                            selectedPedido.id,
+                            "CONFIRMADO",
+                            "Ventas/Admin verificó pago y aprobó orden",
+                            targetStock
+                          );
+                        }}
+                        disabled={saving}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        Aprobar pago y enviar a Stock
+                      </button>
+                    )
+                  )}
+
+                  {selectedPedido.estado === "CONFIRMADO" && (
+                    (user.rol === "ADMINISTRADOR" || user.rol === "ENCARGADO_STOCK") ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const targetStock = selectedPedido.preparadorUsuarioId || user.id;
+                          handleCambiarEstadoPedido(
+                            selectedPedido.id,
+                            "PREPARANDO",
+                            "Stock inició preparación del pedido",
+                            targetStock
+                          );
+                        }}
+                        disabled={saving}
+                        className="px-4 py-2 bg-[#3b82f6] hover:bg-blue-600 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow"
+                      >
+                        <Package className="w-4 h-4" />
+                        Tomar e iniciar preparación
+                      </button>
+                    ) : (
+                      <span className="px-3 py-2 bg-sky-950/40 border border-sky-800/30 text-sky-400 rounded-lg text-xs font-semibold flex items-center gap-1.5">
+                        <Clock className="w-4 h-4" />
+                        <span>En cola de Stock para armado</span>
+                      </span>
+                    )
                   )}
 
                   {selectedPedido.estado === "PREPARANDO" && (
                     (user.rol === "ENCARGADO_STOCK" || user.rol === "ADMINISTRADOR") ? (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleCambiarEstadoPedido(
-                            selectedPedido.id,
-                            selectedPedido.modalidadEntrega === "MOTOMANDADO" ? "LISTO_ENTREGA" : "LISTO_PARA_RETIRAR"
-                          )
-                        }
-                        disabled={saving}
-                        className="px-4 py-2 bg-[#a855f7] hover:bg-purple-600 text-white rounded-lg text-xs font-bold"
-                      >
-                        Marcar listo para entrega / retiro
-                      </button>
+                      (() => {
+                        const tot = selectedPedido.items?.length || 0;
+                        const ckd = selectedPedido.items?.filter((it) => !!it.preparado && (it.cantidadPreparada ?? 0) >= it.cantidad).length || 0;
+                        const allOk = tot > 0 && ckd === tot;
+                        const ordSav = !!savingChecklistItems[`ped-${selectedPedido.id}`];
+
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => handleFinalizarPreparacion(selectedPedido)}
+                            disabled={saving || ordSav || !allOk}
+                            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                              allOk && !ordSav
+                                ? "bg-[#a855f7] hover:bg-purple-600 text-white cursor-pointer"
+                                : "bg-zinc-800/80 text-zinc-400 border border-zinc-700/50 cursor-not-allowed opacity-75"
+                            }`}
+                          >
+                            {ordSav ? (
+                              <>
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                <span>Guardando checklist...</span>
+                              </>
+                            ) : (
+                              <span>
+                                {allOk
+                                  ? "Marcar listo para entrega / retiro"
+                                  : `Checklist incompleto (${ckd}/${tot})`}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })()
                     ) : (
                       <span className="px-3 py-2 bg-blue-950/40 border border-blue-800/30 text-blue-400 rounded-lg text-xs font-semibold flex items-center gap-1.5">
                         <Package className="w-4 h-4" />
