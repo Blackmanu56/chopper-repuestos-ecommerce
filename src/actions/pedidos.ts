@@ -985,9 +985,10 @@ export async function actualizarEstadoPedidoAction(
           if (asignarPreparadorId) {
             const prep = await tx.usuario.findUnique({
               where: { id: asignarPreparadorId },
-              select: { id: true, nombreCompleto: true },
+              include: { rol: true },
             });
-            if (prep) {
+            // Restricción estricta de backend: solo personal de Stock o Administrador puede ser preparador
+            if (prep && (prep.rol.nombre === "ADMINISTRADOR" || prep.rol.nombre === "ENCARGADO_STOCK")) {
               updateSimple.preparadorUsuarioId = prep.id;
               updateSimple.preparadorNombre = prep.nombreCompleto;
             }
@@ -1313,9 +1314,10 @@ export async function actualizarEstadoPedidoAction(
         if (targetPreparerId) {
           const prepUser = await tx.usuario.findUnique({
             where: { id: targetPreparerId },
-            select: { id: true, nombreCompleto: true },
+            include: { rol: true },
           });
-          if (prepUser) {
+          // Restricción estricta de backend: solo personal de Stock o Administrador puede ser preparador
+          if (prepUser && (prepUser.rol.nombre === "ADMINISTRADOR" || prepUser.rol.nombre === "ENCARGADO_STOCK")) {
             updateData.preparadorUsuarioId = prepUser.id;
             updateData.preparadorNombre = prepUser.nombreCompleto;
             if (!pedidoActual.fechaPreparacion) {
@@ -1469,7 +1471,12 @@ export async function getStaffPreparadoresAction(_ignoredUserId?: number): Promi
 
   try {
     const users = await prisma.usuario.findMany({
-      where: { activo: true },
+      where: {
+        activo: true,
+        rol: {
+          nombre: { in: ["ADMINISTRADOR", "ENCARGADO_STOCK"] },
+        },
+      },
       select: {
         id: true,
         nombreCompleto: true,

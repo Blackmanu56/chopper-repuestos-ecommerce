@@ -248,9 +248,8 @@ export default function PanelPage() {
   const [bulkBadgePromo, setBulkBadgePromo] = useState("Mes de la Primavera");
   const [showBulkOfferModal, setShowBulkOfferModal] = useState(false);
 
-  // Staff de Preparadores para Stock
+  // Staff de Preparadores para Stock (solo Stock y Administrador)
   const [staffPreparadores, setStaffPreparadores] = useState<Array<{ id: number; nombre: string; rol: string }>>([]);
-  const [selectedPreparadorId, setSelectedPreparadorId] = useState<number | null>(null);
 
   // Marcas
   const [marcas, setMarcas] = useState<MarcaAdminItem[]>([]);
@@ -421,10 +420,6 @@ export default function PanelPage() {
       if (resBanners) setBannersHome(resBanners);
       if (resStaff.success && resStaff.staff) {
         setStaffPreparadores(resStaff.staff);
-        if (!selectedPreparadorId && resStaff.staff.length > 0) {
-          const match = resStaff.staff.find((s) => s.id === user?.id) || resStaff.staff[0];
-          setSelectedPreparadorId(match.id);
-        }
       }
     } catch (err) {
       console.error("Error al cargar datos del panel:", err);
@@ -611,7 +606,7 @@ export default function PanelPage() {
       }
       // Filtro de empleado preparador
       if (filtroEmpleadoPedido === "SIN_ASIGNAR") {
-        if (p.preparadorUsuarioId) return false;
+        if (p.preparadorUsuarioId || p.preparadorNombre) return false;
       } else if (filtroEmpleadoPedido !== "TODOS") {
         if (String(p.preparadorUsuarioId) !== filtroEmpleadoPedido) return false;
       }
@@ -2284,7 +2279,7 @@ export default function PanelPage() {
                       className="w-full bg-[#0f1012] border border-[#35363d] rounded-lg pl-8 pr-3 py-2 text-xs text-[#e7e7ea] focus:outline-none focus:border-red-600"
                     >
                       <option value="TODOS">Todos los preparadores</option>
-                      <option value="SIN_ASIGNAR">⚠️ Sin asignar a stock</option>
+                      <option value="SIN_ASIGNAR">Sin preparador asignado</option>
                       {staffPreparadores
                         .filter((s) => s.rol === "ADMINISTRADOR" || s.rol === "ENCARGADO_STOCK")
                         .map((s) => (
@@ -5881,27 +5876,6 @@ export default function PanelPage() {
                   Picking de repuestos, checklist de depósito y asignación del empleado encargado de preparar.
                 </p>
               </div>
-
-              {/* Selector de Empleado de Stock Preparador */}
-              <div className="flex items-center gap-2 bg-[#16171c] border border-[#26272e] p-2 rounded-xl text-xs">
-                <UserCheck className="w-4 h-4 text-sky-400" />
-                <span className="text-[#9a9ba3] text-xs font-semibold">Preparador activo:</span>
-                <select
-                  value={selectedPreparadorId || user.id}
-                  onChange={(e) => setSelectedPreparadorId(Number(e.target.value))}
-                  className="bg-[#0f1012] border border-[#35363d] rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:border-red-600 font-semibold"
-                >
-                  {staffPreparadores.length > 0 ? (
-                    staffPreparadores.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.nombre} ({s.rol})
-                      </option>
-                    ))
-                  ) : (
-                    <option value={user.id}>{user.nombreCompleto || "Franco Díaz"} (Stock)</option>
-                  )}
-                </select>
-              </div>
             </div>
 
             {/* Kanban Columns */}
@@ -5950,12 +5924,8 @@ export default function PanelPage() {
                             handleCambiarEstadoPedido(
                               p.id,
                               "PREPARANDO",
-                              `Comenzado a preparar por: ${
-                                staffPreparadores.find((s) => s.id === selectedPreparadorId)?.nombre ||
-                                user.nombreCompleto ||
-                                "Stock"
-                              }`,
-                              selectedPreparadorId || user.id
+                              `Comenzado a preparar por: ${user.nombreCompleto || "Stock"}`,
+                              user.id
                             )
                           }
                           disabled={saving}
@@ -6901,7 +6871,7 @@ export default function PanelPage() {
                           <button
                             type="button"
                             onClick={() => {
-                              const targetStock = selectedPedido.preparadorUsuarioId || selectedPreparadorId || staffPreparadores.find((s) => s.rol === "ENCARGADO_STOCK")?.id || null;
+                              const targetStock = selectedPedido.preparadorUsuarioId || staffPreparadores.find((s) => s.rol === "ENCARGADO_STOCK")?.id || null;
                               handleCambiarEstadoPedido(selectedPedido.id, "PREPARANDO", "Ventas verificó comprobante y envió orden a Stock", targetStock);
                             }}
                             disabled={saving}
@@ -6949,7 +6919,7 @@ export default function PanelPage() {
                         <button
                           type="button"
                           onClick={() => {
-                            const targetStock = selectedPedido.preparadorUsuarioId || selectedPreparadorId || staffPreparadores.find((s) => s.rol === "ENCARGADO_STOCK")?.id || null;
+                            const targetStock = selectedPedido.preparadorUsuarioId || staffPreparadores.find((s) => s.rol === "ENCARGADO_STOCK")?.id || null;
                             handleCambiarEstadoPedido(selectedPedido.id, "PREPARANDO", "Ventas verificó pedido y autorizó preparación en Stock", targetStock);
                           }}
                           disabled={saving}
@@ -7033,7 +7003,7 @@ export default function PanelPage() {
                     <button
                       type="button"
                       onClick={() => {
-                        const targetStock = selectedPedido.preparadorUsuarioId || selectedPreparadorId || staffPreparadores.find((s) => s.rol === "ENCARGADO_STOCK")?.id || null;
+                        const targetStock = selectedPedido.preparadorUsuarioId || staffPreparadores.find((s) => s.rol === "ENCARGADO_STOCK")?.id || null;
                         handleCambiarEstadoPedido(
                           selectedPedido.id,
                           "PREPARANDO",
@@ -7593,7 +7563,7 @@ export default function PanelPage() {
                     <button
                       type="button"
                       onClick={() => {
-                        const targetStock = comprobanteModalPedido.preparadorUsuarioId || selectedPreparadorId || staffPreparadores.find((s) => s.rol === "ENCARGADO_STOCK")?.id || null;
+                        const targetStock = comprobanteModalPedido.preparadorUsuarioId || staffPreparadores.find((s) => s.rol === "ENCARGADO_STOCK")?.id || null;
                         handleCambiarEstadoPedido(comprobanteModalPedido.id, "PREPARANDO", "Ventas verificó comprobante en visor y envió orden a Stock", targetStock);
                         setComprobanteModalUrl(null);
                         setComprobanteModalPedido(null);
