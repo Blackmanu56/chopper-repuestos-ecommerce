@@ -47,6 +47,9 @@ next-env.d.ts
 # customer uploads / comprobantes
 /public/uploads/comprobantes/*
 !/public/uploads/comprobantes/.gitkeep
+/public/uploads/combos/*
+!/public/uploads/combos/.gitkeep
+/public/uploads/branding/logo-17928*.png
 
 # scratch
 /scratch

@@ -104,6 +104,7 @@ import {
   toggleComboEstadoAction,
   eliminarComboAction,
   ComboDTO,
+  ProductSpec,
 } from "@/actions/combos";
 import {
   getConfiguracionAction,
@@ -331,7 +332,15 @@ export default function PanelPage() {
   const [comboImages, setComboImages] = useState<string[]>([]);
   const [comboItems, setComboItems] = useState<{ productoId: number; cantidad: number }[]>([]);
   const [comboItemSearch, setComboItemSearch] = useState("");
+  const [comboActivo, setComboActivo] = useState(true);
+  const [comboDestacado, setComboDestacado] = useState(false);
   const [comboFormErrors, setComboFormErrors] = useState<Record<string, string>>({});
+  const [comboSpecs, setComboSpecs] = useState<ProductSpec[]>([]);
+  const [comboMotos, setComboMotos] = useState<string[]>([]);
+  const [newSpecKey, setNewSpecKey] = useState("");
+  const [newSpecVal, setNewSpecVal] = useState("");
+  const [newMotoInput, setNewMotoInput] = useState("");
+  const [infoTecnicaTab, setInfoTecnicaTab] = useState<"specs" | "motos">("specs");
 
   // Etiquetas de Oferta
   const [etiquetas, setEtiquetas] = useState<EtiquetaOferta[]>([]);
@@ -1135,6 +1144,14 @@ export default function PanelPage() {
     setComboPrecio(0);
     setComboImages([]);
     setComboItems([]);
+    setComboSpecs([]);
+    setComboMotos([]);
+    setComboActivo(true);
+    setComboDestacado(false);
+    setNewSpecKey("");
+    setNewSpecVal("");
+    setNewMotoInput("");
+    setInfoTecnicaTab("specs");
     setComboFormErrors({});
     setShowComboModal(true);
   };
@@ -1146,10 +1163,44 @@ export default function PanelPage() {
     setComboDescripcion(c.descripcion || "");
     setComboBadge(c.badge || "Mes de la Primavera");
     setComboPrecio(c.precio);
-    setComboImages(parseImages(c.imagen));
+    const imgs = c.imagenes && c.imagenes.length > 0 ? c.imagenes : parseImages(c.imagen);
+    setComboImages(imgs);
     setComboItems(c.items.map((it) => ({ productoId: it.productoId, cantidad: it.cantidad })));
+    setComboSpecs(c.especificaciones ? [...c.especificaciones] : []);
+    setComboMotos(c.motosCompatibles ? [...c.motosCompatibles] : []);
+    setComboActivo(c.activo !== undefined ? c.activo : true);
+    setComboDestacado(c.destacado !== undefined ? c.destacado : false);
+    setNewSpecKey("");
+    setNewSpecVal("");
+    setNewMotoInput("");
+    setInfoTecnicaTab("specs");
     setComboFormErrors({});
     setShowComboModal(true);
+  };
+
+  const handleMoverImagenCombo = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex > 3 || toIndex > 3) return;
+    setComboImages((prev) => {
+      const list = [...prev];
+      while (list.length <= Math.max(fromIndex, toIndex)) {
+        list.push("");
+      }
+      const temp = list[fromIndex];
+      list[fromIndex] = list[toIndex];
+      list[toIndex] = temp;
+      return list;
+    });
+  };
+
+  const handleHacerPortadaCombo = (index: number) => {
+    if (index === 0) return;
+    setComboImages((prev) => {
+      const list = [...prev];
+      if (!list[index]) return prev;
+      const [selected] = list.splice(index, 1);
+      list.unshift(selected);
+      return list;
+    });
   };
 
   const combosFiltrados = useMemo(() => {
@@ -1227,7 +1278,8 @@ export default function PanelPage() {
 
     setSaving(true);
     try {
-      const mainImage = comboImages.filter(Boolean)[0] || "/combos/combo-service-motul.jpg";
+      const cleanImages = comboImages.map((s) => (s || "").trim()).filter(Boolean);
+      const mainImage = cleanImages[0] || "/combos/combo-service-motul.jpg";
       const res = await upsertComboAction(user.id, {
         id: editingCombo?.id,
         nombre: comboNombre.trim(),
@@ -1236,10 +1288,12 @@ export default function PanelPage() {
         badge: comboBadge.trim() || "Mes de la Primavera",
         precio: comboPrecio,
         precioRegular: comboPrecioRegularCalculado,
-        imagen: comboImages.filter(Boolean).join(",") || mainImage,
+        imagen: cleanImages.join(",") || mainImage,
+        activo: comboActivo,
+        destacado: comboDestacado,
         items: comboItems,
-        especificaciones: editingCombo?.especificaciones,
-        motosCompatibles: editingCombo?.motosCompatibles,
+        especificaciones: comboSpecs,
+        motosCompatibles: comboMotos,
       });
 
       if (res.success) {
@@ -3891,59 +3945,71 @@ export default function PanelPage() {
           <section className="space-y-6 w-full">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Combos y kits</h1>
-                <p className="text-xs sm:text-[13px] text-[#9a9ba3] mt-0.5">
+                <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
+                  Combos y kits
+                </h1>
+                <p className="text-xs sm:text-[13px] text-slate-500 dark:text-[#9a9ba3] mt-0.5">
                   Armá kits vinculando repuestos reales del catálogo con cálculo automático de ahorro y stock.
                 </p>
               </div>
               <button
                 onClick={handleOpenNuevoCombo}
-                className="self-start sm:self-auto px-4 py-2 bg-[#16a34a] hover:bg-green-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-md"
+                className="self-start sm:self-auto px-4 py-2 bg-[#16a34a] hover:bg-green-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-md cursor-pointer"
               >
                 <Plus className="w-4 h-4" /> Nuevo combo
               </button>
             </div>
 
             {/* Filtros y Búsqueda de Combos */}
-            <div className="bg-[#16171c] border border-[#26272e] rounded-xl p-4 flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+            <div className="bg-white dark:bg-[#16171c] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between shadow-2xs">
               <div className="relative flex-1">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#6b6c75]" />
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-[#6b6c75]" />
                 <input
                   type="text"
                   placeholder="Buscar combo por nombre, repuestos o etiqueta..."
                   value={busquedaCombo}
                   onChange={(e) => setBusquedaCombo(e.target.value)}
-                  className="w-full bg-[#0f1012] border border-[#35363d] rounded-lg pl-9 pr-4 py-2 text-sm text-white focus:outline-none focus:border-red-600 placeholder:text-[#6b6c75]"
+                  className="w-full bg-slate-50 dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg pl-9 pr-8 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-red-600 placeholder:text-slate-400 dark:placeholder:text-[#6b6c75]"
                 />
+                {busquedaCombo.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => setBusquedaCombo("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-white p-0.5 rounded cursor-pointer"
+                    title="Limpiar búsqueda"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
               </div>
 
               <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
                 <button
                   onClick={() => setFiltroComboEstado("TODOS")}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
                     filtroComboEstado === "TODOS"
                       ? "bg-[#dc2626] text-white"
-                      : "bg-[#1a1b20] border border-[#35363d] text-[#9a9ba3] hover:text-white"
+                      : "bg-slate-100 dark:bg-[#1a1b20] border border-slate-300 dark:border-[#35363d] text-slate-600 dark:text-[#9a9ba3] hover:text-slate-900 dark:hover:text-white"
                   }`}
                 >
                   Todos ({combos.length})
                 </button>
                 <button
                   onClick={() => setFiltroComboEstado("ACTIVOS")}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
                     filtroComboEstado === "ACTIVOS"
                       ? "bg-[#dc2626] text-white"
-                      : "bg-[#1a1b20] border border-[#35363d] text-[#9a9ba3] hover:text-white"
+                      : "bg-slate-100 dark:bg-[#1a1b20] border border-slate-300 dark:border-[#35363d] text-slate-600 dark:text-[#9a9ba3] hover:text-slate-900 dark:hover:text-white"
                   }`}
                 >
                   Activos ({combos.filter((c) => c.activo).length})
                 </button>
                 <button
                   onClick={() => setFiltroComboEstado("PAUSADOS")}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
                     filtroComboEstado === "PAUSADOS"
                       ? "bg-[#dc2626] text-white"
-                      : "bg-[#1a1b20] border border-[#35363d] text-[#9a9ba3] hover:text-white"
+                      : "bg-slate-100 dark:bg-[#1a1b20] border border-slate-300 dark:border-[#35363d] text-slate-600 dark:text-[#9a9ba3] hover:text-slate-900 dark:hover:text-white"
                   }`}
                 >
                   Pausados ({combos.filter((c) => !c.activo).length})
@@ -3953,22 +4019,29 @@ export default function PanelPage() {
 
             {/* Listado de Combos en Grid de Tarjetas */}
             {combosFiltrados.length === 0 ? (
-              <div className="bg-[#16171c] border border-[#26272e] rounded-xl p-8 text-center text-[#9a9ba3] text-xs">
+              <div className="bg-white dark:bg-[#16171c] border border-slate-200 dark:border-[#26272e] rounded-xl p-8 text-center text-slate-500 dark:text-[#9a9ba3] text-xs">
                 No se encontraron combos con los filtros aplicados.
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
                 {combosFiltrados.map((c) => {
-                  const imgs = parseImages(c.imagen);
+                  const imgs = c.imagenes && c.imagenes.length > 0 ? c.imagenes : parseImages(c.imagen);
                   const mainImg = imgs[0] || "/combos/combo-service-motul.jpg";
                   return (
                     <div
                       key={c.id}
-                      className="bg-[#1a1b20] border border-[#26272e] hover:border-[#35363d] rounded-xl p-4 flex flex-col justify-between space-y-3 transition-colors"
+                      className="bg-white dark:bg-[#1a1b20] border border-slate-200 dark:border-[#26272e] hover:border-slate-300 dark:hover:border-[#35363d] rounded-xl p-4 flex flex-col justify-between space-y-3 transition-colors shadow-2xs"
                     >
                       <div>
-                        <div className="relative w-full h-36 rounded-lg bg-[#141519] border border-[#26272e] overflow-hidden mb-3">
-                          <img src={mainImg} alt={c.nombre} className="w-full h-full object-cover" />
+                        <div className="relative w-full h-36 rounded-lg bg-slate-100 dark:bg-[#141519] border border-slate-200 dark:border-[#26272e] overflow-hidden mb-3">
+                          <img
+                            src={mainImg}
+                            alt={c.nombre}
+                            onError={(e) => {
+                              (e.currentTarget as HTMLImageElement).src = "/combos/combo-service-motul.jpg";
+                            }}
+                            className="w-full h-full object-cover"
+                          />
                           <span className="absolute top-2 left-2 bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow">
                             {c.badge}
                           </span>
@@ -3979,54 +4052,58 @@ export default function PanelPage() {
                           )}
                         </div>
 
-                        <h3 className="font-bold text-white text-sm mb-1 truncate" title={c.nombre}>
+                        <h3 className="font-bold text-slate-900 dark:text-white text-sm mb-1 truncate" title={c.nombre}>
                           {c.nombre}
                         </h3>
-                        <p className="text-xs text-[#9a9ba3] line-clamp-2 mb-2">{c.descripcion}</p>
+                        <p className="text-xs text-slate-500 dark:text-[#9a9ba3] line-clamp-2 mb-2">{c.descripcion}</p>
 
-                        <div className="space-y-1 text-xs bg-[#141519] p-2.5 rounded-lg border border-[#26272e]">
-                          <div className="text-[#6b6c75] font-semibold text-[11px]">Incluye:</div>
+                        <div className="space-y-1 text-xs bg-slate-50 dark:bg-[#141519] p-2.5 rounded-lg border border-slate-200 dark:border-[#26272e]">
+                          <div className="text-slate-500 dark:text-[#6b6c75] font-semibold text-[11px]">Incluye:</div>
                           {c.items.slice(0, 3).map((it, idx) => (
-                            <div key={idx} className="flex justify-between text-[#e7e7ea] truncate">
+                            <div key={idx} className="flex justify-between text-slate-700 dark:text-[#e7e7ea] truncate">
                               <span className="truncate">{it.cantidad}x {it.producto?.nombre}</span>
-                              <span className="text-[#9a9ba3] ml-1.5 whitespace-nowrap">
+                              <span className="text-slate-500 dark:text-[#9a9ba3] ml-1.5 whitespace-nowrap">
                                 {formatPrice(it.producto?.precioVenta * it.cantidad)}
                               </span>
                             </div>
                           ))}
                           {c.items.length > 3 && (
-                            <div className="text-[10px] text-[#6b6c75] italic">
+                            <div className="text-[10px] text-slate-400 dark:text-[#6b6c75] italic">
                               +{c.items.length - 3} repuesto(s) más
                             </div>
                           )}
                         </div>
                       </div>
 
-                      <div className="pt-2 border-t border-[#26272e] flex items-center justify-between">
+                      <div className="pt-2 border-t border-slate-200 dark:border-[#26272e] flex items-center justify-between">
                         <div>
-                          <div className="text-[11px] text-[#6b6c75] line-through">{formatPrice(c.precioRegular || 0)}</div>
-                          <div className="text-sm font-bold text-emerald-400">{formatPrice(c.precio)}</div>
+                          {c.enOferta && c.precioRegular && c.precioRegular > c.precio ? (
+                            <div className="text-[11px] text-slate-400 dark:text-[#6b6c75] line-through">{formatPrice(c.precioRegular)}</div>
+                          ) : null}
+                          <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{formatPrice(c.precio)}</div>
                         </div>
 
                         <div className="flex items-center gap-1.5">
                           <button
                             onClick={() => handleToggleCombo(c.id, c.activo)}
-                            className={`px-2 py-1 rounded text-xs font-semibold transition-colors ${
-                              c.activo ? "bg-emerald-500/20 text-emerald-400" : "bg-zinc-800 text-[#9a9ba3]"
+                            className={`px-2 py-1 rounded text-xs font-semibold transition-colors cursor-pointer ${
+                              c.activo
+                                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20"
+                                : "bg-zinc-100 dark:bg-zinc-800 text-slate-500 dark:text-[#9a9ba3] border border-zinc-200 dark:border-zinc-700"
                             }`}
                           >
                             {c.activo ? "Activo" : "Pausado"}
                           </button>
                           <button
                             onClick={() => handleOpenEditCombo(c)}
-                            className="p-1.5 bg-[#16171c] hover:bg-[#26272e] border border-[#35363d] rounded text-white"
+                            className="p-1.5 bg-slate-100 dark:bg-[#16171c] hover:bg-slate-200 dark:hover:bg-[#26272e] border border-slate-300 dark:border-[#35363d] rounded text-slate-700 dark:text-white transition-colors cursor-pointer"
                             title="Editar combo"
                           >
                             <Edit className="w-3.5 h-3.5" />
                           </button>
                           <button
                             onClick={() => handleEliminarCombo(c.id)}
-                            className="p-1.5 bg-[#16171c] hover:bg-red-950/60 border border-[#35363d] rounded text-red-400"
+                            className="p-1.5 bg-slate-100 dark:bg-[#16171c] hover:bg-red-50 dark:hover:bg-red-950/60 border border-slate-300 dark:border-[#35363d] rounded text-red-600 dark:text-red-400 transition-colors cursor-pointer"
                             title="Eliminar combo"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -4041,534 +4118,1072 @@ export default function PanelPage() {
 
             {/* MODAL CREAR / EDITAR COMBO */}
             {showComboModal && (
-              <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-                <div className="bg-[#16171c] border border-[#26272e] rounded-xl max-w-2xl w-full p-6 shadow-2xl space-y-5 my-8">
-                  <div className="flex items-start justify-between border-b border-[#26272e] pb-3">
-                    <div>
-                      <h2 className="text-xl font-bold text-white">
-                        {editingCombo ? "Editar combo" : "Nuevo combo"}
-                      </h2>
-                      <p className="text-xs text-[#9a9ba3] mt-0.5">
-                        Seleccioná repuestos reales y definí el precio promocional.
-                      </p>
+              <div
+                className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 md:p-6 animate-in fade-in duration-200 overflow-hidden"
+                onClick={(e) => {
+                  if (e.target === e.currentTarget) {
+                    setShowComboModal(false);
+                  }
+                }}
+              >
+                <div
+                  className="bg-white dark:bg-[#16171c] border border-slate-200 dark:border-[#26272e] rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col max-h-[92vh] sm:max-h-[88vh] overflow-hidden my-auto"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Cabecera Fija */}
+                  <div className="flex items-center justify-between px-5 sm:px-6 py-3.5 border-b border-slate-200 dark:border-[#26272e] bg-slate-50/70 dark:bg-[#16171c] shrink-0">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 rounded-xl bg-red-500/10 text-red-600 dark:text-red-500 border border-red-500/20">
+                        <Package className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
+                            {editingCombo ? "Editar combo" : "Nuevo combo"}
+                          </h2>
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              comboActivo
+                                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
+                                : "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400 border-zinc-500/30"
+                            }`}
+                          >
+                            {comboActivo ? "Activo en tienda" : "Pausado"}
+                          </span>
+                          {comboDestacado && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30">
+                              ⭐ Destacado
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-500 dark:text-[#9a9ba3] mt-0.5">
+                          Armá o modificá el kit, vinculá repuestos reales y definí el precio promocional.
+                        </p>
+                      </div>
                     </div>
                     <button
+                      type="button"
                       onClick={() => setShowComboModal(false)}
-                      className="p-1 rounded-md text-[#9a9ba3] hover:text-white hover:bg-[#26272e]"
+                      className="text-slate-400 hover:text-slate-700 dark:text-[#9a9ba3] dark:hover:text-white p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-[#26272e] transition-colors cursor-pointer"
+                      title="Cerrar ventana"
                     >
                       <X className="w-5 h-5" />
                     </button>
                   </div>
 
-                  <div className="space-y-4">
-                    <label className="flex flex-col gap-1.5 text-xs text-[#b8b9c0]">
-                      Nombre del combo
-                      <input
-                        type="text"
-                        placeholder="Ej: Combo Cadena y Piñón Honda CG"
-                        value={comboNombre}
-                        onChange={(e) => {
-                          setComboNombre(e.target.value);
-                          if (comboFormErrors.nombre) {
-                            setComboFormErrors((prev) => {
-                              const next = { ...prev };
-                              delete next.nombre;
-                              return next;
-                            });
-                          }
-                        }}
-                        className={`bg-[#0f1012] border rounded-lg px-3 py-2 text-sm text-white focus:outline-none ${
-                          comboFormErrors.nombre
-                            ? "border-red-500 focus:border-red-500"
-                            : "border-[#35363d] focus:border-red-600"
-                        }`}
-                      />
-                      {comboFormErrors.nombre && (
-                        <span className="text-[11px] text-red-400 font-medium">
-                          {comboFormErrors.nombre}
-                        </span>
-                      )}
-                    </label>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <label className="flex flex-col gap-1.5 text-xs text-[#b8b9c0]">
-                        Etiqueta de promoción
-                        <select
-                          value={comboBadge}
-                          onChange={(e) => setComboBadge(e.target.value)}
-                          className="bg-[#0f1012] border border-[#35363d] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-red-600"
-                        >
-                          <option value="">Sin etiqueta</option>
-                          {etiquetas
-                            .filter((e) => e.activa)
-                            .map((e) => (
-                              <option key={e.id} value={e.nombre}>
-                                {formatBadgeWithEmoji(e.nombre, e.emoji)}
-                              </option>
-                            ))}
-                          {comboBadge && !etiquetas.some((e) => e.nombre === comboBadge) && (
-                            <option value={comboBadge}>{comboBadge}</option>
-                          )}
-                        </select>
-                      </label>
-
-                      <label className="flex flex-col gap-1.5 text-xs text-[#b8b9c0]">
-                        Precio del combo ($)
-                        <input
-                          type="number"
-                          value={comboPrecio}
-                          onChange={(e) => {
-                            setComboPrecio(Math.max(0, Number(e.target.value)));
-                            if (comboFormErrors.precio) {
-                              setComboFormErrors((prev) => {
-                                const next = { ...prev };
-                                delete next.precio;
-                                return next;
-                              });
-                            }
-                          }}
-                          className={`bg-[#0f1012] border rounded-lg px-3 py-2 text-sm font-bold text-emerald-400 focus:outline-none ${
-                            comboFormErrors.precio
-                              ? "border-red-500 focus:border-red-500"
-                              : "border-[#35363d] focus:border-red-600"
-                          }`}
-                        />
-                        {comboFormErrors.precio && (
-                          <span className="text-[11px] text-red-400 font-medium">
-                            {comboFormErrors.precio}
-                          </span>
-                        )}
-                      </label>
-                    </div>
-
-                    {/* Resumen de Ahorro Calculado */}
-                    <div className="bg-[#141519] border border-[#26272e] rounded-xl p-3.5 flex items-center justify-between text-xs">
-                      <div>
-                        <span className="text-[#6b6c75]">Precio regular suma de ítems: </span>
-                        <b className="text-white">{formatPrice(comboPrecioRegularCalculado)}</b>
-                      </div>
-                      <div className="text-emerald-400 font-bold">
-                        Ahorro cliente: {formatPrice(comboAhorroCalculado)} ({comboDescuentoPct}% OFF)
-                      </div>
-                    </div>
-
-                    {/* Disponibilidad proporcional calculada según stock real */}
-                    <div
-                      className={`rounded-xl p-3 border text-xs flex items-center justify-between gap-3 ${
-                        comboItems.length === 0
-                          ? "bg-[#141519] border-[#26272e] text-[#9a9ba3]"
-                          : comboStockCalculado > 0
-                          ? "bg-emerald-950/20 border-emerald-800/40 text-emerald-300"
-                          : "bg-amber-950/20 border-amber-800/40 text-amber-300"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <Package
-                          className={`w-4 h-4 flex-shrink-0 ${
-                            comboItems.length === 0
-                              ? "text-[#6b6c75]"
-                              : comboStockCalculado > 0
-                              ? "text-emerald-400"
-                              : "text-amber-400"
-                          }`}
-                        />
-                        <div>
-                          <div className="font-bold">
-                            {comboItems.length === 0
-                              ? "Disponibilidad del combo: pendiente (sin repuestos)"
-                              : comboStockCalculado > 0
-                              ? `Disponibilidad calculada: ${comboStockCalculado} unidad${
-                                  comboStockCalculado === 1 ? "" : "es"
-                                } para la venta`
-                              : "Disponibilidad calculada: 0 unidades (sin stock)"}
+                  {/* Cuerpo Desplazable (2 columnas en desktop, 1 en mobile) */}
+                  <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                      {/* COLUMNA IZQUIERDA (Info general, Visibilidad, Precios y Fotos) */}
+                      <div className="lg:col-span-6 space-y-4">
+                        {/* 1. INFORMACIÓN GENERAL */}
+                        <div className="bg-slate-50/80 dark:bg-[#141519] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 space-y-3">
+                          <div className="flex items-center justify-between border-b border-slate-200/80 dark:border-[#26272e] pb-2">
+                            <span className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-white flex items-center gap-1.5">
+                              <Sparkles className="w-4 h-4 text-red-500" /> Información general
+                            </span>
+                            <span className="text-[10px] text-slate-400 dark:text-[#6b6c75]">
+                              Identificación básica
+                            </span>
                           </div>
-                          <p className="text-[11px] text-[#9a9ba3] mt-0.5">
-                            {comboItems.length === 0
-                              ? "Sumá repuestos para calcular el stock conjunto del combo."
-                              : comboStockCalculado > 0
-                              ? "Calculado automáticamente a partir del repuesto con menor stock disponible proporcional."
-                              : "Uno o más componentes no tienen stock. Podés guardar la configuración del combo, pero figurará sin stock en la tienda hasta que ingrese mercadería."}
-                          </p>
-                        </div>
-                      </div>
-                      {comboItems.length > 0 && (
-                        <div
-                          className={`px-2.5 py-1 rounded-lg font-bold text-xs whitespace-nowrap ${
-                            comboStockCalculado > 0
-                              ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                              : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
-                          }`}
-                        >
-                          {comboStockCalculado} disp.
-                        </div>
-                      )}
-                    </div>
 
-                    {/* 1. LISTA DE REPUESTOS SELECCIONADOS EN EL COMBO */}
-                    <div className="space-y-2.5 bg-[#141519] border border-[#26272e] rounded-xl p-3.5">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-bold text-white flex items-center gap-1.5">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                          Repuestos incluidos en el combo ({comboItems.length}):
-                        </span>
-                        <span className="text-[11px] text-[#6b6c75]">
-                          Podés modificar cantidades o quitar repuestos
-                        </span>
-                      </div>
-
-                      {comboFormErrors.items && (
-                        <div className="p-2.5 rounded-lg bg-red-950/30 border border-red-800/40 text-red-400 text-xs font-medium flex items-center gap-2">
-                          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                          <span>{comboFormErrors.items}</span>
-                        </div>
-                      )}
-
-                      {comboItems.length === 0 ? (
-                        <div className="py-4 text-center text-xs text-[#9a9ba3] italic border border-dashed border-[#26272e] rounded-lg">
-                          Aún no incluiste repuestos. Buscá abajo en el catálogo para sumarlos.
-                        </div>
-                      ) : (
-                        <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
-                          {comboItems.map((it) => {
-                            const prod = products.find((p) => p.id === it.productoId);
-                            const unitPrice = prod?.precioVenta || 0;
-                            const subtotal = unitPrice * it.cantidad;
-                            const stockProd = prod?.cantidad ?? 0;
-                            const sinStock = stockProd === 0;
-                            const superaStock = !sinStock && it.cantidad > stockProd;
-
-                            return (
-                              <div
-                                key={it.productoId}
-                                className={`border rounded-lg p-2.5 flex items-center justify-between gap-3 text-xs transition-colors ${
-                                  sinStock
-                                    ? "bg-red-950/20 border-red-800/40"
-                                    : superaStock
-                                    ? "bg-amber-950/20 border-amber-800/40"
-                                    : "bg-[#1a1b20] border-[#35363d]"
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <label className="flex flex-col gap-1 text-xs text-slate-700 dark:text-[#b8b9c0] font-semibold sm:col-span-2">
+                              Nombre del combo *
+                              <input
+                                type="text"
+                                placeholder="Ej: Combo Transmisión Completa Honda CG 150"
+                                value={comboNombre}
+                                onChange={(e) => {
+                                  setComboNombre(e.target.value);
+                                  if (comboFormErrors.nombre) {
+                                    setComboFormErrors((prev) => {
+                                      const next = { ...prev };
+                                      delete next.nombre;
+                                      return next;
+                                    });
+                                  }
+                                }}
+                                className={`bg-white dark:bg-[#0f1012] border rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-[#6b6c75] focus:outline-none ${
+                                  comboFormErrors.nombre
+                                    ? "border-red-500 focus:border-red-500"
+                                    : "border-slate-300 dark:border-[#35363d] focus:border-red-600"
                                 }`}
-                              >
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <span className="text-[10px] text-red-400 font-bold bg-red-950/40 px-1.5 py-0.5 rounded border border-red-800/40">
-                                      {prod?.marca || "Repuesto"}
-                                    </span>
-                                    <span className="font-semibold text-white truncate">
-                                      {prod?.nombre || `Producto #${it.productoId}`}
-                                    </span>
-                                    {sinStock && (
-                                      <span className="text-[10px] text-red-400 bg-red-950/60 px-1.5 py-0.5 rounded border border-red-800/60 font-semibold flex items-center gap-1">
-                                        ⚠️ Sin stock disponible (0 unid.)
-                                      </span>
-                                    )}
-                                    {superaStock && (
-                                      <span className="text-[10px] text-amber-400 bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-800/60 font-semibold flex items-center gap-1">
-                                        ⚠️ Supera stock físico ({stockProd} disp.)
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="text-[11px] text-[#9a9ba3] mt-1 flex items-center gap-2 flex-wrap">
-                                    <span>Unitario: {formatPrice(unitPrice)}</span>
-                                    <span>·</span>
-                                    <span>
-                                      Stock en local:{" "}
-                                      <b className={stockProd > 0 ? "text-slate-200" : "text-red-400"}>
-                                        {stockProd} unid.
-                                      </b>
-                                    </span>
-                                    <span>·</span>
-                                    <span>
-                                      Subtotal: <b className="text-emerald-400">{formatPrice(subtotal)}</b>
-                                    </span>
-                                  </div>
-                                </div>
+                              />
+                              {comboFormErrors.nombre && (
+                                <span className="text-[11px] text-red-500 dark:text-red-400 font-medium">
+                                  {comboFormErrors.nombre}
+                                </span>
+                              )}
+                            </label>
 
-                                <div className="flex items-center gap-2">
-                                  {/* Stepper Cantidad con input numérico directo */}
-                                  <div className="flex items-center bg-[#0f1012] border border-[#35363d] rounded-lg overflow-hidden">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        if (it.cantidad > 1) {
-                                          setComboItems(
-                                            comboItems.map((x) =>
-                                              x.productoId === it.productoId
-                                                ? { ...x, cantidad: x.cantidad - 1 }
-                                                : x
-                                            )
-                                          );
-                                        } else {
-                                          setComboItems(
-                                            comboItems.filter((x) => x.productoId !== it.productoId)
-                                          );
-                                        }
-                                      }}
-                                      className="px-2 py-1 hover:bg-[#26272e] text-[#9a9ba3] hover:text-white transition-colors"
-                                      title="Disminuir cantidad"
-                                    >
-                                      <Minus className="w-3 h-3" />
-                                    </button>
-                                    <input
-                                      type="number"
-                                      min="1"
-                                      step="1"
-                                      value={it.cantidad}
-                                      onChange={(e) => {
-                                        const val = parseInt(e.target.value, 10);
-                                        const cleanVal = isNaN(val) ? 1 : Math.max(1, Math.floor(val));
-                                        setComboItems(
-                                          comboItems.map((x) =>
-                                            x.productoId === it.productoId
-                                              ? { ...x, cantidad: cleanVal }
-                                              : x
-                                          )
-                                        );
-                                      }}
-                                      className="w-10 bg-transparent text-xs font-bold text-white text-center focus:outline-none py-1"
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setComboItems(
-                                          comboItems.map((x) =>
-                                            x.productoId === it.productoId
-                                              ? { ...x, cantidad: x.cantidad + 1 }
-                                              : x
-                                          )
-                                        );
-                                      }}
-                                      className="px-2 py-1 hover:bg-[#26272e] text-[#9a9ba3] hover:text-white transition-colors"
-                                      title="Aumentar cantidad"
-                                    >
-                                      <Plus className="w-3 h-3" />
-                                    </button>
-                                  </div>
+                            <label className="flex flex-col gap-1 text-xs text-slate-700 dark:text-[#b8b9c0] font-semibold sm:col-span-2">
+                              Slug de URL (opcional)
+                              <input
+                                type="text"
+                                placeholder="Ej: combo-transmision-cg-150"
+                                value={comboSlug}
+                                onChange={(e) => setComboSlug(e.target.value)}
+                                className="bg-white dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-[#6b6c75] focus:outline-none focus:border-red-600"
+                              />
+                            </label>
+                          </div>
 
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setComboItems(
-                                        comboItems.filter((x) => x.productoId !== it.productoId)
-                                      )
-                                    }
-                                    className="p-1.5 rounded-lg bg-transparent hover:bg-red-950/50 text-[#6b6c75] hover:text-red-400 transition-colors"
-                                    title="Quitar del combo"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })}
+                          <label className="flex flex-col gap-1 text-xs text-slate-700 dark:text-[#b8b9c0] font-semibold">
+                            Descripción del combo (opcional)
+                            <textarea
+                              rows={2}
+                              placeholder="Breve reseña o aplicaciones del combo (ej: Incluye cadena reforzada, piñón y corona paso 428)..."
+                              value={comboDescripcion}
+                              onChange={(e) => setComboDescripcion(e.target.value)}
+                              className="w-full bg-white dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-[#6b6c75] focus:outline-none focus:border-red-600 resize-none"
+                            />
+                          </label>
                         </div>
-                      )}
-                    </div>
 
-                    {/* 2. BUSCADOR PARA AGREGAR NUEVOS REPUESTOS AL COMBO */}
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-xs text-[#b8b9c0]">
-                        <span className="font-semibold text-white">Buscar y agregar repuestos al combo:</span>
-                        <span className="text-[#6b6c75]">Escribí código, nombre o marca</span>
-                      </div>
+                        {/* 2. PUBLICACIÓN Y VISIBILIDAD */}
+                        <div className="bg-slate-50/80 dark:bg-[#141519] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 space-y-3">
+                          <div className="flex items-center justify-between border-b border-slate-200/80 dark:border-[#26272e] pb-2">
+                            <span className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-white flex items-center gap-1.5">
+                              <Eye className="w-4 h-4 text-emerald-500" /> Publicación y visibilidad
+                            </span>
+                            <span className="text-[10px] text-slate-400 dark:text-[#6b6c75]">
+                              Opciones comerciales
+                            </span>
+                          </div>
 
-                      <div className="relative">
-                        <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#6b6c75]" />
-                        <input
-                          type="text"
-                          placeholder="Ej: Corona, Cadena, Aceite Motul, Bujía, Pastillas..."
-                          value={comboItemSearch}
-                          onChange={(e) => setComboItemSearch(e.target.value)}
-                          className="w-full bg-[#0f1012] border border-[#35363d] rounded-lg pl-8 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-red-600"
-                        />
-                      </div>
-
-                      <div className="max-h-40 overflow-y-auto bg-[#141519] border border-[#26272e] rounded-lg p-2 space-y-1.5">
-                        {products
-                          .filter((p) =>
-                            comboItemSearch.trim()
-                              ? p.nombre.toLowerCase().includes(comboItemSearch.toLowerCase()) ||
-                                (p.marca || "").toLowerCase().includes(comboItemSearch.toLowerCase()) ||
-                                (p.codigo || "").toLowerCase().includes(comboItemSearch.toLowerCase())
-                              : true
-                          )
-                          .slice(0, 20)
-                          .map((prod) => {
-                            const includedItem = comboItems.find((it) => it.productoId === prod.id);
-                            const isSelected = Boolean(includedItem);
-                            const stockProd = prod.cantidad ?? 0;
-                            const sinStock = stockProd === 0;
-
-                            return (
-                              <div
-                                key={prod.id}
-                                className={`p-2 rounded-md flex items-center justify-between text-xs transition-colors ${
-                                  isSelected
-                                    ? "bg-red-950/20 border border-red-800/30 text-white"
-                                    : "bg-[#1a1b20] border border-[#26272e] text-[#9a9ba3] hover:text-white"
-                                }`}
-                              >
-                                <div className="flex items-center gap-2 flex-1 min-w-0">
-                                  <span className="text-[10px] text-red-400 font-bold bg-red-950/40 px-1 py-0.5 rounded">
-                                    {prod.marca || "Repuesto"}
+                          {/* Toggles de Publicado y Destacado */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            {/* Publicado Online */}
+                            <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-slate-200 dark:border-[#2b2c35] bg-white dark:bg-[#1a1b20] cursor-pointer hover:border-emerald-500/50 transition-colors">
+                              <input
+                                type="checkbox"
+                                checked={comboActivo}
+                                onChange={(e) => setComboActivo(e.target.checked)}
+                                className="mt-0.5 rounded text-emerald-600 focus:ring-0 cursor-pointer"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                                  <span>Publicado online</span>
+                                  <span className={`text-[9px] px-1.5 py-0.2 rounded font-bold ${
+                                    comboActivo
+                                      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                                      : "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400"
+                                  }`}>
+                                    {comboActivo ? "Activo" : "Pausado"}
                                   </span>
-                                  <span className="truncate text-white">{prod.nombre}</span>
-                                  {sinStock ? (
-                                    <span className="text-[10px] text-red-400 bg-red-950/40 px-1.5 py-0.5 rounded border border-red-800/40 whitespace-nowrap">
-                                      Sin stock (0)
-                                    </span>
-                                  ) : (
-                                    <span className="text-[10px] text-[#8e8f99] bg-[#0f1012] px-1.5 py-0.5 rounded whitespace-nowrap">
-                                      Stock: {stockProd}
+                                </div>
+                                <p className="text-[10px] text-slate-500 dark:text-[#8e8f96] mt-0.5 leading-snug">
+                                  {comboActivo ? "Visible en Inicio, catálogo y tienda pública" : "Oculto para clientes, solo visible en el panel"}
+                                </p>
+                              </div>
+                            </label>
+
+                            {/* Destacado en Inicio */}
+                            <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-slate-200 dark:border-[#2b2c35] bg-white dark:bg-[#1a1b20] cursor-pointer hover:border-amber-500/50 transition-colors">
+                              <input
+                                type="checkbox"
+                                checked={comboDestacado}
+                                onChange={(e) => setComboDestacado(e.target.checked)}
+                                className="mt-0.5 rounded text-amber-500 focus:ring-0 cursor-pointer"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                                  <span>Destacado en inicio</span>
+                                  {comboDestacado && (
+                                    <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-500/15 text-amber-700 dark:text-amber-400">
+                                      ⭐ Prioridad
                                     </span>
                                   )}
                                 </div>
+                                <p className="text-[10px] text-slate-500 dark:text-[#8e8f96] mt-0.5 leading-snug">
+                                  Aparece primero en el carrusel de Combos de la portada
+                                </p>
+                              </div>
+                            </label>
+                          </div>
 
-                                <div className="flex items-center gap-2 ml-2">
-                                  <span className="font-semibold text-white whitespace-nowrap">
-                                    {formatPrice(prod.precioVenta)}
+                          {/* Etiqueta y Estado Comercial */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-0.5">
+                            {/* Selector de Etiqueta Promocional / Recomendado */}
+                            <label className="flex flex-col gap-1 text-xs text-slate-700 dark:text-[#b8b9c0] font-semibold">
+                              <span>Etiqueta promocional / Recomendación</span>
+                              <select
+                                value={comboBadge}
+                                onChange={(e) => setComboBadge(e.target.value)}
+                                className="bg-white dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg px-2.5 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-red-600"
+                              >
+                                <option value="">Sin etiqueta</option>
+                                {etiquetas
+                                  .filter((e) => e.activa)
+                                  .map((e) => (
+                                    <option key={e.id} value={e.nombre}>
+                                      {formatBadgeWithEmoji(e.nombre, e.emoji)}
+                                    </option>
+                                  ))}
+                                {comboBadge && !etiquetas.some((e) => e.nombre === comboBadge) && (
+                                  <option value={comboBadge}>{comboBadge}</option>
+                                )}
+                              </select>
+                            </label>
+
+                            {/* Estado comercial de Oferta */}
+                            <div className="flex flex-col justify-center gap-0.5 p-2 rounded-lg bg-white dark:bg-[#1a1b20] border border-slate-200 dark:border-[#2b2c35] text-xs">
+                              <span className="text-[10px] font-bold text-slate-500 dark:text-[#8e8f96] uppercase tracking-wider">
+                                Estado de oferta
+                              </span>
+                              {comboPrecioRegularCalculado > comboPrecio && comboPrecio > 0 ? (
+                                <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                                  <span>🔥 En oferta</span>
+                                  <span className="text-[10px] font-normal text-slate-500 dark:text-[#9a9ba3]">
+                                    ({comboDescuentoPct}% OFF · Ahorro {formatPrice(comboAhorroCalculado)})
                                   </span>
-                                  {isSelected ? (
-                                    <div className="flex items-center gap-1.5">
-                                      <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[10px] font-bold border border-emerald-500/30 flex items-center gap-1">
-                                        <Check className="w-3 h-3" /> Incluido
-                                      </span>
-                                      <div className="flex items-center bg-[#0f1012] border border-[#35363d] rounded overflow-hidden">
+                                </span>
+                              ) : (
+                                <span className="text-xs text-slate-600 dark:text-[#a0a1a8]">
+                                  Precio estándar (sin descuento automático)
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 3. PRECIOS Y DESCUENTO */}
+                        <div className="bg-slate-50/80 dark:bg-[#141519] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 space-y-3">
+                          <div className="flex items-center justify-between border-b border-slate-200/80 dark:border-[#26272e] pb-2">
+                            <span className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-white flex items-center gap-1.5">
+                              <Coins className="w-4 h-4 text-emerald-500" /> Precios y rentabilidad
+                            </span>
+                            {comboDescuentoPct > 0 && (
+                              <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 text-[11px] font-bold">
+                                {comboDescuentoPct}% OFF
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="flex flex-col gap-1 text-xs">
+                              <span className="font-semibold text-slate-600 dark:text-[#8e8f96]">
+                                Precio regular (suma catálogo)
+                              </span>
+                              <div className="bg-white/80 dark:bg-[#0f1012] border border-slate-200 dark:border-[#35363d] rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 dark:text-[#b8b9c0] flex items-center justify-between">
+                                <span>{formatPrice(comboPrecioRegularCalculado)}</span>
+                                <span className="text-[10px] text-slate-400 dark:text-[#6b6c75]">catálogo</span>
+                              </div>
+                            </div>
+
+                            <label className="flex flex-col gap-1 text-xs">
+                              <span className="font-semibold text-slate-700 dark:text-[#b8b9c0] flex items-center justify-between">
+                                <span>Precio del combo ($) *</span>
+                                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">Promocional</span>
+                              </span>
+                              <input
+                                type="number"
+                                value={comboPrecio}
+                                onChange={(e) => {
+                                  setComboPrecio(Math.max(0, Number(e.target.value)));
+                                  if (comboFormErrors.precio) {
+                                    setComboFormErrors((prev) => {
+                                      const next = { ...prev };
+                                      delete next.precio;
+                                      return next;
+                                    });
+                                  }
+                                }}
+                                className={`bg-white dark:bg-[#0f1012] border rounded-lg px-3 py-2 text-xs font-bold text-emerald-600 dark:text-emerald-400 focus:outline-none ${
+                                  comboFormErrors.precio
+                                    ? "border-red-500 focus:border-red-500"
+                                    : "border-slate-300 dark:border-[#35363d] focus:border-red-600"
+                                }`}
+                              />
+                              {comboFormErrors.precio && (
+                                <span className="text-[11px] text-red-500 dark:text-red-400 font-medium">
+                                  {comboFormErrors.precio}
+                                </span>
+                              )}
+                            </label>
+                          </div>
+
+                          {/* Ahorro calculado */}
+                          <div className="bg-emerald-500/10 dark:bg-emerald-950/20 border border-emerald-500/20 dark:border-emerald-800/30 rounded-lg p-2.5 flex items-center justify-between text-xs">
+                            <span className="text-emerald-800 dark:text-emerald-300 font-medium">
+                              Ahorro calculado para el cliente:
+                            </span>
+                            <b className="text-emerald-700 dark:text-emerald-400 font-bold">
+                              {formatPrice(comboAhorroCalculado)} ({comboDescuentoPct}% OFF)
+                            </b>
+                          </div>
+
+                          {/* Disponibilidad proporcional calculada según stock real */}
+                          <div
+                            className={`rounded-lg p-2.5 border text-xs flex items-center justify-between gap-3 ${
+                              comboItems.length === 0
+                                ? "bg-slate-100 dark:bg-[#0f1012] border-slate-200 dark:border-[#26272e] text-slate-500 dark:text-[#9a9ba3]"
+                                : comboStockCalculado > 0
+                                ? "bg-emerald-500/10 dark:bg-emerald-950/20 border-emerald-500/20 dark:border-emerald-800/40 text-emerald-800 dark:text-emerald-300"
+                                : "bg-amber-500/10 dark:bg-amber-950/20 border-amber-500/20 dark:border-amber-800/40 text-amber-800 dark:text-amber-300"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Package
+                                className={`w-4 h-4 shrink-0 ${
+                                  comboItems.length === 0
+                                    ? "text-slate-400 dark:text-[#6b6c75]"
+                                    : comboStockCalculado > 0
+                                    ? "text-emerald-600 dark:text-emerald-400"
+                                    : "text-amber-600 dark:text-amber-400"
+                                }`}
+                              />
+                              <div className="min-w-0">
+                                <div className="font-bold truncate">
+                                  {comboItems.length === 0
+                                    ? "Disponibilidad pendiente (sin repuestos)"
+                                    : comboStockCalculado > 0
+                                    ? `Disponibilidad: ${comboStockCalculado} unidad${
+                                        comboStockCalculado === 1 ? "" : "es"
+                                      }`
+                                    : "Disponibilidad: 0 unidades (sin stock)"}
+                                </div>
+                                <p className="text-[11px] text-slate-500 dark:text-[#9a9ba3] line-clamp-1">
+                                  {comboItems.length === 0
+                                    ? "Sumá repuestos para calcular el stock conjunto del combo."
+                                    : comboStockCalculado > 0
+                                    ? "Calculado automáticamente por el componente con menor stock proporcional."
+                                    : "Uno o más componentes no tienen stock. Figurará sin stock en la tienda."}
+                                </p>
+                              </div>
+                            </div>
+                            {comboItems.length > 0 && (
+                              <div
+                                className={`px-2 py-0.5 rounded font-bold text-xs whitespace-nowrap shrink-0 ${
+                                  comboStockCalculado > 0
+                                    ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30"
+                                    : "bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30"
+                                }`}
+                              >
+                                {comboStockCalculado} disp.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 4. FOTOS DEL COMBO */}
+                        <div className="bg-slate-50/80 dark:bg-[#141519] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 space-y-2.5">
+                          <div className="flex items-center justify-between border-b border-slate-200/80 dark:border-[#26272e] pb-2">
+                            <span className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-white flex items-center gap-1.5">
+                              <ImageIcon className="w-4 h-4 text-red-500" /> Fotos del combo (hasta 4)
+                            </span>
+                            <span className="text-[11px] text-slate-500 dark:text-[#6b6c75]">
+                              {comboImages.filter(Boolean).length}/4 cargadas · Foto 1 es Portada
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                            {[0, 1, 2, 3].map((idx) => {
+                              const img = comboImages[idx] || "";
+                              const isCover = idx === 0;
+                              return (
+                                <div
+                                  key={idx}
+                                  className={`relative bg-white dark:bg-[#0f1012] border rounded-xl p-1.5 flex flex-col items-center justify-between h-28 overflow-hidden shadow-2xs group transition-all ${
+                                    isCover
+                                      ? "border-emerald-500/50 ring-1 ring-emerald-500/30"
+                                      : "border-slate-200 dark:border-[#26272e]"
+                                  }`}
+                                >
+                                  {/* Slot Label & Reorder Header */}
+                                  <div className="w-full flex items-center justify-between px-1 text-[10px] font-bold z-10">
+                                    <span
+                                      className={
+                                        isCover
+                                          ? "text-emerald-600 dark:text-emerald-400 font-extrabold flex items-center gap-0.5"
+                                          : "text-slate-500 dark:text-[#8e8f96]"
+                                      }
+                                    >
+                                      {isCover ? "⭐ Portada" : `Foto ${idx + 1}`}
+                                    </span>
+
+                                    {img && (
+                                      <div className="flex items-center gap-0.5">
+                                        {/* Botón mover izquierda */}
+                                        {idx > 0 && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleMoverImagenCombo(idx, idx - 1)}
+                                            className="p-0.5 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 rounded text-slate-700 dark:text-white cursor-pointer"
+                                            title={idx === 1 ? "Mover a Portada" : "Mover a la izquierda"}
+                                          >
+                                            <ChevronLeft className="w-3 h-3" />
+                                          </button>
+                                        )}
+                                        {/* Botón mover derecha */}
+                                        {idx < 3 && comboImages[idx + 1] && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleMoverImagenCombo(idx, idx + 1)}
+                                            className="p-0.5 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 rounded text-slate-700 dark:text-white cursor-pointer"
+                                            title="Mover a la derecha"
+                                          >
+                                            <ChevronRight className="w-3 h-3" />
+                                          </button>
+                                        )}
+                                        {/* Botón eliminar */}
                                         <button
                                           type="button"
                                           onClick={() => {
-                                            if (includedItem && includedItem.cantidad > 1) {
+                                            const updated = [...comboImages];
+                                            updated.splice(idx, 1);
+                                            setComboImages(updated);
+                                          }}
+                                          className="p-0.5 bg-red-500/10 hover:bg-red-500 hover:text-white rounded text-red-500 transition-colors cursor-pointer"
+                                          title="Quitar foto"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Image preview or Upload target */}
+                                  {img ? (
+                                    <div className="relative w-full flex-1 flex items-center justify-center p-1 overflow-hidden">
+                                      <img
+                                        src={img}
+                                        alt={`Combo slot ${idx + 1}`}
+                                        onError={(e) => {
+                                          (e.currentTarget as HTMLImageElement).src = "/combos/combo-service-motul.jpg";
+                                        }}
+                                        className="h-full w-full object-contain rounded"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <label className="w-full flex-1 flex flex-col items-center justify-center cursor-pointer text-slate-400 hover:text-slate-700 dark:text-[#6b6c75] dark:hover:text-white transition-colors">
+                                      <Upload className="w-4 h-4 mb-1 text-slate-400 dark:text-[#6b6c75]" />
+                                      <span className="text-[10px] font-medium">Subir foto</span>
+                                      <input
+                                        type="file"
+                                        accept="image/*"
+                                        className="hidden"
+                                        onChange={(e) => {
+                                          const file = e.target.files?.[0];
+                                          if (file) handleUploadImageSlot(idx, file, "combo");
+                                        }}
+                                      />
+                                    </label>
+                                  )}
+
+                                  {/* Action quick button for non-cover photos */}
+                                  {img && !isCover && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleHacerPortadaCombo(idx)}
+                                      className="w-full text-[9px] font-bold py-0.5 rounded bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 text-center transition-colors cursor-pointer"
+                                    >
+                                      Hacer portada
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* 5. INFORMACIÓN TÉCNICA Y COMPATIBILIDAD (OPCIONAL) */}
+                        <div className="bg-slate-50/80 dark:bg-[#141519] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 space-y-3">
+                          <div className="flex items-center justify-between border-b border-slate-200/80 dark:border-[#26272e] pb-2">
+                            <span className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-white flex items-center gap-1.5">
+                              <FileText className="w-4 h-4 text-emerald-500" /> Información técnica del combo
+                            </span>
+                            <span className="text-[10px] text-slate-400 dark:text-[#6b6c75]">
+                              Opcional
+                            </span>
+                          </div>
+
+                          <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-2 text-[11px] text-emerald-800 dark:text-emerald-300 leading-snug">
+                            💡 <strong>Información automática:</strong> Los repuestos incluidos ya aportan automáticamente su marca, categoría, código y ficha técnica al detalle público. Cargá acá especificaciones generales o compatibilidad integral del kit completo.
+                          </div>
+
+                          {/* Selector de sub-pestañas */}
+                          <div className="flex gap-1 border-b border-slate-200 dark:border-[#26272e] pb-1">
+                            <button
+                              type="button"
+                              onClick={() => setInfoTecnicaTab("specs")}
+                              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
+                                infoTecnicaTab === "specs"
+                                  ? "bg-slate-200 dark:bg-[#26272e] text-slate-900 dark:text-white"
+                                  : "text-slate-500 hover:text-slate-800 dark:text-[#8e8f96] dark:hover:text-white"
+                              }`}
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                              <span>Especificaciones ({comboSpecs.length})</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setInfoTecnicaTab("motos")}
+                              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
+                                infoTecnicaTab === "motos"
+                                  ? "bg-slate-200 dark:bg-[#26272e] text-slate-900 dark:text-white"
+                                  : "text-slate-500 hover:text-slate-800 dark:text-[#8e8f96] dark:hover:text-white"
+                              }`}
+                            >
+                              <Bike className="w-3.5 h-3.5" />
+                              <span>Motos compatibles ({comboMotos.length})</span>
+                            </button>
+                          </div>
+
+                          {/* Sub-tab 1: Especificaciones Técnicas */}
+                          {infoTecnicaTab === "specs" && (
+                            <div className="space-y-2.5">
+                              <div className="flex flex-col sm:flex-row gap-2">
+                                <input
+                                  type="text"
+                                  placeholder="Característica (ej: Material, Origen)"
+                                  value={newSpecKey}
+                                  onChange={(e) => setNewSpecKey(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      e.preventDefault();
+                                      if (newSpecKey.trim() && newSpecVal.trim()) {
+                                        setComboSpecs([...comboSpecs, { caracteristica: newSpecKey.trim(), valor: newSpecVal.trim() }]);
+                                        setNewSpecKey("");
+                                        setNewSpecVal("");
+                                      }
+                                    }
+                                  }}
+                                  className="flex-1 bg-white dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg px-2.5 py-1.5 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-[#6b6c75] focus:outline-none focus:border-emerald-600"
+                                />
+                                <input
+                                  type="text"
+                                  placeholder="Valor (ej: Acero 1045, Japón)"
+                                  value={newSpecVal}
+                                  onChange={(e) => setNewSpecVal(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      e.preventDefault();
+                                      if (newSpecKey.trim() && newSpecVal.trim()) {
+                                        setComboSpecs([...comboSpecs, { caracteristica: newSpecKey.trim(), valor: newSpecVal.trim() }]);
+                                        setNewSpecKey("");
+                                        setNewSpecVal("");
+                                      }
+                                    }
+                                  }}
+                                  className="flex-1 bg-white dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg px-2.5 py-1.5 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-[#6b6c75] focus:outline-none focus:border-emerald-600"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (newSpecKey.trim() && newSpecVal.trim()) {
+                                      setComboSpecs([...comboSpecs, { caracteristica: newSpecKey.trim(), valor: newSpecVal.trim() }]);
+                                      setNewSpecKey("");
+                                      setNewSpecVal("");
+                                    }
+                                  }}
+                                  disabled={!newSpecKey.trim() || !newSpecVal.trim()}
+                                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-lg text-xs font-bold transition-colors shrink-0 cursor-pointer flex items-center justify-center gap-1"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                  <span>Agregar</span>
+                                </button>
+                              </div>
+
+                              {/* Sugerencias rápidas */}
+                              <div className="flex flex-wrap gap-1 items-center">
+                                <span className="text-[10px] text-slate-400 dark:text-[#6b6c75]">Sugerencias:</span>
+                                {["Material", "Origen", "Paso de cadena", "Garantía", "Tipo de aceite", "Viscosidad"].map((sug) => (
+                                  <button
+                                    key={sug}
+                                    type="button"
+                                    onClick={() => setNewSpecKey(sug)}
+                                    className="text-[10px] px-1.5 py-0.5 rounded bg-slate-200/70 hover:bg-slate-200 dark:bg-[#202127] dark:hover:bg-[#2b2c34] text-slate-600 dark:text-[#b8b9c0] transition-colors cursor-pointer"
+                                  >
+                                    + {sug}
+                                  </button>
+                                ))}
+                              </div>
+
+                              {/* Listado */}
+                              {comboSpecs.length === 0 ? (
+                                <div className="py-2.5 text-center text-[11px] text-slate-400 dark:text-[#6b6c75] italic border border-dashed border-slate-200 dark:border-[#26272e] rounded-lg bg-white/40 dark:bg-transparent">
+                                  Sin especificaciones técnicas cargadas.
+                                </div>
+                              ) : (
+                                <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                                  {comboSpecs.map((spec, sIdx) => (
+                                    <div
+                                      key={sIdx}
+                                      className="flex items-center justify-between gap-2 p-2 rounded-lg bg-white dark:bg-[#1a1b20] border border-slate-200 dark:border-[#35363d] text-xs"
+                                    >
+                                      <div className="flex items-center gap-1.5 min-w-0">
+                                        <span className="font-semibold text-slate-600 dark:text-slate-400 shrink-0">{spec.caracteristica}:</span>
+                                        <span className="text-slate-900 dark:text-white font-medium truncate">{spec.valor}</span>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const updated = [...comboSpecs];
+                                          updated.splice(sIdx, 1);
+                                          setComboSpecs(updated);
+                                        }}
+                                        className="p-1 text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors cursor-pointer"
+                                        title="Eliminar especificación"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Sub-tab 2: Motos Compatibles */}
+                          {infoTecnicaTab === "motos" && (
+                            <div className="space-y-2.5">
+                              <div className="flex gap-2">
+                                <input
+                                  type="text"
+                                  placeholder="Marca, modelo y cilindrada (ej: Honda CG 150 Titan)"
+                                  value={newMotoInput}
+                                  onChange={(e) => setNewMotoInput(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      e.preventDefault();
+                                      const val = newMotoInput.trim();
+                                      if (val && !comboMotos.includes(val)) {
+                                        setComboMotos([...comboMotos, val]);
+                                        setNewMotoInput("");
+                                      }
+                                    }
+                                  }}
+                                  className="flex-1 bg-white dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg px-2.5 py-1.5 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-[#6b6c75] focus:outline-none focus:border-emerald-600"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const val = newMotoInput.trim();
+                                    if (val && !comboMotos.includes(val)) {
+                                      setComboMotos([...comboMotos, val]);
+                                      setNewMotoInput("");
+                                    }
+                                  }}
+                                  disabled={!newMotoInput.trim()}
+                                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-lg text-xs font-bold transition-colors shrink-0 cursor-pointer flex items-center justify-center gap-1"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                  <span>Agregar</span>
+                                </button>
+                              </div>
+
+                              {/* Sugerencias rápidas de modelos populares */}
+                              <div className="flex flex-wrap gap-1 items-center">
+                                <span className="text-[10px] text-slate-400 dark:text-[#6b6c75]">Populares:</span>
+                                {["Honda CG 150 Titan", "Honda Wave 110", "Honda XR 150L", "Yamaha YBR 125", "Motomel S2 150", "Gilera Smash 110", "Bajaj Rouser 200"].map((sug) => (
+                                  <button
+                                    key={sug}
+                                    type="button"
+                                    onClick={() => {
+                                      if (!comboMotos.includes(sug)) {
+                                        setComboMotos([...comboMotos, sug]);
+                                      }
+                                    }}
+                                    className="text-[10px] px-1.5 py-0.5 rounded bg-slate-200/70 hover:bg-slate-200 dark:bg-[#202127] dark:hover:bg-[#2b2c34] text-slate-600 dark:text-[#b8b9c0] transition-colors cursor-pointer"
+                                  >
+                                    + {sug}
+                                  </button>
+                                ))}
+                              </div>
+
+                              {/* Chips de motos */}
+                              {comboMotos.length === 0 ? (
+                                <div className="py-2.5 text-center text-[11px] text-slate-400 dark:text-[#6b6c75] italic border border-dashed border-slate-200 dark:border-[#26272e] rounded-lg bg-white/40 dark:bg-transparent">
+                                  Sin motos compatibles especificadas.
+                                </div>
+                              ) : (
+                                <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto pr-1">
+                                  {comboMotos.map((moto, mIdx) => (
+                                    <span
+                                      key={mIdx}
+                                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white dark:bg-[#1a1b20] border border-slate-200 dark:border-[#35363d] text-xs font-medium text-slate-800 dark:text-[#d0d1d7]"
+                                    >
+                                      <Bike className="w-3 h-3 text-red-500" />
+                                      <span>{moto}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const updated = [...comboMotos];
+                                          updated.splice(mIdx, 1);
+                                          setComboMotos(updated);
+                                        }}
+                                        className="ml-1 text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors cursor-pointer"
+                                        title="Quitar modelo"
+                                      >
+                                        <X className="w-3 h-3" />
+                                      </button>
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* COLUMNA DERECHA (Repuestos incluidos y Buscador de catálogo) */}
+                      <div className="lg:col-span-6 space-y-4">
+                        {/* 6. REPUESTOS INCLUIDOS EN EL COMBO */}
+                        <div className="bg-slate-50/80 dark:bg-[#141519] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 space-y-2.5 flex flex-col">
+                          <div className="flex items-center justify-between border-b border-slate-200/80 dark:border-[#26272e] pb-2 text-xs">
+                            <span className="font-bold text-slate-800 dark:text-white uppercase tracking-wider flex items-center gap-1.5 text-xs">
+                              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                              Repuestos incluidos ({comboItems.length})
+                            </span>
+                            <span className="text-[11px] text-slate-500 dark:text-[#6b6c75]">
+                              Suma: <b className="text-slate-800 dark:text-white">{formatPrice(comboPrecioRegularCalculado)}</b>
+                            </span>
+                          </div>
+
+                          {comboFormErrors.items && (
+                            <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-medium flex items-center gap-2">
+                              <AlertTriangle className="w-4 h-4 shrink-0" />
+                              <span>{comboFormErrors.items}</span>
+                            </div>
+                          )}
+
+                          {comboItems.length === 0 ? (
+                            <div className="py-7 text-center text-xs text-slate-500 dark:text-[#9a9ba3] italic border border-dashed border-slate-300 dark:border-[#26272e] rounded-lg bg-white/50 dark:bg-transparent">
+                              Aún no incluiste repuestos. Buscá abajo en el catálogo para sumarlos.
+                            </div>
+                          ) : (
+                            <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                              {comboItems.map((it) => {
+                                const prod = products.find((p) => p.id === it.productoId);
+                                const unitPrice = prod?.precioVenta || 0;
+                                const subtotal = unitPrice * it.cantidad;
+                                const stockProd = prod?.cantidad ?? 0;
+                                const sinStock = stockProd === 0;
+                                const superaStock = !sinStock && it.cantidad > stockProd;
+
+                                return (
+                                  <div
+                                    key={it.productoId}
+                                    className={`border rounded-lg p-2.5 flex items-center justify-between gap-2.5 text-xs transition-colors ${
+                                      sinStock
+                                        ? "bg-red-500/10 dark:bg-red-950/20 border-red-500/30 dark:border-red-800/40"
+                                        : superaStock
+                                        ? "bg-amber-500/10 dark:bg-amber-950/20 border-amber-500/30 dark:border-amber-800/40"
+                                        : "bg-white dark:bg-[#1a1b20] border-slate-200 dark:border-[#35363d]"
+                                    }`}
+                                  >
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span className="text-[10px] font-bold text-red-600 dark:text-red-400 bg-red-500/10 dark:bg-red-950/40 px-1.5 py-0.5 rounded border border-red-500/20 dark:border-red-800/40">
+                                          {prod?.marca || "Repuesto"}
+                                        </span>
+                                        <span className="font-semibold text-slate-900 dark:text-white truncate">
+                                          {prod?.nombre || `Producto #${it.productoId}`}
+                                        </span>
+                                        {sinStock && (
+                                          <span className="text-[10px] text-red-600 dark:text-red-400 bg-red-500/10 dark:bg-red-950/60 px-1.5 py-0.5 rounded border border-red-500/30 dark:border-red-800/60 font-semibold">
+                                            ⚠️ Sin stock (0)
+                                          </span>
+                                        )}
+                                        {superaStock && (
+                                          <span className="text-[10px] text-amber-600 dark:text-amber-400 bg-amber-500/10 dark:bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-500/30 dark:border-amber-800/60 font-semibold">
+                                            ⚠️ Supera stock (${stockProd})
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-[11px] text-slate-500 dark:text-[#9a9ba3] mt-1 flex items-center gap-2 flex-wrap">
+                                        <span>Unit: {formatPrice(unitPrice)}</span>
+                                        <span>·</span>
+                                        <span>
+                                          Stock local:{" "}
+                                          <b className={stockProd > 0 ? "text-slate-700 dark:text-slate-200" : "text-red-500"}>
+                                            {stockProd} u.
+                                          </b>
+                                        </span>
+                                        <span>·</span>
+                                        <span>
+                                          Subtotal:{" "}
+                                          <b className="text-emerald-600 dark:text-emerald-400">
+                                            {formatPrice(subtotal)}
+                                          </b>
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                      {/* Stepper Cantidad */}
+                                      <div className="flex items-center bg-slate-100 dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg overflow-hidden">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            if (it.cantidad > 1) {
                                               setComboItems(
                                                 comboItems.map((x) =>
-                                                  x.productoId === prod.id
+                                                  x.productoId === it.productoId
                                                     ? { ...x, cantidad: x.cantidad - 1 }
                                                     : x
                                                 )
                                               );
                                             } else {
                                               setComboItems(
-                                                comboItems.filter((x) => x.productoId !== prod.id)
+                                                comboItems.filter((x) => x.productoId !== it.productoId)
                                               );
                                             }
                                           }}
-                                          className="px-1.5 py-0.5 hover:bg-[#26272e] text-[#9a9ba3] hover:text-white"
-                                          title="Reducir cantidad"
+                                          className="px-1.5 py-1 hover:bg-slate-200 dark:hover:bg-[#26272e] text-slate-500 hover:text-slate-900 dark:text-[#9a9ba3] dark:hover:text-white transition-colors cursor-pointer"
+                                          title="Disminuir cantidad"
                                         >
-                                          <Minus className="w-2.5 h-2.5" />
+                                          <Minus className="w-3 h-3" />
                                         </button>
-                                        <span className="px-1.5 py-0.5 text-[11px] font-bold text-white min-w-[20px] text-center">
-                                          {includedItem?.cantidad || 1}
-                                        </span>
+                                        <input
+                                          type="number"
+                                          min="1"
+                                          step="1"
+                                          value={it.cantidad}
+                                          onChange={(e) => {
+                                            const val = parseInt(e.target.value, 10);
+                                            const cleanVal = isNaN(val) ? 1 : Math.max(1, Math.floor(val));
+                                            setComboItems(
+                                              comboItems.map((x) =>
+                                                x.productoId === it.productoId
+                                                  ? { ...x, cantidad: cleanVal }
+                                                  : x
+                                              )
+                                            );
+                                          }}
+                                          className="w-8 bg-transparent text-xs font-bold text-slate-900 dark:text-white text-center focus:outline-none py-1"
+                                        />
                                         <button
                                           type="button"
                                           onClick={() => {
                                             setComboItems(
                                               comboItems.map((x) =>
-                                                x.productoId === prod.id
+                                                x.productoId === it.productoId
                                                   ? { ...x, cantidad: x.cantidad + 1 }
                                                   : x
                                               )
                                             );
                                           }}
-                                          className="px-1.5 py-0.5 hover:bg-[#26272e] text-[#9a9ba3] hover:text-white"
+                                          className="px-1.5 py-1 hover:bg-slate-200 dark:hover:bg-[#26272e] text-slate-500 hover:text-slate-900 dark:text-[#9a9ba3] dark:hover:text-white transition-colors cursor-pointer"
                                           title="Aumentar cantidad"
                                         >
-                                          <Plus className="w-2.5 h-2.5" />
+                                          <Plus className="w-3 h-3" />
                                         </button>
                                       </div>
-                                    </div>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        if (!comboItems.some((x) => x.productoId === prod.id)) {
-                                          setComboItems([
-                                            ...comboItems,
-                                            { productoId: prod.id, cantidad: 1 },
-                                          ]);
-                                          if (comboFormErrors.items) {
-                                            setComboFormErrors((prev) => {
-                                              const c = { ...prev };
-                                              delete c.items;
-                                              return c;
-                                            });
-                                          }
-                                        }
-                                      }}
-                                      className="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-[11px] font-bold transition-colors flex items-center gap-1"
-                                    >
-                                      <Plus className="w-3 h-3" /> Agregar
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                      </div>
-                    </div>
 
-                    {/* Hasta 4 Fotos del Combo */}
-                    <div className="pt-2 border-t border-[#26272e]">
-                      <div className="text-xs font-semibold text-[#b8b9c0] mb-2">Fotos del combo (hasta 4):</div>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                        {[0, 1, 2, 3].map((idx) => {
-                          const img = comboImages[idx] || "";
-                          return (
-                            <div
-                              key={idx}
-                              className="relative bg-[#141519] border border-[#26272e] rounded-lg p-2 flex flex-col items-center justify-center gap-1.5 h-24 overflow-hidden"
-                            >
-                              {img ? (
-                                <>
-                                  <img src={img} alt={`Combo ${idx + 1}`} className="w-full h-full object-cover rounded" />
-                                  <button
-                                    onClick={() => {
-                                      const updated = [...comboImages];
-                                      updated.splice(idx, 1);
-                                      setComboImages(updated);
-                                    }}
-                                    className="absolute top-1 right-1 p-1 bg-black/70 hover:bg-red-600 rounded text-white"
-                                  >
-                                    <X className="w-3 h-3" />
-                                  </button>
-                                </>
-                              ) : (
-                                <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer text-[#6b6c75] hover:text-white transition-colors">
-                                  <Upload className="w-4 h-4 mb-1" />
-                                  <span className="text-[10px]">Foto {idx + 1}</span>
-                                  <input
-                                    type="file"
-                                    accept="image/*"
-                                    className="hidden"
-                                    onChange={(e) => {
-                                      const file = e.target.files?.[0];
-                                      if (file) handleUploadImageSlot(idx, file, "combo");
-                                    }}
-                                  />
-                                </label>
-                              )}
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setComboItems(
+                                            comboItems.filter((x) => x.productoId !== it.productoId)
+                                          )
+                                        }
+                                        className="p-1 rounded-lg hover:bg-red-500/10 text-slate-400 hover:text-red-500 transition-colors cursor-pointer"
+                                        title="Quitar del combo"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
                             </div>
-                          );
-                        })}
+                          )}
+                        </div>
+
+                        {/* 7. BUSCADOR Y CATÁLOGO PARA AGREGAR REPUESTOS */}
+                        <div className="bg-slate-50/80 dark:bg-[#141519] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 space-y-2.5 flex flex-col">
+                          <div className="flex items-center justify-between border-b border-slate-200/80 dark:border-[#26272e] pb-2 text-xs">
+                            <span className="font-bold text-slate-800 dark:text-white uppercase tracking-wider flex items-center gap-1.5 text-xs">
+                              <Search className="w-4 h-4 text-red-500" />
+                              Buscar y sumar repuestos
+                            </span>
+                            <span className="text-[11px] text-slate-500 dark:text-[#6b6c75]">
+                              Código, nombre o marca
+                            </span>
+                          </div>
+
+                          <div className="relative">
+                            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-[#6b6c75]" />
+                            <input
+                              type="text"
+                              placeholder="Ej: Cadena, Corona, Aceite Motul, Pastillas..."
+                              value={comboItemSearch}
+                              onChange={(e) => setComboItemSearch(e.target.value)}
+                              className="w-full bg-white dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg pl-8 pr-8 py-1.5 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-[#6b6c75] focus:outline-none focus:border-red-600"
+                            />
+                            {comboItemSearch.trim() && (
+                              <button
+                                type="button"
+                                onClick={() => setComboItemSearch("")}
+                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-white p-0.5 rounded cursor-pointer"
+                                title="Limpiar búsqueda"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="max-h-52 overflow-y-auto pr-1 space-y-1 bg-white/50 dark:bg-[#0f1012]/40 border border-slate-200 dark:border-[#26272e] rounded-lg p-1.5">
+                            {products
+                              .filter((p) =>
+                                comboItemSearch.trim()
+                                  ? p.nombre.toLowerCase().includes(comboItemSearch.toLowerCase()) ||
+                                    (p.marca || "").toLowerCase().includes(comboItemSearch.toLowerCase()) ||
+                                    (p.codigo || "").toLowerCase().includes(comboItemSearch.toLowerCase())
+                                  : true
+                              )
+                              .slice(0, 25)
+                              .map((prod) => {
+                                const includedItem = comboItems.find((it) => it.productoId === prod.id);
+                                const isSelected = Boolean(includedItem);
+                                const stockProd = prod.cantidad ?? 0;
+                                const sinStock = stockProd === 0;
+
+                                return (
+                                  <div
+                                    key={prod.id}
+                                    className={`p-2 rounded-md flex items-center justify-between text-xs transition-colors ${
+                                      isSelected
+                                        ? "bg-red-500/10 dark:bg-red-950/20 border border-red-500/20 dark:border-red-800/30"
+                                        : "bg-white dark:bg-[#1a1b20] border border-slate-200 dark:border-[#26272e] hover:border-slate-300 dark:hover:border-[#35363d]"
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                                      <span className="text-[10px] font-bold text-red-600 dark:text-red-400 bg-red-500/10 dark:bg-red-950/40 px-1 py-0.5 rounded shrink-0">
+                                        {prod.marca || "Repuesto"}
+                                      </span>
+                                      <span className="truncate text-slate-900 dark:text-white">{prod.nombre}</span>
+                                      {sinStock ? (
+                                        <span className="text-[10px] text-red-600 dark:text-red-400 bg-red-500/10 dark:bg-red-950/40 px-1.5 py-0.5 rounded border border-red-500/20 dark:border-red-800/40 whitespace-nowrap shrink-0">
+                                          Sin stock
+                                        </span>
+                                      ) : (
+                                        <span className="text-[10px] text-slate-500 dark:text-[#8e8f99] bg-slate-100 dark:bg-[#0f1012] px-1.5 py-0.5 rounded whitespace-nowrap shrink-0">
+                                          Stock: {stockProd}
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    <div className="flex items-center gap-2 ml-2 shrink-0">
+                                      <span className="font-semibold text-slate-800 dark:text-white whitespace-nowrap text-xs">
+                                        {formatPrice(prod.precioVenta)}
+                                      </span>
+                                      {isSelected ? (
+                                        <div className="flex items-center gap-1">
+                                          <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 text-[10px] font-bold border border-emerald-500/30 flex items-center gap-0.5">
+                                            <Check className="w-2.5 h-2.5" /> {includedItem?.cantidad || 1} en kit
+                                          </span>
+                                          <div className="flex items-center bg-slate-100 dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded overflow-hidden">
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                if (includedItem && includedItem.cantidad > 1) {
+                                                  setComboItems(
+                                                    comboItems.map((x) =>
+                                                      x.productoId === prod.id
+                                                        ? { ...x, cantidad: x.cantidad - 1 }
+                                                        : x
+                                                    )
+                                                  );
+                                                } else {
+                                                  setComboItems(
+                                                    comboItems.filter((x) => x.productoId !== prod.id)
+                                                  );
+                                                }
+                                              }}
+                                              className="px-1 py-0.5 hover:bg-slate-200 dark:hover:bg-[#26272e] text-slate-500 dark:text-[#9a9ba3] hover:text-slate-900 dark:hover:text-white cursor-pointer"
+                                              title="Reducir cantidad"
+                                            >
+                                              <Minus className="w-2.5 h-2.5" />
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setComboItems(
+                                                  comboItems.map((x) =>
+                                                    x.productoId === prod.id
+                                                      ? { ...x, cantidad: x.cantidad + 1 }
+                                                      : x
+                                                  )
+                                                );
+                                              }}
+                                              className="px-1 py-0.5 hover:bg-slate-200 dark:hover:bg-[#26272e] text-slate-500 dark:text-[#9a9ba3] hover:text-slate-900 dark:hover:text-white cursor-pointer"
+                                              title="Aumentar cantidad"
+                                            >
+                                              <Plus className="w-2.5 h-2.5" />
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            if (!comboItems.some((x) => x.productoId === prod.id)) {
+                                              setComboItems([
+                                                ...comboItems,
+                                                { productoId: prod.id, cantidad: 1 },
+                                              ]);
+                                              if (comboFormErrors.items) {
+                                                setComboFormErrors((prev) => {
+                                                  const c = { ...prev };
+                                                  delete c.items;
+                                                  return c;
+                                                });
+                                              }
+                                            }
+                                          }}
+                                          className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-[11px] font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                                        >
+                                          <Plus className="w-3 h-3" /> Agregar
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[#26272e]">
-                    <button
-                      type="button"
-                      onClick={() => setShowComboModal(false)}
-                      className="px-4 py-2 bg-transparent border border-[#35363d] text-[#b8b9c0] rounded-lg text-xs"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleSaveCombo}
-                      disabled={saving}
-                      className="px-5 py-2 bg-[#16a34a] hover:bg-green-700 text-white rounded-lg text-xs font-bold"
-                    >
-                      {saving ? "Guardando..." : "Guardar combo"}
-                    </button>
+                  {/* Pie de Acciones Fijo */}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-5 sm:px-6 py-3.5 border-t border-slate-200 dark:border-[#26272e] bg-slate-50/90 dark:bg-[#121316] shrink-0">
+                    <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-[#9a9ba3] w-full sm:w-auto justify-between sm:justify-start">
+                      <span>
+                        <b className="text-slate-900 dark:text-white">{comboItems.length}</b> {comboItems.length === 1 ? "repuesto" : "repuestos"}
+                      </span>
+                      <span>·</span>
+                      <span>
+                        Stock: <b className={comboStockCalculado > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-amber-500"}>{comboStockCalculado} u.</b>
+                      </span>
+                      <span>·</span>
+                      <span>
+                        Precio: <b className="text-emerald-600 dark:text-emerald-400 font-bold">{formatPrice(comboPrecio)}</b>
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setShowComboModal(false)}
+                        className="px-4 py-2 border border-slate-300 dark:border-[#35363d] text-slate-700 dark:text-[#b8b9c0] hover:bg-slate-100 dark:hover:bg-[#1f2026] rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSaveCombo}
+                        disabled={saving}
+                        className="px-5 py-2 bg-[#16a34a] hover:bg-green-700 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-md shadow-green-900/20 cursor-pointer disabled:opacity-50"
+                      >
+                        <Check className="w-4 h-4" />
+                        <span>{saving ? "Guardando..." : editingCombo ? "Guardar cambios" : "Guardar combo"}</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
