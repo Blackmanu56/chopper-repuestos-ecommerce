@@ -63,6 +63,16 @@ export default function CarritoPage() {
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [stockIssues, setStockIssues] = useState<string[]>([]);
 
+  // Cierre accesible con tecla Escape para el modal de confirmación de vaciado
+  useEffect(() => {
+    if (!showClearConfirm) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowClearConfirm(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [showClearConfirm]);
+
   // Sincronizar y validar en tiempo real los precios y el stock disponible con la base de datos
   const sincronizarConServidor = async (silencioso = false) => {
     if (items.length === 0) return;
@@ -460,43 +470,56 @@ export default function CarritoPage() {
               </div>
             </div>
 
-            {/* Botón de Checkout */}
-            {isStaff ? (
-              <div className="space-y-2">
-                <button
-                  type="button"
-                  disabled
-                  className="w-full cursor-not-allowed rounded-xl bg-slate-200 dark:bg-surface py-3 text-xs font-bold text-slate-500 dark:text-slate-400 border border-slate-300 dark:border-line flex items-center justify-center gap-2"
+            {/* Acciones principales: Finalizar pedido y Vaciar carrito */}
+            <div className="space-y-2.5">
+              {isStaff ? (
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    disabled
+                    className="w-full cursor-not-allowed rounded-xl bg-slate-200 dark:bg-surface py-3 text-xs font-bold text-slate-500 dark:text-slate-400 border border-slate-300 dark:border-line flex items-center justify-center gap-2"
+                  >
+                    <Lock size={14} className="text-amber-500" />
+                    <span>Compras deshabilitadas para personal</span>
+                  </button>
+                  <p className="text-[11px] text-center text-amber-600 dark:text-amber-400 font-medium">
+                    Para realizar compras, ingresá con una cuenta de cliente.
+                  </p>
+                </div>
+              ) : hayBloqueoStock ? (
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    disabled
+                    className="w-full cursor-not-allowed rounded-xl bg-slate-300 dark:bg-surface py-3 text-xs font-bold text-slate-500 dark:text-slate-500 border border-slate-300 dark:border-line"
+                  >
+                    Finalizar pedido (Stock insuficiente)
+                  </button>
+                  <p className="text-[11px] text-center text-amber-600 dark:text-amber-400 font-medium">
+                    Ajustá las cantidades para no superar el stock disponible.
+                  </p>
+                </div>
+              ) : (
+                <Link
+                  href="/checkout"
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-brand py-3 text-xs font-black text-white hover:bg-brandhover shadow-lg shadow-brand/25 transition-all active:scale-95"
                 >
-                  <Lock size={14} className="text-amber-500" />
-                  <span>Compras deshabilitadas para personal</span>
-                </button>
-                <p className="text-[11px] text-center text-amber-600 dark:text-amber-400 font-medium">
-                  Para realizar compras, ingresá con una cuenta de cliente.
-                </p>
-              </div>
-            ) : hayBloqueoStock ? (
-              <div className="space-y-2">
-                <button
-                  type="button"
-                  disabled
-                  className="w-full cursor-not-allowed rounded-xl bg-slate-300 dark:bg-surface py-3 text-xs font-bold text-slate-500 dark:text-slate-500 border border-slate-300 dark:border-line"
-                >
-                  Finalizar pedido (Stock insuficiente)
-                </button>
-                <p className="text-[11px] text-center text-amber-600 dark:text-amber-400 font-medium">
-                  Ajustá las cantidades para no superar el stock disponible.
-                </p>
-              </div>
-            ) : (
-              <Link
-                href="/checkout"
-                className="w-full flex items-center justify-center gap-2 rounded-xl bg-brand py-3 text-xs font-black text-white hover:bg-brandhover shadow-lg shadow-brand/25 transition-all active:scale-95"
+                  <span>Finalizar pedido</span>
+                  <ArrowRight size={15} />
+                </Link>
+              )}
+
+              {/* Botón secundario: Vaciar carrito */}
+              <button
+                type="button"
+                onClick={() => setShowClearConfirm(true)}
+                className="w-full flex items-center justify-center gap-2 rounded-xl border border-slate-300 dark:border-line bg-white dark:bg-surface py-2.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400 hover:border-red-300 dark:hover:border-red-900/50 hover:bg-red-50/50 dark:hover:bg-red-950/20 transition-all active:scale-95 cursor-pointer"
+                title="Vaciar todo el carrito"
               >
-                <span>Finalizar pedido</span>
-                <ArrowRight size={15} />
-              </Link>
-            )}
+                <Trash2 size={14} className="text-slate-400" />
+                <span>Vaciar carrito</span>
+              </button>
+            </div>
 
             {/* Garantías y beneficios de compra */}
             <div className="rounded-xl bg-slate-50 dark:bg-surface/50 border border-slate-200 dark:border-line/70 p-3.5 space-y-2.5 text-[11px] text-slate-600 dark:text-slate-400">
@@ -514,7 +537,12 @@ export default function CarritoPage() {
 
       {/* MODAL DE CONFIRMACIÓN: VACIAR CARRITO */}
       {showClearConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-in fade-in">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowClearConfirm(false);
+          }}
+        >
           <div className="w-full max-w-sm rounded-2xl border border-slate-200 dark:border-line bg-white dark:bg-[#121318] p-6 shadow-2xl space-y-4 animate-in zoom-in-95">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-500/10 text-red-500 border border-red-500/20 mx-auto">
               <Trash2 size={24} />
@@ -525,7 +553,7 @@ export default function CarritoPage() {
                 ¿Vaciar el carrito de compras?
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                Se eliminarán todos los repuestos seleccionados ({totalArticulos} unidades). Esta acción no se puede deshacer.
+                Se eliminarán todos los repuestos y combos seleccionados ({totalArticulos} {totalArticulos === 1 ? "unidad" : "unidades"}). Esta acción no se puede deshacer.
               </p>
             </div>
 
@@ -533,7 +561,7 @@ export default function CarritoPage() {
               <button
                 type="button"
                 onClick={() => setShowClearConfirm(false)}
-                className="flex-1 rounded-xl border border-slate-300 dark:border-line bg-white dark:bg-surface py-2.5 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:border-slate-400 transition-colors"
+                className="flex-1 rounded-xl border border-slate-300 dark:border-line bg-white dark:bg-surface py-2.5 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:border-slate-400 transition-colors cursor-pointer"
               >
                 Cancelar
               </button>
@@ -544,7 +572,7 @@ export default function CarritoPage() {
                   clearCart();
                   setShowClearConfirm(false);
                 }}
-                className="flex-1 rounded-xl bg-red-600 hover:bg-red-700 py-2.5 text-xs font-bold text-white shadow-md shadow-red-600/20 transition-all active:scale-95"
+                className="flex-1 rounded-xl bg-red-600 hover:bg-red-700 py-2.5 text-xs font-bold text-white shadow-md shadow-red-600/20 transition-all active:scale-95 cursor-pointer"
               >
                 Sí, vaciar carrito
               </button>
