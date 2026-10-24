@@ -32,17 +32,23 @@ function uint8ArrayToBase64Url(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-async function verifyEdgeToken(token: string | undefined): Promise<{
-  kind: string;
-  rol: string;
-  iat: number;
-  exp: number;
-} | null> {
-  if (!token) return null;
+interface EdgeTokenResult {
+  valid: boolean;
+  expired: boolean;
+  payload: {
+    kind: string;
+    rol: string;
+    iat: number;
+    exp: number;
+  } | null;
+}
+
+async function verifyEdgeToken(token: string | undefined): Promise<EdgeTokenResult> {
+  if (!token) return { valid: false, expired: false, payload: null };
   const parts = token.split(".");
-  if (parts.length !== 2) return null;
+  if (parts.length !== 2) return { valid: false, expired: false, payload: null };
   const [payloadB64, sigB64] = parts;
-  if (!payloadB64 || !sigB64) return null;
+  if (!payloadB64 || !sigB64) return { valid: false, expired: false, payload: null };
 
   try {
     const enc = new TextEncoder();
@@ -55,26 +61,26 @@ async function verifyEdgeToken(token: string | undefined): Promise<{
     );
     const sigBuf = await crypto.subtle.sign("HMAC", key, enc.encode(payloadB64));
     const expectedSigB64 = uint8ArrayToBase64Url(new Uint8Array(sigBuf));
-    if (expectedSigB64 !== sigB64) return null;
+    if (expectedSigB64 !== sigB64) return { valid: false, expired: false, payload: null };
 
     const jsonStr = new TextDecoder().decode(base64UrlToUint8Array(payloadB64));
     const payload = JSON.parse(jsonStr);
     if (!payload || typeof payload.exp !== "number" || typeof payload.iat !== "number") {
-      return null;
+      return { valid: false, expired: false, payload: null };
     }
     const now = Date.now();
     if (now > payload.exp) {
-      return null;
+      return { valid: false, expired: true, payload: null };
     }
     // Límite de duración absoluta según tipo de cuenta
     const maxAllowedDuration =
       (payload.kind === "STAFF" ? STAFF_SESSION_DURATION_MS : CLIENT_SESSION_DURATION_MS) + 60000;
     if (payload.exp - payload.iat > maxAllowedDuration) {
-      return null;
+      return { valid: false, expired: false, payload: null };
     }
-    return payload;
+    return { valid: true, expired: false, payload };
   } catch {
-    return null;
+    return { valid: false, expired: false, payload: null };
   }
 }
 
@@ -84,13 +90,13 @@ export async function middleware(request: NextRequest) {
   // 1. Protección de rutas administrativas
   if (pathname.startsWith("/panel")) {
     const rawCookie = request.cookies.get(SESSION_COOKIE_NAME)?.value;
-    const session = await verifyEdgeToken(rawCookie);
+    const tokenResult = await verifyEdgeToken(rawCookie);
 
-    if (!session) {
-      const isExpiredOrInvalid = Boolean(rawCookie);
-      const redirectUrl = new URL(isExpiredOrInvalid ? "/?sessionExpired=true" : "/", request.url);
+    if (!tokenResult.valid || !tokenResult.payload) {
+      const isExpired = tokenResult.expired;
+      const redirectUrl = new URL(isExpired ? "/?sessionExpired=true" : "/", request.url);
       const response = NextResponse.redirect(redirectUrl);
-      if (isExpiredOrInvalid) {
+      if (rawCookie) {
         response.cookies.set(SESSION_COOKIE_NAME, "", {
           httpOnly: true,
           sameSite: "lax",
@@ -103,6 +109,7 @@ export async function middleware(request: NextRequest) {
       return response;
     }
 
+    const session = tokenResult.payload;
     const rolUpper = (session.rol || "").toUpperCase();
     const isStaff =
       session.kind === "STAFF" &&
@@ -119,9 +126,9 @@ export async function middleware(request: NextRequest) {
   // 2. Protección y redirección segura de comprobantes de pago
   if (pathname.startsWith("/uploads/comprobantes/")) {
     const rawCookie = request.cookies.get(SESSION_COOKIE_NAME)?.value;
-    const session = await verifyEdgeToken(rawCookie);
+    const tokenResult = await verifyEdgeToken(rawCookie);
 
-    if (!session) {
+    if (!tokenResult.valid || !tokenResult.payload) {
       return NextResponse.json(
         { error: "Acceso no autorizado: debes iniciar sesión para consultar este comprobante." },
         { status: 401 }

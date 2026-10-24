@@ -166,6 +166,7 @@ export async function setServerSessionCookie(
 export async function clearServerSessionCookie(): Promise<void> {
   try {
     const cookieStore = await cookies();
+    cookieStore.delete(SESSION_COOKIE_NAME);
     cookieStore.set(SESSION_COOKIE_NAME, "", {
       httpOnly: true,
       sameSite: "lax",

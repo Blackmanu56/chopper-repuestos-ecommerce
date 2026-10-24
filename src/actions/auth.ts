@@ -794,7 +794,7 @@ export async function checkSessionStatusAction(): Promise<{
         return {
           active: false,
           expired: true,
-          error: "Tu sesión ha expirado por límite de tiempo. Por favor, iniciá sesión nuevamente.",
+          error: "Tu sesión expiró. Por favor, iniciá sesión nuevamente.",
         };
       }
       return {

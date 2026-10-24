@@ -108,7 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const params = new URLSearchParams(window.location.search);
       if (params.get("sessionExpired") === "true") {
         setSessionExpiredNotice(
-          "Tu sesión ha expirado por límite de tiempo. Por favor, iniciá sesión nuevamente."
+          "Tu sesión expiró. Por favor, iniciá sesión nuevamente."
         );
         setIsLoginOpen(true);
         try {
@@ -156,11 +156,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           localStorage.removeItem("chopper_user");
           if (status.expired) {
             setSessionExpiredNotice(
-              status.kind === "STAFF"
-                ? "Tu sesión de personal ha expirado tras 24 horas. Por favor, volvé a iniciar sesión."
-                : "Tu sesión ha expirado tras 7 días. Por favor, iniciá sesión nuevamente."
+              "Tu sesión expiró. Por favor, iniciá sesión nuevamente."
             );
             setIsLoginOpen(true);
+          } else {
+            setSessionExpiredNotice(null);
           }
         }
       })
@@ -200,6 +200,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
         setUser(sessionUser);
         localStorage.setItem("chopper_user", JSON.stringify(sessionUser));
+        setSessionExpiredNotice(null);
         setIsLoginOpen(false);
         return { success: true };
       }
@@ -237,6 +238,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
         setUser(sessionUser);
         localStorage.setItem("chopper_user", JSON.stringify(sessionUser));
+        setSessionExpiredNotice(null);
         return { success: true };
       }
       return { success: false, error: res.error || "No se pudo crear la cuenta." };
@@ -279,6 +281,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
         setUser(sessionUser);
         localStorage.setItem("chopper_user", JSON.stringify(sessionUser));
+        setSessionExpiredNotice(null);
         setIsLoginOpen(false);
         return { success: true };
       }
@@ -436,7 +439,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         sessionExpiredNotice,
         clearSessionExpiredNotice: () => setSessionExpiredNotice(null),
         isLoginOpen,
-        openLogin: () => setIsLoginOpen(true),
+        openLogin: () => {
+          setSessionExpiredNotice(null);
+          setIsLoginOpen(true);
+        },
         closeLogin: () => {
           setIsLoginOpen(false);
           setSessionExpiredNotice(null);
