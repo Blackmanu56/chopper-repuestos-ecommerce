@@ -14,7 +14,7 @@ interface CombosSectionProps {
 
 export default function CombosSection({ initialCombos }: CombosSectionProps) {
   const { addToCart, isStaff, getItemCartQuantity, getRemainingStock } = useCart();
-  const { shouldShowAhorroBadge, calcularCuotas } = useConfig();
+  const { shouldShowAhorroBadge } = useConfig();
   const formatPrice = (n: number) => "$" + Number(n).toLocaleString("es-AR");
 
   const [combos, setCombos] = useState<ComboDTO[]>(initialCombos || []);
@@ -162,7 +162,6 @@ export default function CombosSection({ initialCombos }: CombosSectionProps) {
             });
             const isLimitReached = hasStock && remainingStock <= 0;
             const isLowStock = hasStock && combo.stockCalculado <= 5;
-            const financiacion = calcularCuotas(combo.precio);
 
             return (
             <div
@@ -249,18 +248,6 @@ export default function CombosSection({ initialCombos }: CombosSectionProps) {
                 <div className="mt-1 text-[11px] font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1">
                   <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
                   <span>¡Últimos {combo.stockCalculado} kits disponibles!</span>
-                </div>
-              )}
-
-              {/* Pill amarillo: cuotas */}
-              {financiacion.habilitadas && (
-                <div className="mt-2.5 flex items-center justify-center gap-1.5 rounded-lg bg-amber-400 py-1 px-2 text-[11px] font-black text-slate-900 shadow-sm">
-                  <span>
-                    💳{" "}
-                    {financiacion.sinInteres
-                      ? `${financiacion.cuotas} cuotas sin interés`
-                      : `${financiacion.cuotas} cuotas fijas`}
-                  </span>
                 </div>
               )}
 

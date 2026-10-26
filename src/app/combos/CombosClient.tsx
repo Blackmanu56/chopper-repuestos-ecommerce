@@ -25,7 +25,7 @@ interface CombosClientProps {
 
 export default function CombosClient({ initialCombos }: CombosClientProps) {
   const { addToCart, isStaff, getItemCartQuantity, getRemainingStock } = useCart();
-  const { shouldShowAhorroBadge, calcularCuotas } = useConfig();
+  const { shouldShowAhorroBadge } = useConfig();
   const formatPrice = (n: number) => "$" + Number(n).toLocaleString("es-AR");
 
   const [search, setSearch] = useState("");
@@ -309,8 +309,6 @@ export default function CombosClient({ initialCombos }: CombosClientProps) {
                 const isLimitReached = hasStock && remainingStock <= 0;
                 const isLowStock = hasStock && combo.stockCalculado <= 5;
                 const isAdded = Boolean(addedIds[combo.id]);
-                const financiacion = calcularCuotas(combo.precio);
-                const cuota = financiacion.valorCuota;
 
                 return (
                   <div
@@ -415,14 +413,6 @@ export default function CombosClient({ initialCombos }: CombosClientProps) {
                         <div className="text-[11px] font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1">
                           <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
                           <span>¡Últimos {combo.stockCalculado} kits disponibles!</span>
-                        </div>
-                      )}
-
-                      {financiacion.habilitadas && (
-                        <div className="text-[11px] font-semibold text-amber-500 mt-0.5">
-                          {financiacion.sinInteres
-                            ? `${financiacion.cuotas} cuotas sin interés de ${formatPrice(cuota)}`
-                            : `${financiacion.cuotas} cuotas fijas de ${formatPrice(cuota)}`}
                         </div>
                       )}
 

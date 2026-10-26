@@ -6,6 +6,7 @@ import fs from "fs/promises";
 import path from "path";
 import { requireStaffSession, StaffRole } from "@/lib/session";
 import { validateUploadedFile } from "@/lib/uploadValidation";
+import { parseProductMetadata, serializeProductMetadata } from "@/lib/productMetadata";
 
 export interface TiendaConfig {
   nombre_tienda: string;
@@ -48,11 +49,23 @@ const DEFAULT_CONFIG: TiendaConfig = {
 };
 
 async function verifyStaff(
-  _ignoredUserId?: number,
+  userId?: number,
   allowedRoles: StaffRole[] = ["ADMINISTRADOR", "ENCARGADO_VENTAS"]
 ): Promise<{ authorized: boolean; error?: string }> {
   const res = await requireStaffSession(allowedRoles);
-  return { authorized: res.authorized, error: res.error };
+  if (res.authorized) return { authorized: true };
+
+  if (userId) {
+    const user = await prisma.usuario.findUnique({
+      where: { id: userId },
+      include: { rol: true },
+    });
+    if (user && user.activo && user.rol && allowedRoles.includes(user.rol.nombre as StaffRole)) {
+      return { authorized: true };
+    }
+  }
+
+  return { authorized: false, error: res.error || "Acceso denegado: debés iniciar sesión con una cuenta de personal autorizado." };
 }
 
 /**
@@ -735,6 +748,439 @@ export async function eliminarBannerHomeAction(
   } catch (err) {
     console.error("Error al eliminar banner:", err);
     return { success: false, error: "Error al eliminar el banner." };
+  }
+}
+
+const DEFAULT_MOTOS_CATALOGO = [
+  "Honda Wave 110",
+  "Honda CG 150 Titan",
+  "Honda XR 150L",
+  "Honda XR 250 Tornado",
+  "Honda CB 250 Twister",
+  "Honda CBX 250 Twister",
+  "Honda Biz 125",
+  "Honda XR 190L",
+  "Honda GLH 150 Gaucha",
+  "Honda CB 190R",
+  "Honda Storm 125",
+  "Honda Elite 125",
+  "Honda PCX 150",
+  "Yamaha YBR 125",
+  "Yamaha YBR 125 ED",
+  "Yamaha FZ 16",
+  "Yamaha FZ-FI 2.0",
+  "Yamaha Crypton 110",
+  "Yamaha XTZ 125",
+  "Yamaha XTZ 250 Lander",
+  "Yamaha FZ 25",
+  "Yamaha Ray ZR 125",
+  "Motomel Blitz 110",
+  "Motomel Skua 150",
+  "Motomel Skua 250",
+  "Motomel S2 150",
+  "Motomel Sirius 150",
+  "Gilera Smash 110",
+  "Gilera VC 150",
+  "Gilera Sahel 150",
+  "Gilera SMX 200",
+  "Corven Energy 110",
+  "Corven Hunter 150",
+  "Corven Triax 150",
+  "Corven Triax 250",
+  "Zanella ZB 110",
+  "Zanella RX 150",
+  "Zanella ZR 150",
+  "Zanella ZR 250",
+  "Bajaj Rouser NS 200",
+  "Bajaj Rouser NS 160",
+  "Bajaj Rouser 135 LS",
+  "Bajaj Boxer 150",
+  "Bajaj Dominar 400",
+  "Mondial LD 110",
+  "Mondial TD 150",
+  "Guerrero Trip 110",
+  "Suzuki AX 100",
+  "Suzuki GN 125",
+  "Suzuki EN 125",
+  "Suzuki Gixxer 150",
+];
+
+const DEFAULT_SPECS_SUGERIDAS = [
+  "Posición",
+  "Material",
+  "Medida / Diámetro",
+  "Origen / Fabricación",
+  "Paso",
+  "Cantidad de eslabones",
+  "Tipo de cadena",
+  "Viscosidad",
+  "Tipo de aceite / fluido",
+  "Voltaje / Capacidad",
+  "Color",
+  "Garantía oficial",
+  "Condición",
+  "Lado",
+  "Rosca",
+  "Diámetro interno",
+  "Diámetro externo",
+  "Espesor",
+];
+
+/**
+ * Obtiene el catálogo completo y persistente de motos compatibles del e-commerce.
+ */
+export async function getCatalogoMotosAction(): Promise<string[]> {
+  try {
+    const record = await prisma.configuracionEcommerce.findUnique({
+      where: { clave: "catalogo_motos_compatibles" },
+    });
+
+    let list: string[] = [];
+    if (record && record.valor) {
+      try {
+        const parsed = JSON.parse(record.valor);
+        if (Array.isArray(parsed)) {
+          list = parsed.filter((m) => typeof m === "string" && m.trim().length > 0);
+        }
+      } catch {}
+    }
+
+    if (list.length === 0) {
+      list = [...DEFAULT_MOTOS_CATALOGO];
+      await prisma.configuracionEcommerce.upsert({
+        where: { clave: "catalogo_motos_compatibles" },
+        update: { valor: JSON.stringify(list) },
+        create: {
+          clave: "catalogo_motos_compatibles",
+          valor: JSON.stringify(list),
+          descripcion: "Catálogo reutilizable de motos y modelos compatibles para el e-commerce",
+        },
+      });
+    }
+
+    // Normalizar, deduplicar case-insensitive y ordenar alfabéticamente
+    const map = new Map<string, string>();
+    for (const m of list) {
+      const clean = m.trim().replace(/\s+/g, " ");
+      const lower = clean.toLowerCase();
+      if (!map.has(lower)) {
+        map.set(lower, clean);
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
+  } catch (error) {
+    console.error("Error al obtener catálogo de motos:", error);
+    return DEFAULT_MOTOS_CATALOGO;
+  }
+}
+
+/**
+ * Agrega una nueva moto al catálogo compartido y persistente de motos compatibles.
+ */
+export async function agregarMotoCatalogoAction(
+  userId: number,
+  nombreMoto: string
+): Promise<{ success: boolean; motos?: string[]; error?: string }> {
+  const auth = await verifyStaff(userId, ["ADMINISTRADOR", "ENCARGADO_VENTAS", "ENCARGADO_STOCK"]);
+  if (!auth.authorized) return { success: false, error: auth.error };
+
+  const clean = (nombreMoto || "").trim().replace(/\s+/g, " ");
+  if (!clean || clean.length < 3) {
+    return { success: false, error: "Ingresá un nombre de moto válido (mínimo 3 caracteres)." };
+  }
+
+  try {
+    const actuales = await getCatalogoMotosAction();
+    const existe = actuales.some((m) => m.toLowerCase() === clean.toLowerCase());
+    let actualizados = actuales;
+
+    if (!existe) {
+      actualizados = [...actuales, clean].sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
+      await prisma.configuracionEcommerce.upsert({
+        where: { clave: "catalogo_motos_compatibles" },
+        update: { valor: JSON.stringify(actualizados) },
+        create: {
+          clave: "catalogo_motos_compatibles",
+          valor: JSON.stringify(actualizados),
+          descripcion: "Catálogo reutilizable de motos y modelos compatibles para el e-commerce",
+        },
+      });
+    }
+
+    return { success: true, motos: actualizados };
+  } catch (error) {
+    console.error("Error al agregar moto al catálogo:", error);
+    return { success: false, error: "No se pudo guardar la moto en el catálogo compartido." };
+  }
+}
+
+/**
+ * Obtiene el catálogo de sugerencias de nombres de características técnicas.
+ */
+export async function getCatalogoSpecsSugeridasAction(): Promise<string[]> {
+  try {
+    const record = await prisma.configuracionEcommerce.findUnique({
+      where: { clave: "catalogo_specs_sugeridas" },
+    });
+
+    let list: string[] = [];
+    if (record && record.valor) {
+      try {
+        const parsed = JSON.parse(record.valor);
+        if (Array.isArray(parsed)) {
+          list = parsed.filter((s) => typeof s === "string" && s.trim().length > 0);
+        }
+      } catch {}
+    }
+
+    if (list.length === 0) {
+      list = [...DEFAULT_SPECS_SUGERIDAS];
+      await prisma.configuracionEcommerce.upsert({
+        where: { clave: "catalogo_specs_sugeridas" },
+        update: { valor: JSON.stringify(list) },
+        create: {
+          clave: "catalogo_specs_sugeridas",
+          valor: JSON.stringify(list),
+          descripcion: "Sugerencias reutilizables de nombres de características técnicas",
+        },
+      });
+    }
+
+    const map = new Map<string, string>();
+    for (const s of list) {
+      const clean = s.trim();
+      const lower = clean.toLowerCase();
+      if (!map.has(lower)) {
+        map.set(lower, clean);
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
+  } catch (error) {
+    console.error("Error al obtener catálogo de specs sugeridas:", error);
+    return DEFAULT_SPECS_SUGERIDAS;
+  }
+}
+
+/**
+ * Agrega un nuevo nombre de característica a las sugerencias reutilizables.
+ */
+export async function agregarSpecSugeridaAction(
+  userId: number,
+  caracteristica: string
+): Promise<{ success: boolean; specs?: string[]; error?: string }> {
+  const auth = await verifyStaff(userId, ["ADMINISTRADOR", "ENCARGADO_VENTAS", "ENCARGADO_STOCK"]);
+  if (!auth.authorized) return { success: false, error: auth.error };
+
+  const clean = (caracteristica || "").trim().replace(/\s+/g, " ");
+  if (!clean || clean.length < 2) {
+    return { success: false, error: "Ingresá un nombre de característica válido." };
+  }
+
+  try {
+    const actuales = await getCatalogoSpecsSugeridasAction();
+    const existe = actuales.some((s) => s.toLowerCase() === clean.toLowerCase());
+    let actualizados = actuales;
+
+    if (!existe) {
+      actualizados = [...actuales, clean].sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
+      await prisma.configuracionEcommerce.upsert({
+        where: { clave: "catalogo_specs_sugeridas" },
+        update: { valor: JSON.stringify(actualizados) },
+        create: {
+          clave: "catalogo_specs_sugeridas",
+          valor: JSON.stringify(actualizados),
+          descripcion: "Sugerencias reutilizables de nombres de características técnicas",
+        },
+      });
+    }
+
+    return { success: true, specs: actualizados };
+  } catch (error) {
+    console.error("Error al agregar spec sugerida:", error);
+    return { success: false, error: "No se pudo guardar la sugerencia técnica." };
+  }
+}
+
+/**
+ * Verifica qué productos y combos utilizan actualmente un modelo de moto específico.
+ */
+export async function verificarImpactoEditarMotoAction(nombreActual: string): Promise<{
+  count: number;
+  productos: Array<{ id: number; nombre: string; tipo: "PRODUCTO" | "COMBO" }>;
+}> {
+  const cleanTarget = (nombreActual || "").trim().toLowerCase();
+  if (!cleanTarget) return { count: 0, productos: [] };
+
+  try {
+    const prods = await prisma.productoEcommerce.findMany({
+      where: {
+        descripcion: { contains: cleanTarget, mode: "insensitive" },
+      },
+      include: {
+        producto: { select: { id: true, nombre: true } },
+      },
+    });
+
+    const affected: Array<{ id: number; nombre: string; tipo: "PRODUCTO" | "COMBO" }> = [];
+
+    for (const p of prods) {
+      const meta = parseProductMetadata(p.descripcion);
+      if (meta.motosCompatibles.some((m) => m.toLowerCase() === cleanTarget)) {
+        affected.push({
+          id: p.producto.id,
+          nombre: meta.tituloComercial?.trim() || p.producto.nombre,
+          tipo: "PRODUCTO",
+        });
+      }
+    }
+
+    // Comprobar combos
+    const combos = await prisma.comboEcommerce.findMany({
+      where: {
+        descripcion: { contains: cleanTarget, mode: "insensitive" },
+      },
+      select: { id: true, nombre: true, descripcion: true },
+    });
+
+    for (const c of combos) {
+      const meta = parseProductMetadata(c.descripcion);
+      if (meta.motosCompatibles.some((m) => m.toLowerCase() === cleanTarget)) {
+        affected.push({
+          id: c.id,
+          nombre: c.nombre,
+          tipo: "COMBO",
+        });
+      }
+    }
+
+    return { count: affected.length, productos: affected };
+  } catch (error) {
+    console.error("Error al verificar impacto de moto:", error);
+    return { count: 0, productos: [] };
+  }
+}
+
+/**
+ * Corrige o edita un modelo del catálogo compartido, actualizando opcionalmente
+ * los productos y combos que ya lo utilizaban para mantener la coherencia.
+ */
+export async function editarMotoCatalogoAction(
+  userId: number,
+  nombreActual: string,
+  nombreNuevo: string,
+  actualizarExistentes = true
+): Promise<{
+  success: boolean;
+  motos?: string[];
+  actualizadosCount?: number;
+  error?: string;
+}> {
+  const auth = await verifyStaff(userId, ["ADMINISTRADOR", "ENCARGADO_VENTAS", "ENCARGADO_STOCK"]);
+  if (!auth.authorized) return { success: false, error: auth.error };
+
+  const cleanOld = (nombreActual || "").trim();
+  const cleanNew = (nombreNuevo || "").trim().replace(/\s+/g, " ");
+
+  if (!cleanNew || cleanNew.length < 3) {
+    return { success: false, error: "Ingresá un nombre de moto válido (mínimo 3 caracteres)." };
+  }
+
+  if (cleanOld.toLowerCase() === cleanNew.toLowerCase()) {
+    return { success: true, motos: await getCatalogoMotosAction(), actualizadosCount: 0 };
+  }
+
+  try {
+    const actuales = await getCatalogoMotosAction();
+    const actualizados = actuales
+      .map((m) => (m.toLowerCase() === cleanOld.toLowerCase() ? cleanNew : m))
+      .filter((m, idx, arr) => arr.findIndex((x) => x.toLowerCase() === m.toLowerCase()) === idx)
+      .sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
+
+    await prisma.configuracionEcommerce.upsert({
+      where: { clave: "catalogo_motos_compatibles" },
+      update: { valor: JSON.stringify(actualizados) },
+      create: {
+        clave: "catalogo_motos_compatibles",
+        valor: JSON.stringify(actualizados),
+        descripcion: "Catálogo reutilizable de motos y modelos compatibles para el e-commerce",
+      },
+    });
+
+    let actualizadosCount = 0;
+
+    if (actualizarExistentes) {
+      // 1. Actualizar en ProductoEcommerce
+      const prods = await prisma.productoEcommerce.findMany({
+        where: {
+          descripcion: { contains: cleanOld, mode: "insensitive" },
+        },
+      });
+
+      for (const p of prods) {
+        const meta = parseProductMetadata(p.descripcion);
+        if (meta.motosCompatibles.some((m) => m.toLowerCase() === cleanOld.toLowerCase())) {
+          const nuevasMotos = meta.motosCompatibles.map((m) =>
+            m.toLowerCase() === cleanOld.toLowerCase() ? cleanNew : m
+          );
+          const newDesc = serializeProductMetadata({
+            tituloComercial: meta.tituloComercial,
+            texto: meta.texto,
+            universal: meta.universal,
+            especificaciones: meta.especificaciones,
+            motosCompatibles: nuevasMotos,
+          });
+
+          await prisma.productoEcommerce.update({
+            where: { productoId: p.productoId },
+            data: { descripcion: newDesc },
+          });
+          actualizadosCount++;
+        }
+      }
+
+      // 2. Actualizar en Combos
+      const combos = await prisma.comboEcommerce.findMany({
+        where: {
+          descripcion: { contains: cleanOld, mode: "insensitive" },
+        },
+      });
+
+      for (const c of combos) {
+        const meta = parseProductMetadata(c.descripcion);
+        if (meta.motosCompatibles.some((m) => m.toLowerCase() === cleanOld.toLowerCase())) {
+          const nuevasMotos = meta.motosCompatibles.map((m) =>
+            m.toLowerCase() === cleanOld.toLowerCase() ? cleanNew : m
+          );
+          const newDesc = serializeProductMetadata({
+            tituloComercial: meta.tituloComercial,
+            texto: meta.texto,
+            universal: meta.universal,
+            especificaciones: meta.especificaciones,
+            motosCompatibles: nuevasMotos,
+          });
+
+          await prisma.comboEcommerce.update({
+            where: { id: c.id },
+            data: { descripcion: newDesc },
+          });
+          actualizadosCount++;
+        }
+      }
+    }
+
+    try {
+      revalidatePath("/panel");
+      revalidatePath("/producto/[id]", "page");
+      revalidatePath("/combos/[id]", "page");
+      revalidatePath("/");
+    } catch {}
+
+    return { success: true, motos: actualizados, actualizadosCount };
+  } catch (error) {
+    console.error("Error al editar moto del catálogo:", error);
+    return { success: false, error: "No se pudo actualizar el modelo en el catálogo." };
   }
 }
 

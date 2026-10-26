@@ -35,7 +35,7 @@ export default function OfertasClient({
   initialCatName = "",
 }: OfertasClientProps) {
   const { addToCart, isStaff, getItemCartQuantity, getRemainingStock } = useCart();
-  const { shouldShowAhorroBadge, calcularCuotas } = useConfig();
+  const { shouldShowAhorroBadge } = useConfig();
   const formatPrice = (n: number) => "$" + Number(n).toLocaleString("es-AR");
 
   // Estados de filtros laterales
@@ -452,7 +452,6 @@ export default function OfertasClient({
                 const ahorro = p.enOferta ? Math.max(0, regular - p.precio) : 0;
                 const precioOriginal = regular;
                 const badge = p.badgePromo || null;
-                const financiacion = calcularCuotas(p.precio);
 
                 const esCombo = Boolean((p as any).esCombo || p.categoriaId === 9999 || p.categoriaNombre.toLowerCase().includes("combo"));
                 const itemHref = esCombo ? `/combos/${p.id}` : `/producto/${p.id}`;
@@ -521,7 +520,7 @@ export default function OfertasClient({
                       </Link>
                     </div>
 
-                    {/* Precios & Cuotas */}
+                    {/* Precios */}
                     <div className="mt-3 pt-3 border-t border-slate-200 dark:border-line/60">
                       {p.enOferta && ahorro > 0 ? (
                         <div className="text-[11px] text-slate-500 line-through">
@@ -545,13 +544,6 @@ export default function OfertasClient({
                           </span>
                         )}
                       </div>
-                      {financiacion.habilitadas && (
-                        <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mt-0.5">
-                          {financiacion.sinInteres
-                            ? `${financiacion.cuotas} cuotas sin interés de ${formatPrice(financiacion.valorCuota)}`
-                            : `${financiacion.cuotas} cuotas fijas de ${formatPrice(financiacion.valorCuota)}`}
-                        </div>
-                      )}
 
                       {/* Entrega y Botón Carrito */}
                       <div className="mt-2.5 flex items-center justify-between gap-2">

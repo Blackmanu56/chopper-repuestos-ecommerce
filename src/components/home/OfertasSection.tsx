@@ -9,7 +9,7 @@ import { ShoppingCart, ChevronRight, ChevronLeft, Lock, Check } from "lucide-rea
 
 export default function OfertasSection({ products }: { products: ProductItem[] }) {
   const { addToCart, isStaff, getItemCartQuantity, getRemainingStock } = useCart();
-  const { shouldShowAhorroBadge, calcularCuotas } = useConfig();
+  const { shouldShowAhorroBadge } = useConfig();
   const formatPrice = (n: number) => "$" + Number(n).toLocaleString("es-AR");
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -94,7 +94,6 @@ export default function OfertasSection({ products }: { products: ProductItem[] }
             const hasStock = prod.stock > 0;
             const isLimitReached = hasStock && remainingStock <= 0;
             const isLowStock = hasStock && prod.stock <= 5;
-            const financiacion = calcularCuotas(prod.precio);
             return (
             <div
               key={prod.id}
@@ -189,18 +188,6 @@ export default function OfertasSection({ products }: { products: ProductItem[] }
               <div className="text-[10px] text-slate-600 dark:text-slate-400">
                 Efectivo / Transferencia
               </div>
-
-              {/* Pill amarillo: cuotas */}
-              {financiacion.habilitadas && (
-                <div className="mt-2 flex items-center justify-center gap-1 rounded-lg bg-amber-400 py-1 px-1.5 text-[10px] font-black text-slate-900 shadow-sm">
-                  <span>
-                    💳{" "}
-                    {financiacion.sinInteres
-                      ? `${financiacion.cuotas} cuotas sin interés`
-                      : `${financiacion.cuotas} cuotas fijas`}
-                  </span>
-                </div>
-              )}
 
               {/* Botón Agregar al Carrito */}
               {isStaff ? (

@@ -28,7 +28,6 @@ import {
   Lock,
   AlertTriangle,
 } from "lucide-react";
-import CuotasModal from "@/components/products/CuotasModal";
 
 interface ProductDetailClientProps {
   product: ProductItem;
@@ -41,14 +40,13 @@ export default function ProductDetailClient({
 }: ProductDetailClientProps) {
   const { addToCart, isStaff, getItemCartQuantity, getRemainingStock } = useCart();
   const { user, openLogin } = useAuth();
-  const { config, shouldShowAhorroBadge, calcularCuotas } = useConfig();
+  const { config, shouldShowAhorroBadge } = useConfig();
   const router = useRouter();
 
   const [activeImage, setActiveImage] = useState<string>(product.imagen || "");
   const [qty, setQty] = useState(1);
-  const [activeTab, setActiveTab] = useState<"descripcion" | "specs" | "motos" | "compra_cuotas">("descripcion");
+  const [activeTab, setActiveTab] = useState<"descripcion" | "specs" | "motos" | "compra_pagos">("descripcion");
   const [copied, setCopied] = useState(false);
-  const [showCuotasModal, setShowCuotasModal] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const inCartQty = getItemCartQuantity(product.id, false);
@@ -68,39 +66,6 @@ export default function ProductDetailClient({
     return !key.includes("marca") && !key.includes("categor") && !key.includes("código") && !key.includes("codigo") && !key.includes("garant");
   });
 
-  const modelosReferenciaPlaza = [
-    {
-      marca: "HONDA",
-      color: "text-red-600 dark:text-red-500",
-      modelos: "Wave 110, CG 150 Titan, XR 150L, XR 250 Tornado, Twister 250",
-    },
-    {
-      marca: "YAMAHA",
-      color: "text-blue-600 dark:text-blue-500",
-      modelos: "YBR 125 ED/ESD, FZ 16, Crypton 110, XTZ 125 / 250 Lander",
-    },
-    {
-      marca: "MOTOMEL",
-      color: "text-sky-600 dark:text-sky-400",
-      modelos: "Blitz 110, Skua 150 / 250, S2 150, Sirius 150",
-    },
-    {
-      marca: "GILERA",
-      color: "text-red-500 dark:text-red-400",
-      modelos: "Smash 110 (todas las versiones), VC 150, Sahel 150",
-    },
-    {
-      marca: "CORVEN / ZANELLA",
-      color: "text-amber-600 dark:text-amber-400",
-      modelos: "Energy 110, Triax 150, Hunter 150, ZB 110, RX 150",
-    },
-    {
-      marca: "BAJAJ",
-      color: "text-blue-600 dark:text-blue-400",
-      modelos: "Rouser NS 125 / 160 / 200, Boxer 150",
-    },
-  ];
-
   const scroll = (direction: "left" | "right") => {
     if (scrollRef.current) {
       const scrollAmount = direction === "left" ? -280 : 280;
@@ -118,12 +83,10 @@ export default function ProductDetailClient({
 
   const formatPrice = (n: number) => "$" + Number(n).toLocaleString("es-AR");
 
-  // Precios reales y cuotas basados estrictamente en datos del producto
+  // Precios reales basados estrictamente en datos del producto
   const regular = product.precioRegular ?? product.precio;
   const hasOffer = Boolean(product.enOferta && regular > product.precio);
   const ahorroOferta = hasOffer ? Math.max(0, regular - product.precio) : 0;
-  const financiacion = calcularCuotas(product.precio);
-  const cuotaValor = financiacion.valorCuota;
 
   const handleQty = (delta: number) => {
     if (sinStock || remainingStock <= 0) return;
@@ -309,33 +272,6 @@ export default function ProductDetailClient({
               Precio final con IVA incluido. Pagá en efectivo, transferencia o tarjeta al retirar en Posadas o al recibir.
             </div>
           </div>
-
-          {/* BANNER AMARILLO: CUOTAS */}
-          {financiacion.habilitadas && (
-            <div
-              onClick={() => setShowCuotasModal(true)}
-              className="flex items-center justify-between rounded-xl bg-amber-400 p-3 text-slate-950 font-bold shadow-md cursor-pointer hover:bg-amber-300 transition-colors"
-            >
-              <div className="flex items-center gap-2 text-xs sm:text-sm">
-                <span className="text-base">⚡</span>
-                <span>
-                  {financiacion.sinInteres
-                    ? `${financiacion.cuotas} CUOTAS SIN INTERÉS de ${formatPrice(cuotaValor)}`
-                    : `${financiacion.cuotas} CUOTAS FIJAS de ${formatPrice(cuotaValor)}`}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowCuotasModal(true);
-                }}
-                className="text-xs font-black uppercase tracking-wider underline cursor-pointer hover:text-slate-800"
-              >
-                Ver cuotas &gt;
-              </button>
-            </div>
-          )}
 
           {/* ESTADO DE STOCK Y BENEFICIOS LOCALES EN POSADAS */}
           <div className="space-y-2.5 rounded-xl border border-slate-200 dark:border-line bg-white dark:bg-card p-4 text-xs shadow-sm">
@@ -534,14 +470,14 @@ export default function ProductDetailClient({
             Motos Compatibles
           </button>
           <button
-            onClick={() => setActiveTab("compra_cuotas")}
+            onClick={() => setActiveTab("compra_pagos")}
             className={`pb-3 px-4 border-b-2 transition-colors shrink-0 ${
-              activeTab === "compra_cuotas"
+              activeTab === "compra_pagos"
                 ? "border-emerald-600 text-emerald-700 dark:text-emerald-400 font-black"
                 : "border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
             }`}
           >
-            Información de Compra y Cuotas
+            Información de Compra y Pagos
           </button>
         </div>
 
@@ -669,12 +605,55 @@ export default function ProductDetailClient({
         {/* Solapa 3: Motos Compatibles */}
         {activeTab === "motos" && (
           <div className="rounded-2xl border border-slate-200 dark:border-line bg-white dark:bg-card p-6 space-y-4 shadow-sm text-xs">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-              Motos y Modelos Compatibles
-            </h3>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                Motos y Modelos Compatibles
+              </h3>
+              {product.universal && (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-sky-500/10 text-sky-700 dark:text-sky-300 border border-sky-500/30">
+                  <Sparkles size={14} className="text-sky-600 dark:text-sky-400" />
+                  Aplicación Universal
+                </span>
+              )}
+            </div>
 
-            {product.motosCompatibles && product.motosCompatibles.length > 0 ? (
-              /* CASO 1: Compatibilidades específicas verificadas en el panel */
+            {product.universal ? (
+              /* CASO 1: Repuesto de aplicación universal */
+              <div className="space-y-4">
+                <div className="rounded-xl border border-sky-500/30 bg-sky-50/70 dark:bg-sky-950/20 p-4 space-y-2 text-xs">
+                  <div className="flex items-center gap-2 font-bold text-sky-800 dark:text-sky-300 text-sm">
+                    <Sparkles size={18} className="text-sky-600 dark:text-sky-400 shrink-0" />
+                    <span>Repuesto de Aplicación Universal</span>
+                  </div>
+                  <p className="text-slate-700 dark:text-slate-300 leading-relaxed text-xs">
+                    Este producto cuenta con <strong>diseño y medidas universales</strong>, siendo compatible y adaptable a una amplia gama de motocicletas, marcas y cilindradas del mercado (salvo especificaciones excepcionales de fábrica).
+                  </p>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                    Apto para instalación estándar. Si tenés dudas sobre el anclaje, rosca o dimensiones específicas para tu modelo, consultanos por WhatsApp antes de comprar.
+                  </p>
+                </div>
+
+                {product.motosCompatibles && product.motosCompatibles.length > 0 && (
+                  <div className="space-y-2.5 pt-1">
+                    <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
+                      Modelos de referencia frecuente testeados:
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                      {product.motosCompatibles.map((moto, idx) => (
+                        <div
+                          key={`moto-compat-${idx}`}
+                          className="flex items-center gap-2 rounded-xl border border-sky-500/20 dark:border-sky-500/20 bg-sky-50/40 dark:bg-surface p-3 font-semibold text-slate-800 dark:text-slate-200"
+                        >
+                          <Bike size={16} className="text-sky-600 dark:text-sky-400 shrink-0" />
+                          <span className="truncate">{moto}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : product.motosCompatibles && product.motosCompatibles.length > 0 ? (
+              /* CASO 2: Compatibilidades específicas verificadas en el panel */
               <div className="space-y-4">
                 <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-50/70 dark:bg-emerald-950/20 p-3.5 text-xs text-emerald-800 dark:text-emerald-300 font-semibold">
                   <Check size={18} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
@@ -693,36 +672,18 @@ export default function ProductDetailClient({
                 </div>
               </div>
             ) : (
-              /* CASO 2: Guía de referencia general orientativa con aviso explícito */
-              <div className="space-y-4">
-                <div className="rounded-xl border border-amber-500/30 bg-amber-50/70 dark:bg-amber-950/20 p-4 space-y-2 text-xs">
-                  <div className="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-400">
-                    <AlertTriangle size={16} className="shrink-0" />
-                    <span>Guía de marcas y modelos de referencia habitual en plaza</span>
-                  </div>
-                  <p className="text-slate-700 dark:text-slate-300 leading-relaxed">
-                    <strong>Referencia orientativa:</strong> los siguientes modelos representan las líneas de motocicletas de cilindrada común (110cc, 125cc, 150cc y 250cc) más extendidas en plaza para las que habitualmente se aplican repuestos de esta categoría. <strong>No constituyen una compatibilidad técnica garantizada para esta pieza específica.</strong>
-                  </p>
-                  <p className="text-[11px] text-slate-600 dark:text-slate-400">
-                    Para verificar la compatibilidad exacta de esta pieza según el año, serie de motor o versión de tu moto, consultanos por WhatsApp antes de realizar tu compra.
-                  </p>
+              /* CASO 3: Compatibilidad no especificada (reemplaza la guía genérica de plaza) */
+              <div className="rounded-xl border border-slate-200 dark:border-line bg-slate-50 dark:bg-surface/60 p-5 space-y-3 text-xs">
+                <div className="flex items-center gap-2 font-bold text-slate-800 dark:text-slate-200 text-sm">
+                  <Info size={18} className="text-slate-500 dark:text-slate-400 shrink-0" />
+                  <span>Compatibilidad no especificada</span>
                 </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-1">
-                  {modelosReferenciaPlaza.map((ref, idx) => (
-                    <div
-                      key={`ref-marca-${idx}`}
-                      className="rounded-xl border border-slate-200 dark:border-line bg-slate-50 dark:bg-surface p-3.5 space-y-1.5"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className={`font-black text-xs ${ref.color}`}>{ref.marca}</span>
-                        <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Ref. plaza</span>
-                      </div>
-                      <p className="text-slate-800 dark:text-slate-200 text-[11px] font-medium leading-relaxed">
-                        {ref.modelos}
-                      </p>
-                    </div>
-                  ))}
+                <p className="text-slate-600 dark:text-slate-300 leading-relaxed text-xs">
+                  Este repuesto no tiene modelos de motocicleta asociados explícitamente en su ficha técnica comercial.
+                </p>
+                <div className="flex items-center gap-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-500/20 p-3 text-[11px] text-amber-800 dark:text-amber-300 font-medium">
+                  <AlertTriangle size={15} className="shrink-0 text-amber-600 dark:text-amber-400" />
+                  <span>Para verificar si esta pieza es compatible con el año, serie de motor o versión de tu moto, consultanos por WhatsApp con tu modelo exacto antes de realizar la compra.</span>
                 </div>
               </div>
             )}
@@ -741,8 +702,8 @@ export default function ProductDetailClient({
           </div>
         )}
 
-        {/* Solapa 4: Información de Compra y Cuotas */}
-        {activeTab === "compra_cuotas" && (
+        {/* Solapa 4: Información de Compra y Pagos */}
+        {activeTab === "compra_pagos" && (
           <div className="rounded-2xl border border-slate-200 dark:border-line bg-white dark:bg-card p-6 space-y-6 shadow-sm text-xs">
             <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
               Información de Compra, Pagos y Envíos
@@ -763,35 +724,18 @@ export default function ProductDetailClient({
                 </p>
               </div>
 
-              {/* Card 2: Financiación en Cuotas */}
-              <div className="rounded-xl border border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20 p-4 space-y-2">
-                <div className="flex items-center gap-2 font-bold text-amber-700 dark:text-amber-400 text-sm">
-                  <CreditCard size={16} />
-                  <span>Tarjetas y Cuotas</span>
+              {/* Card 2: Tarjetas y Medios de Pago */}
+              <div className="rounded-xl border border-slate-200 dark:border-line bg-slate-50 dark:bg-surface p-4 space-y-2">
+                <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white text-sm">
+                  <CreditCard size={16} className="text-brand" />
+                  <span>Tarjetas y Medios de Pago</span>
                 </div>
-                {financiacion.habilitadas ? (
-                  <>
-                    <p className="text-slate-800 dark:text-slate-200 font-bold text-base">
-                      {financiacion.sinInteres
-                        ? `${financiacion.cuotas} cuotas de ${formatPrice(cuotaValor)}`
-                        : `${financiacion.cuotas} cuotas fijas de ${formatPrice(cuotaValor)}`}
-                    </p>
-                    <p className="text-[11px] text-slate-600 dark:text-slate-400">
-                      Tarjetas de crédito bancarias y billeteras virtuales habilitadas.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => setShowCuotasModal(true)}
-                      className="text-[11px] font-bold text-amber-700 dark:text-amber-400 hover:underline pt-1 block"
-                    >
-                      Ver detalle de cuotas &gt;
-                    </button>
-                  </>
-                ) : (
-                  <p className="text-[11px] text-slate-600 dark:text-slate-400">
-                    Aceptamos todas las tarjetas de débito y crédito en un solo pago al precio regular.
-                  </p>
-                )}
+                <p className="text-slate-800 dark:text-slate-200 font-bold text-base">
+                  {formatPrice(product.precio)}
+                </p>
+                <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                  Aceptamos tarjetas de débito y crédito bancarias, y pagos mediante billeteras virtuales habilitadas.
+                </p>
               </div>
 
               {/* Card 3: Retiro y Envíos */}
@@ -944,13 +888,6 @@ export default function ProductDetailClient({
                     </div>
                     <div className="text-[9px] text-slate-600 dark:text-slate-400 font-medium">Efectivo / Transferencia</div>
 
-                    {/* Cuotas tag */}
-                    {financiacion.habilitadas && (
-                      <div className="mt-1 rounded bg-amber-400 py-0.5 px-1.5 text-[9px] font-bold text-slate-950 text-center truncate shadow-xs">
-                        ⚡ {financiacion.sinInteres ? `${financiacion.cuotas} cuotas sin interés` : `${financiacion.cuotas} cuotas fijas`}
-                      </div>
-                    )}
-
                     <button
                       onClick={() => addToCart(item, 1)}
                       className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-xl bg-brand hover:bg-brandhover py-2 text-xs font-bold text-white shadow-md transition-all active:scale-95 cursor-pointer"
@@ -965,14 +902,6 @@ export default function ProductDetailClient({
           </div>
         </section>
       )}
-
-      {/* Modal de Cuotas y Financiación */}
-      <CuotasModal
-        isOpen={showCuotasModal}
-        onClose={() => setShowCuotasModal(false)}
-        precio={product.precio}
-        titulo={product.nombre}
-      />
     </div>
   );
 }

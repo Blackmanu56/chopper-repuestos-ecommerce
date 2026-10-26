@@ -29,7 +29,6 @@ import {
   Store,
   Info,
 } from "lucide-react";
-import CuotasModal from "@/components/products/CuotasModal";
 import { ProductSpec } from "@/lib/productMetadata";
 
 interface ComboDetailClientProps {
@@ -39,11 +38,10 @@ interface ComboDetailClientProps {
 
 export default function ComboDetailClient({ combo, otherCombos }: ComboDetailClientProps) {
   const { addToCart, isStaff, getItemCartQuantity, getRemainingStock } = useCart();
-  const { shouldShowAhorroBadge, calcularCuotas } = useConfig();
+  const { shouldShowAhorroBadge } = useConfig();
   const router = useRouter();
   const [qty, setQty] = useState(1);
   const [added, setAdded] = useState(false);
-  const [showCuotasModal, setShowCuotasModal] = useState(false);
   const [activeTab, setActiveTab] = useState<"descripcion" | "componentes" | "specs" | "motos" | "compra">("descripcion");
   const otherCombosScrollRef = useRef<HTMLDivElement>(null);
 
@@ -145,9 +143,6 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
     handleAddToCart();
     router.push("/carrito");
   };
-
-  const financiacion = calcularCuotas(combo.precio);
-  const cuota = financiacion.valorCuota;
 
   const hasOffer = Boolean(combo.enOferta && combo.precioRegular && combo.precioRegular > combo.precio);
   const regular = hasOffer && combo.precioRegular ? combo.precioRegular : combo.precio;
@@ -330,7 +325,7 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
             </p>
           </div>
 
-          {/* Bloque de Precios y Cuotas */}
+          {/* Bloque de Precio */}
           <div className="rounded-2xl border border-slate-200 dark:border-line bg-slate-50/70 dark:bg-surface/50 p-3.5 sm:p-4 space-y-2">
             <div className="flex items-baseline justify-between gap-3">
               <div className="flex items-baseline gap-2.5">
@@ -368,36 +363,6 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
                 </div>
               )}
             </div>
-
-            {/* Pill Cuotas */}
-            {financiacion.habilitadas && (
-              <div
-                onClick={() => setShowCuotasModal(true)}
-                className="flex items-center justify-between rounded-xl bg-amber-400 py-2 px-3 text-xs font-black text-slate-950 shadow-xs cursor-pointer hover:bg-amber-300 transition-colors"
-              >
-                <div className="flex items-center gap-1.5">
-                  <span>💳</span>
-                  <span>
-                    {financiacion.sinInteres
-                      ? `${financiacion.cuotas} CUOTAS SIN INTERÉS`
-                      : `${financiacion.cuotas} CUOTAS FIJAS`}
-                  </span>
-                  <span className="text-[11px] font-bold text-slate-800">
-                    ({formatPrice(cuota)} / mes)
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowCuotasModal(true);
-                  }}
-                  className="text-[11px] font-black uppercase underline tracking-wider hover:text-slate-800 cursor-pointer"
-                >
-                  Ver cuotas &gt;
-                </button>
-              </div>
-            )}
           </div>
 
           {/* Avisos de Stock para el Combo */}
@@ -654,7 +619,7 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
                 : "border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
             }`}
           >
-            Información de compra y cuotas
+            Información de compra y pagos
           </button>
         </div>
 
@@ -953,7 +918,7 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
             </div>
           )}
 
-          {/* TAB 5: INFORMACIÓN DE COMPRA Y CUOTAS */}
+          {/* TAB 5: INFORMACIÓN DE COMPRA Y PAGOS */}
           {activeTab === "compra" && (
             <div className="space-y-4">
               <div className="border-b border-slate-200 dark:border-line pb-3">
@@ -982,24 +947,11 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
                       <Check size={14} className="text-emerald-500 shrink-0" />
                       <span><strong>Transferencia Bancaria:</strong> Pagás de forma segura y subís tu comprobante.</span>
                     </li>
-                    {financiacion.habilitadas && (
-                      <li className="flex items-center gap-2">
-                        <Check size={14} className="text-amber-500 shrink-0" />
-                        <span>
-                          <strong>Cuotas con tarjeta:</strong> {financiacion.sinInteres ? `${financiacion.cuotas} cuotas sin interés` : `${financiacion.cuotas} cuotas fijas`} de {formatPrice(cuota)}
-                        </span>
-                      </li>
-                    )}
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-emerald-500 shrink-0" />
+                      <span><strong>Tarjetas de Débito y Crédito:</strong> Aceptamos tarjetas bancarias y billeteras virtuales.</span>
+                    </li>
                   </ul>
-                  {financiacion.habilitadas && (
-                    <button
-                      type="button"
-                      onClick={() => setShowCuotasModal(true)}
-                      className="text-[11px] font-bold text-amber-500 hover:text-amber-400 underline cursor-pointer mt-1 inline-block"
-                    >
-                      Ver tabla completa de cuotas &gt;
-                    </button>
-                  )}
                 </div>
 
                 {/* Opciones de Entrega */}
@@ -1171,14 +1123,6 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
           </div>
         </section>
       )}
-
-      {/* Modal de Cuotas y Financiación */}
-      <CuotasModal
-        isOpen={showCuotasModal}
-        onClose={() => setShowCuotasModal(false)}
-        precio={combo.precio}
-        titulo={combo.nombre}
-      />
     </div>
   );
 }

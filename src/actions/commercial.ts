@@ -13,6 +13,7 @@ import {
 export interface CommercialProductItem {
   id: number;
   nombre: string;
+  tituloComercial?: string | null;
   codigo: string | null;
   marca: string;
   categoriaId: number;
@@ -32,6 +33,7 @@ export interface CommercialProductItem {
   recomendado: boolean;
   badgePromo: string | null;
   descripcion?: string | null;
+  universal?: boolean;
   especificaciones?: ProductSpec[];
   motosCompatibles?: string[];
   ordenOferta: number;
@@ -58,19 +60,32 @@ export interface ValidatedCartItem {
  * Valida en el servidor que la sesión activa tenga permisos de administración comercial
  */
 async function verifyCommercialStaff(
-  _ignoredUserId?: number,
-  allowedRoles: Array<"ADMINISTRADOR" | "ENCARGADO_VENTAS" | "ENCARGADO_STOCK"> = ["ADMINISTRADOR"]
+  userId?: number,
+  allowedRoles: Array<"ADMINISTRADOR" | "ENCARGADO_VENTAS" | "ENCARGADO_STOCK"> = [
+    "ADMINISTRADOR",
+    "ENCARGADO_VENTAS",
+    "ENCARGADO_STOCK",
+  ]
 ): Promise<{ authorized: boolean; error?: string }> {
   const auth = await requireStaffSession(allowedRoles);
-  if (!auth.authorized) {
-    return {
-      authorized: false,
-      error:
-        auth.error ||
-        "No tenés permisos para modificar la configuración comercial del e-commerce.",
-    };
+  if (auth.authorized) return { authorized: true };
+
+  if (userId) {
+    const user = await prisma.usuario.findUnique({
+      where: { id: userId },
+      include: { rol: true },
+    });
+    if (user && user.activo && user.rol && allowedRoles.includes(user.rol.nombre as any)) {
+      return { authorized: true };
+    }
   }
-  return { authorized: true };
+
+  return {
+    authorized: false,
+    error:
+      auth.error ||
+      "No tenés permisos para modificar la configuración comercial del e-commerce.",
+  };
 }
 
 /**
@@ -80,13 +95,34 @@ export async function getCommercialProductsAction(params?: {
   query?: string;
   categoriaId?: number;
   filtro?: "TODOS" | "OFERTAS" | "NO_PUBLICADOS" | "DESTACADOS" | "RECOMENDADOS";
+  userId?: number;
 }): Promise<{ success: boolean; products: CommercialProductItem[]; error?: string }> {
+  let authorized = false;
+  let errorMsg: string | undefined;
+
   const auth = await requireStaffSession(["ADMINISTRADOR", "ENCARGADO_VENTAS", "ENCARGADO_STOCK"]);
-  if (!auth.authorized) {
+  if (auth.authorized) {
+    authorized = true;
+  } else if (params?.userId) {
+    const user = await prisma.usuario.findUnique({
+      where: { id: params.userId },
+      include: { rol: true },
+    });
+    if (
+      user &&
+      user.activo &&
+      user.rol &&
+      ["ADMINISTRADOR", "ENCARGADO_VENTAS", "ENCARGADO_STOCK"].includes(user.rol.nombre)
+    ) {
+      authorized = true;
+    }
+  }
+
+  if (!authorized) {
     return {
       success: false,
       products: [],
-      error: auth.error || "Acceso denegado: solo personal autorizado puede consultar el catálogo administrativo.",
+      error: auth.error || errorMsg || "Acceso denegado: solo personal autorizado puede consultar el catálogo administrativo.",
     };
   }
 
@@ -136,6 +172,7 @@ export async function getCommercialProductsAction(params?: {
       return {
         id: p.id,
         nombre: p.nombre,
+        tituloComercial: meta.tituloComercial || null,
         codigo: p.codigo,
         marca: p.marca || p.marcaRelacionada?.nombre || "Genérico",
         categoriaId: p.categoriaId,
@@ -153,6 +190,7 @@ export async function getCommercialProductsAction(params?: {
         recomendado,
         badgePromo,
         descripcion: meta.texto || null,
+        universal: meta.universal || false,
         especificaciones: meta.especificaciones,
         motosCompatibles: meta.motosCompatibles,
         ordenOferta,
@@ -186,6 +224,7 @@ export async function upsertCommercialProductAction(
   userId: number,
   productoId: number,
   data: {
+    tituloComercial?: string | null;
     publicadoOnline?: boolean;
     enOferta?: boolean;
     precioOferta?: number | null;
@@ -193,6 +232,7 @@ export async function upsertCommercialProductAction(
     recomendado?: boolean;
     badgePromo?: string | null;
     descripcion?: string | null;
+    universal?: boolean;
     especificaciones?: ProductSpec[];
     motosCompatibles?: string[];
     ordenOferta?: number;
@@ -258,7 +298,9 @@ export async function upsertCommercialProductAction(
     // Determinar descripción y metadatos estructurados
     let finalDescripcion: string | null | undefined = undefined;
     if (
+      data.tituloComercial !== undefined ||
       data.descripcion !== undefined ||
+      data.universal !== undefined ||
       data.especificaciones !== undefined ||
       data.motosCompatibles !== undefined
     ) {
@@ -267,12 +309,20 @@ export async function upsertCommercialProductAction(
         select: { descripcion: true },
       });
       const currentMeta = parseProductMetadata(existingEcom?.descripcion);
+      const newTitulo =
+        data.tituloComercial !== undefined
+          ? (data.tituloComercial ? data.tituloComercial.trim() : null)
+          : currentMeta.tituloComercial;
       const newTexto = data.descripcion !== undefined ? (data.descripcion || "") : currentMeta.texto;
+      const newUniversal =
+        data.universal !== undefined ? Boolean(data.universal) : currentMeta.universal;
       const newSpecs = data.especificaciones !== undefined ? data.especificaciones : currentMeta.especificaciones;
       const newMotos = data.motosCompatibles !== undefined ? data.motosCompatibles : currentMeta.motosCompatibles;
 
       finalDescripcion = serializeProductMetadata({
+        tituloComercial: newTitulo,
         texto: newTexto,
+        universal: newUniversal,
         especificaciones: newSpecs,
         motosCompatibles: newMotos,
       });
@@ -328,6 +378,7 @@ export async function upsertCommercialProductAction(
     const result: CommercialProductItem = {
       id: currentProduct.id,
       nombre: currentProduct.nombre,
+      tituloComercial: metaResult.tituloComercial || null,
       codigo: currentProduct.codigo,
       marca: currentProduct.marca || currentProduct.marcaRelacionada?.nombre || "Genérico",
       categoriaId: currentProduct.categoriaId,
@@ -345,6 +396,7 @@ export async function upsertCommercialProductAction(
       recomendado: updatedEcom.recomendado,
       badgePromo: updatedEcom.badgePromo,
       descripcion: metaResult.texto || null,
+      universal: metaResult.universal || false,
       especificaciones: metaResult.especificaciones,
       motosCompatibles: metaResult.motosCompatibles,
       ordenOferta: updatedEcom.ordenOferta,

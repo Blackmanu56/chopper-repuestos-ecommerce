@@ -9,6 +9,8 @@ import { ProductSpec, parseProductMetadata } from "@/lib/productMetadata";
 export interface ProductItem {
   id: number;
   nombre: string;
+  nombreOriginal?: string;
+  tituloComercial?: string | null;
   marca: string;
   categoriaId: number;
   categoriaNombre: string;
@@ -20,6 +22,7 @@ export interface ProductItem {
   descuentoPorcentaje?: number;
   badgePromo?: string | null;
   descripcion?: string | null;
+  universal?: boolean;
   especificaciones?: ProductSpec[];
   motosCompatibles?: string[];
   destacado?: boolean;
@@ -174,10 +177,13 @@ export async function getProducts(params?: {
         }
 
         const meta = parseProductMetadata(ecom?.descripcion);
+        const nombreComercial = meta.tituloComercial?.trim() || p.nombre;
 
         return {
           id: p.id,
-          nombre: p.nombre,
+          nombre: nombreComercial,
+          nombreOriginal: p.nombre,
+          tituloComercial: meta.tituloComercial?.trim() || null,
           marca: p.marca || p.marcaRelacionada?.nombre || "Genérico",
           categoriaId: p.categoriaId,
           categoriaNombre: p.categoria.nombre,
@@ -188,6 +194,7 @@ export async function getProducts(params?: {
           descuentoPorcentaje,
           badgePromo,
           descripcion: meta.texto || null,
+          universal: Boolean(meta.universal),
           especificaciones: meta.especificaciones,
           motosCompatibles: meta.motosCompatibles,
           destacado: Boolean(ecom?.destacado),
@@ -245,10 +252,13 @@ export async function getProductById(id: number): Promise<ProductItem | null> {
       }
 
       const meta = parseProductMetadata(ecom?.descripcion);
+      const nombreComercial = meta.tituloComercial?.trim() || p.nombre;
 
       return {
         id: p.id,
-        nombre: p.nombre,
+        nombre: nombreComercial,
+        nombreOriginal: p.nombre,
+        tituloComercial: meta.tituloComercial?.trim() || null,
         marca: p.marca || p.marcaRelacionada?.nombre || "Genérico",
         categoriaId: p.categoriaId,
         categoriaNombre: p.categoria.nombre,
@@ -259,6 +269,7 @@ export async function getProductById(id: number): Promise<ProductItem | null> {
         descuentoPorcentaje,
         badgePromo,
         descripcion: meta.texto || null,
+        universal: Boolean(meta.universal),
         especificaciones: meta.especificaciones,
         motosCompatibles: meta.motosCompatibles,
         destacado: Boolean(ecom?.destacado),

@@ -9,11 +9,10 @@ import { ShoppingCart, MapPin, Lock, AlertCircle, Check } from "lucide-react";
 
 export default function ProductCard({ product }: { product: ProductItem }) {
   const { addToCart, isStaff, getItemCartQuantity, getRemainingStock } = useCart();
-  const { config, shouldShowAhorroBadge, calcularCuotas } = useConfig();
+  const { config, shouldShowAhorroBadge } = useConfig();
   const formatPrice = (n: number) => "$" + Number(n).toLocaleString("es-AR");
   const precioRegular = product.precioRegular ?? product.precio;
   const ahorro = product.enOferta ? Math.max(0, precioRegular - product.precio) : 0;
-  const financiacion = calcularCuotas(product.precio);
 
   const inCartQty = getItemCartQuantity(product.id, false);
   const remainingStock = getRemainingStock(product);
@@ -110,13 +109,6 @@ export default function ProductCard({ product }: { product: ProductItem }) {
           <div className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
             Efectivo / Transferencia
           </div>
-          {financiacion.habilitadas && (
-            <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mt-1">
-              {financiacion.sinInteres
-                ? `${financiacion.cuotas} cuotas sin interés de ${formatPrice(financiacion.valorCuota)}`
-                : `${financiacion.cuotas} cuotas fijas de ${formatPrice(financiacion.valorCuota)}`}
-            </div>
-          )}
         </div>
 
         {/* Tag de Retiro en Local y Disponibilidad de Stock */}
