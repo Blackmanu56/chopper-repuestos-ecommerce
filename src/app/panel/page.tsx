@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import { useTheme } from "@/context/ThemeContext";
 import {
   Package,
   Flame,
@@ -106,6 +107,7 @@ import {
   ComboDTO,
   ProductSpec,
 } from "@/actions/combos";
+import { getDefaultProductDescription } from "@/lib/productMetadata";
 import {
   getConfiguracionAction,
   updateConfiguracionAction,
@@ -122,6 +124,12 @@ import {
   editarBannerHomeAction,
   toggleBannerHomeAction,
   eliminarBannerHomeAction,
+  getCatalogoMotosAction,
+  agregarMotoCatalogoAction,
+  verificarImpactoEditarMotoAction,
+  editarMotoCatalogoAction,
+  getCatalogoSpecsSugeridasAction,
+  agregarSpecSugeridaAction,
   BannerHome,
   TiendaConfig,
   EtiquetaOferta,
@@ -237,6 +245,7 @@ export default function PanelPage() {
   const searchParams = useSearchParams();
   const tabParam = (searchParams.get("tab") as ViewType) || "pedidos";
   const { user, isStaff, isHydrating, openLogin, loginClient } = useAuth();
+  const { theme: currentAppTheme } = useTheme();
   const { updateConfig: updateContextConfig } = useConfig();
   const router = useRouter();
 
@@ -256,8 +265,14 @@ export default function PanelPage() {
   );
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Datos principales
+  // Datos principales y estados de carga granular
   const [loading, setLoading] = useState(true);
+  const [loadingProducts, setLoadingProducts] = useState(false);
+  const [loadingCombos, setLoadingCombos] = useState(false);
+  const [loadingAudit, setLoadingAudit] = useState(false);
+  const loadedModules = useRef<Set<string>>(new Set());
+  const initialLoadDone = useRef(false);
+  const prevUserIdRef = useRef<number | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; msg: string } | null>(null);
 
@@ -291,6 +306,39 @@ export default function PanelPage() {
   const [productPublicado, setProductPublicado] = useState(true);
   const [productDestacado, setProductDestacado] = useState(false);
   const [productRecomendado, setProductRecomendado] = useState(false);
+  const [productTituloComercial, setProductTituloComercial] = useState("");
+  const [productDescripcion, setProductDescripcion] = useState("");
+  const [productUniversal, setProductUniversal] = useState(false);
+  const [productSpecs, setProductSpecs] = useState<ProductSpec[]>([]);
+  const [productMotos, setProductMotos] = useState<string[]>([]);
+  const [newProdSpecKey, setNewProdSpecKey] = useState("");
+  const [newProdSpecVal, setNewProdSpecVal] = useState("");
+  const [editingSpecIdx, setEditingSpecIdx] = useState<number | null>(null);
+  const [editSpecKey, setEditSpecKey] = useState("");
+  const [editSpecVal, setEditSpecVal] = useState("");
+  const [prodInfoTab, setProdInfoTab] = useState<"descripcion" | "specs" | "motos">("descripcion");
+  const [showProductPreview, setShowProductPreview] = useState(false);
+  // Catálogos compartidos de compatibilidades y sugerencias
+  const [catalogoMotos, setCatalogoMotos] = useState<string[]>([]);
+  const [specsSugeridas, setSpecsSugeridas] = useState<string[]>([]);
+  const [busquedaMoto, setBusquedaMoto] = useState("");
+  const [mostrarDropdownMotos, setMostrarDropdownMotos] = useState(false);
+  const [showNuevaMotoForm, setShowNuevaMotoForm] = useState(false);
+  const [nuevaMotoMarca, setNuevaMotoMarca] = useState("Honda");
+  const [nuevaMotoMarcaCustom, setNuevaMotoMarcaCustom] = useState("");
+  const [nuevaMotoModelo, setNuevaMotoModelo] = useState("");
+  const [nuevaMotoCilindrada, setNuevaMotoCilindrada] = useState("");
+  const [guardandoNuevaMoto, setGuardandoNuevaMoto] = useState(false);
+  const [showEditMotoModal, setShowEditMotoModal] = useState(false);
+  const [motoToEditOriginal, setMotoToEditOriginal] = useState("");
+  const [motoToEditNewName, setMotoToEditNewName] = useState("");
+  const [actualizarMotosExistentes, setActualizarMotosExistentes] = useState(true);
+  const [verificandoImpactoMoto, setVerificandoImpactoMoto] = useState(false);
+  const [guardandoEditMoto, setGuardandoEditMoto] = useState(false);
+  const [impactoMotoInfo, setImpactoMotoInfo] = useState<{
+    count: number;
+    productos: Array<{ id: number; nombre: string; tipo: "PRODUCTO" | "COMBO" }>;
+  } | null>(null);
   const [nuevaCatNombre, setNuevaCatNombre] = useState("");
   const [showNuevaCatModal, setShowNuevaCatModal] = useState(false);
 
@@ -384,6 +432,7 @@ export default function PanelPage() {
   const [bannerBadge, setBannerBadge] = useState("CHOPPER REPUESTOS · POSADAS, MISIONES");
   const [bannerImagenUrl, setBannerImagenUrl] = useState("");
   const [bannerActivo, setBannerActivo] = useState(true);
+  const [bannerPreviewTheme, setBannerPreviewTheme] = useState<"auto" | "light" | "dark">("auto");
   const [bannerOrden, setBannerOrden] = useState(1);
   const [uploadingBannerImage, setUploadingBannerImage] = useState(false);
 
@@ -441,64 +490,211 @@ export default function PanelPage() {
     }
   }, [activeView]);
 
-  // Carga inicial de datos
-  const loadAllData = async () => {
-    setLoading(true);
-    try {
-      const [
-        resPedidos,
-        resProducts,
-        resCats,
-        resMarcas,
-        resCombos,
-        resEtiquetas,
-        resConfig,
-        resAudit,
-        resStaff,
-        resBanners,
-      ] = await Promise.all([
-        user?.id ? getPedidosEcommerceAction(user.id) : { success: false, pedidos: [] },
-        getCommercialProductsAction(),
-        getCategoriasAdminAction(),
-        getMarcasAdminAction(),
-        user?.id ? getAllCombosAdminAction(user.id) : { success: false, combos: [] },
-        getEtiquetasOfertaAction(),
-        getConfiguracionAction(),
-        getAuditoriaLogsAction(),
-        user?.id ? getStaffPreparadoresAction(user.id) : { success: false, staff: [] },
-        getBannersHomeAction(),
-      ]);
+  // Carga modular y optimizada de datos
 
+  const loadPedidosData = async (silent = false) => {
+    if (!user?.id) return;
+    if (!silent) setLoading(true);
+    try {
+      const [resPedidos, resStaff] = await Promise.all([
+        getPedidosEcommerceAction(user.id),
+        getStaffPreparadoresAction(user.id),
+      ]);
       if (resPedidos.success && resPedidos.pedidos) setPedidos(resPedidos.pedidos);
-      if (resProducts.success) setProducts(resProducts.products);
-      if (resCats.success) setCategorias(resCats.categorias);
-      if (resMarcas.success) setMarcas(resMarcas.marcas);
-      if (resCombos.success && resCombos.combos) setCombos(resCombos.combos);
-      setEtiquetas(resEtiquetas);
-      setConfig(resConfig);
-      setAuditoriaLogs(resAudit);
-      if (resBanners) setBannersHome(resBanners);
-      if (resStaff.success && resStaff.staff) {
-        setStaffPreparadores(resStaff.staff);
+      if (resStaff.success && resStaff.staff) setStaffPreparadores(resStaff.staff);
+      loadedModules.current.add("pedidos");
+    } catch (err) {
+      console.error("Error al cargar pedidos:", err);
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  };
+
+  const loadProductsData = async (force = false) => {
+    if (!user?.id) return;
+    if (!force && loadedModules.current.has("products") && products.length > 0) return;
+    setLoadingProducts(true);
+    try {
+      const [resProducts, resCats, resEtiquetas] = await Promise.all([
+        getCommercialProductsAction({ userId: user.id }),
+        getCategoriasAdminAction(),
+        getEtiquetasOfertaAction(),
+      ]);
+      if (resProducts.success && resProducts.products) setProducts(resProducts.products);
+      if (resCats.success && resCats.categorias) setCategorias(resCats.categorias);
+      if (resEtiquetas) setEtiquetas(resEtiquetas);
+      loadedModules.current.add("products");
+    } catch (err) {
+      console.error("Error al cargar catálogo de productos:", err);
+    } finally {
+      setLoadingProducts(false);
+    }
+  };
+
+  const loadMarcasData = async (force = false) => {
+    if (!force && loadedModules.current.has("marcas") && marcas.length > 0) return;
+    try {
+      const res = await getMarcasAdminAction();
+      if (res.success && res.marcas) {
+        setMarcas(res.marcas);
+        loadedModules.current.add("marcas");
       }
     } catch (err) {
-      console.error("Error al cargar datos del panel:", err);
+      console.error("Error al cargar marcas:", err);
+    }
+  };
+
+  const loadCombosData = async (force = false) => {
+    if (!user?.id) return;
+    if (!force && loadedModules.current.has("combos") && combos.length > 0) return;
+    setLoadingCombos(true);
+    try {
+      const res = await getAllCombosAdminAction(user.id);
+      if (res.success && res.combos) {
+        setCombos(res.combos);
+        loadedModules.current.add("combos");
+      }
+    } catch (err) {
+      console.error("Error al cargar combos:", err);
     } finally {
+      setLoadingCombos(false);
+    }
+  };
+
+  const loadBannersData = async (force = false) => {
+    if (!force && loadedModules.current.has("banners") && bannersHome.length > 0) return;
+    try {
+      const res = await getBannersHomeAction();
+      if (res) {
+        setBannersHome(res);
+        loadedModules.current.add("banners");
+      }
+    } catch (err) {
+      console.error("Error al cargar banners:", err);
+    }
+  };
+
+  const loadAuditoriaData = async (force = false) => {
+    if (!force && loadedModules.current.has("auditoria") && auditoriaLogs.length > 0) return;
+    setLoadingAudit(true);
+    try {
+      const res = await getAuditoriaLogsAction();
+      if (res) {
+        setAuditoriaLogs(res);
+        loadedModules.current.add("auditoria");
+      }
+    } catch (err) {
+      console.error("Error al cargar auditoría:", err);
+    } finally {
+      setLoadingAudit(false);
+    }
+  };
+
+  const loadInitialData = async () => {
+    if (!user?.id) return;
+    setLoading(true);
+    try {
+      // 1. Configuración de tienda y marcas (esenciales y ultraligeras)
+      const [resConfig, resMarcas] = await Promise.all([
+        getConfiguracionAction(),
+        getMarcasAdminAction(),
+      ]);
+      setConfig(resConfig);
+      if (resMarcas.success && resMarcas.marcas) {
+        setMarcas(resMarcas.marcas);
+        loadedModules.current.add("marcas");
+      }
+
+      // 2. Carga prioritaria según la pestaña activa del usuario
+      if (activeView === "catalogo") {
+        await loadProductsData(true);
+        setLoading(false);
+        // Precargar pedidos en segundo plano para que al cambiar no haya espera
+        loadPedidosData(true);
+      } else if (activeView === "combos") {
+        await Promise.all([loadCombosData(true), loadProductsData()]);
+        setLoading(false);
+        loadPedidosData(true);
+      } else if (activeView === "auditoria") {
+        await loadAuditoriaData(true);
+        setLoading(false);
+        loadPedidosData(true);
+      } else if (activeView === "identidad") {
+        await loadBannersData(true);
+        setLoading(false);
+        loadPedidosData(true);
+      } else {
+        // Vista por defecto (pedidos, entrega, preparación)
+        await loadPedidosData(false);
+        setLoading(false);
+        // Precargar catálogo en segundo plano
+        loadProductsData();
+      }
+    } catch (err) {
+      console.error("Error al iniciar panel:", err);
       setLoading(false);
     }
   };
 
+  // Recarga manual completa si el usuario la solicita explícitamente
+  const loadAllData = async (force = true) => {
+    if (force) {
+      loadedModules.current.clear();
+    }
+    await loadInitialData();
+  };
+
+  // Reiniciar estado de módulos si cambia el usuario autenticado
   useEffect(() => {
-    loadAllData();
+    if (user?.id !== prevUserIdRef.current) {
+      prevUserIdRef.current = user?.id;
+      initialLoadDone.current = false;
+      loadedModules.current.clear();
+    }
   }, [user?.id]);
 
+  // Carga inicial protegida contra doble ejecución durante la hidratación de auth
   useEffect(() => {
-    if (activeView === "marcas") {
-      getMarcasAdminAction().then((res) => {
-        if (res.success && res.marcas) setMarcas(res.marcas);
-      });
+    if (isHydrating || !user?.id) return;
+    if (!initialLoadDone.current) {
+      initialLoadDone.current = true;
+      loadInitialData();
     }
-  }, [activeView]);
+  }, [isHydrating, user?.id]);
+
+  // Carga bajo demanda al navegar entre pestañas (con caché en memoria instantánea)
+  useEffect(() => {
+    if (isHydrating || !user?.id || !initialLoadDone.current) return;
+
+    if (activeView === "catalogo") {
+      if (!loadedModules.current.has("products")) {
+        loadProductsData();
+      }
+    } else if (activeView === "combos") {
+      if (!loadedModules.current.has("combos")) {
+        loadCombosData();
+      }
+      if (!loadedModules.current.has("products")) {
+        loadProductsData();
+      }
+    } else if (activeView === "marcas") {
+      if (!loadedModules.current.has("marcas")) {
+        loadMarcasData();
+      }
+    } else if (activeView === "auditoria") {
+      if (!loadedModules.current.has("auditoria")) {
+        loadAuditoriaData();
+      }
+    } else if (activeView === "identidad") {
+      if (!loadedModules.current.has("banners")) {
+        loadBannersData();
+      }
+    } else if (activeView === "pedidos" || activeView === "entrega" || activeView === "preparacion") {
+      if (!loadedModules.current.has("pedidos")) {
+        loadPedidosData(true);
+      }
+    }
+  }, [activeView, isHydrating, user?.id]);
 
   useEffect(() => {
     if (user?.rol) {
@@ -552,7 +748,7 @@ export default function PanelPage() {
           "Pedidos Online",
           notas || `Estado actualizado con éxito`
         );
-        loadAllData();
+        loadPedidosData(true);
         if (selectedPedido && selectedPedido.id === pedidoId && res.pedido) {
           setSelectedPedido(res.pedido);
         }
@@ -580,7 +776,7 @@ export default function PanelPage() {
           "Pedidos Online",
           `Comprobante verificado y cargado`
         );
-        loadAllData();
+        loadPedidosData(true);
         if (selectedPedido && selectedPedido.numero === pedidoNumero) {
           setSelectedPedido((prev) => (prev ? { ...prev, comprobanteUrl: res.comprobanteUrl! } : null));
         }
@@ -747,6 +943,233 @@ export default function PanelPage() {
     setProductPublicado(p.publicadoOnline);
     setProductDestacado(p.destacado);
     setProductRecomendado(p.recomendado);
+    setProductTituloComercial(p.tituloComercial || "");
+    const descRecuperada = p.descripcion || getDefaultProductDescription(p.nombre, p.marca);
+    setProductDescripcion(descRecuperada);
+    setProductUniversal(Boolean(p.universal));
+    setProductSpecs(p.especificaciones ? [...p.especificaciones] : []);
+    setProductMotos(p.motosCompatibles ? [...p.motosCompatibles] : []);
+    setProdInfoTab("descripcion");
+    setNewProdSpecKey("");
+    setNewProdSpecVal("");
+    setEditingSpecIdx(null);
+    setEditSpecKey("");
+    setEditSpecVal("");
+    setBusquedaMoto("");
+    setMostrarDropdownMotos(false);
+    setShowNuevaMotoForm(false);
+    setNuevaMotoMarca("Honda");
+    setNuevaMotoMarcaCustom("");
+    setNuevaMotoModelo("");
+    setNuevaMotoCilindrada("");
+    setShowProductPreview(false);
+
+    if (catalogoMotos.length === 0) {
+      getCatalogoMotosAction().then((motos) => {
+        if (motos && motos.length > 0) setCatalogoMotos(motos);
+      });
+    }
+    if (specsSugeridas.length === 0) {
+      getCatalogoSpecsSugeridasAction().then((specs) => {
+        if (specs && specs.length > 0) setSpecsSugeridas(specs);
+      });
+    }
+  };
+
+  const handleMoverImagenProducto = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex > 3 || toIndex > 3) return;
+    setProductImages((prev) => {
+      const list = [...prev];
+      while (list.length <= Math.max(fromIndex, toIndex)) {
+        list.push("");
+      }
+      const temp = list[fromIndex];
+      list[fromIndex] = list[toIndex];
+      list[toIndex] = temp;
+      return list;
+    });
+  };
+
+  const handleHacerPortadaProducto = (index: number) => {
+    if (index === 0) return;
+    setProductImages((prev) => {
+      const list = [...prev];
+      if (!list[index]) return prev;
+      const [selected] = list.splice(index, 1);
+      list.unshift(selected);
+      return list;
+    });
+  };
+
+  const handleAddProductSpec = () => {
+    const key = newProdSpecKey.trim();
+    const val = newProdSpecVal.trim();
+    if (!key || !val) return;
+    setProductSpecs((prev) => [
+      ...prev,
+      { caracteristica: key, valor: val },
+    ]);
+    setNewProdSpecKey("");
+    setNewProdSpecVal("");
+
+    if (user?.id && !specsSugeridas.some((s) => s.toLowerCase() === key.toLowerCase())) {
+      agregarSpecSugeridaAction(user.id, key).then((res) => {
+        if (res.success && res.specs) setSpecsSugeridas(res.specs);
+      });
+    }
+  };
+
+  const handleStartEditSpec = (index: number) => {
+    setEditingSpecIdx(index);
+    setEditSpecKey(productSpecs[index].caracteristica);
+    setEditSpecVal(productSpecs[index].valor);
+  };
+
+  const handleSaveEditSpec = () => {
+    if (editingSpecIdx === null) return;
+    const key = editSpecKey.trim();
+    const val = editSpecVal.trim();
+    if (!key || !val) return;
+    setProductSpecs((prev) => {
+      const list = [...prev];
+      list[editingSpecIdx] = { caracteristica: key, valor: val };
+      return list;
+    });
+    setEditingSpecIdx(null);
+    setEditSpecKey("");
+    setEditSpecVal("");
+  };
+
+  const handleCancelEditSpec = () => {
+    setEditingSpecIdx(null);
+    setEditSpecKey("");
+    setEditSpecVal("");
+  };
+
+  const handleRemoveProductSpec = (index: number) => {
+    setProductSpecs((prev) => prev.filter((_, i) => i !== index));
+    if (editingSpecIdx === index) {
+      setEditingSpecIdx(null);
+    }
+  };
+
+  const handleSelectMoto = (moto: string) => {
+    const clean = moto.trim();
+    if (!clean) return;
+    if (!productMotos.includes(clean)) {
+      setProductMotos((prev) => [...prev, clean]);
+    }
+    setBusquedaMoto("");
+    setMostrarDropdownMotos(false);
+  };
+
+  const handleRemoveProductMoto = (index: number) => {
+    setProductMotos((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleCrearNuevaMoto = async () => {
+    const marcaFinal = nuevaMotoMarca === "Otra" ? nuevaMotoMarcaCustom.trim() : nuevaMotoMarca.trim();
+    const mod = nuevaMotoModelo.trim();
+    const cc = nuevaMotoCilindrada.trim();
+    if (!marcaFinal || !mod) {
+      showFeedback("error", "Completá la marca y el modelo de la moto.");
+      return;
+    }
+
+    let nombreCompleto = `${marcaFinal} ${mod}`;
+    if (cc) {
+      const ccClean = cc.toLowerCase().endsWith("cc") ? cc : `${cc}cc`;
+      if (!mod.toLowerCase().includes(cc.toLowerCase())) {
+        nombreCompleto += ` ${ccClean}`;
+      }
+    }
+    nombreCompleto = nombreCompleto.trim().replace(/\s+/g, " ");
+
+    setGuardandoNuevaMoto(true);
+    try {
+      if (user?.id) {
+        const res = await agregarMotoCatalogoAction(user.id, nombreCompleto);
+        if (res.success && res.motos) {
+          setCatalogoMotos(res.motos);
+        }
+      }
+      if (!productMotos.includes(nombreCompleto)) {
+        setProductMotos((prev) => [...prev, nombreCompleto]);
+      }
+      showFeedback("success", `Moto "${nombreCompleto}" agregada al catálogo.`);
+      setNuevaMotoModelo("");
+      setNuevaMotoCilindrada("");
+      setNuevaMotoMarcaCustom("");
+      setShowNuevaMotoForm(false);
+      setBusquedaMoto("");
+    } catch {
+      showFeedback("error", "No se pudo guardar la moto en el catálogo.");
+    } finally {
+      setGuardandoNuevaMoto(false);
+    }
+  };
+
+  const handleOpenEditMotoModal = async (moto: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    setMotoToEditOriginal(moto);
+    setMotoToEditNewName(moto);
+    setActualizarMotosExistentes(true);
+    setImpactoMotoInfo(null);
+    setShowEditMotoModal(true);
+    setVerificandoImpactoMoto(true);
+    try {
+      const res = await verificarImpactoEditarMotoAction(moto);
+      setImpactoMotoInfo(res);
+    } catch (err) {
+      console.error("Error al verificar impacto de moto:", err);
+      setImpactoMotoInfo({ count: 0, productos: [] });
+    } finally {
+      setVerificandoImpactoMoto(false);
+    }
+  };
+
+  const handleConfirmEditMoto = async () => {
+    if (!user?.id || !motoToEditOriginal.trim() || !motoToEditNewName.trim()) return;
+    const cleanOld = motoToEditOriginal.trim();
+    const cleanNew = motoToEditNewName.trim();
+    if (cleanOld.toLowerCase() === cleanNew.toLowerCase()) {
+      setShowEditMotoModal(false);
+      return;
+    }
+    setGuardandoEditMoto(true);
+    try {
+      const res = await editarMotoCatalogoAction(
+        user.id,
+        cleanOld,
+        cleanNew,
+        actualizarMotosExistentes
+      );
+      if (res.success && res.motos) {
+        setCatalogoMotos(res.motos);
+        // Si el producto actual tiene la moto asociada, actualizar su nombre en el estado local
+        setProductMotos((prev) =>
+          prev.map((m) => (m.toLowerCase() === cleanOld.toLowerCase() ? cleanNew : m))
+        );
+        showFeedback(
+          "success",
+          `Modelo "${cleanOld}" actualizado a "${cleanNew}" en el catálogo.${
+            res.actualizadosCount
+              ? ` Se actualizaron ${res.actualizadosCount} publicaciones afectadas.`
+              : ""
+          }`
+        );
+        setShowEditMotoModal(false);
+      } else {
+        showFeedback("error", res.error || "No se pudo actualizar el modelo.");
+      }
+    } catch {
+      showFeedback("error", "Error al actualizar la moto en el catálogo.");
+    } finally {
+      setGuardandoEditMoto(false);
+    }
   };
 
   const handleSaveProduct = async () => {
@@ -760,6 +1183,7 @@ export default function PanelPage() {
       }
 
       const res = await upsertCommercialProductAction(user.id, editingProduct.id, {
+        tituloComercial: productTituloComercial.trim() || null,
         publicadoOnline: productPublicado,
         enOferta: productEnOferta,
         precioOferta,
@@ -768,18 +1192,25 @@ export default function PanelPage() {
         recomendado: productRecomendado,
         imagenes: productImages.filter(Boolean),
         precioVenta: productNormalPrice,
+        descripcion: productDescripcion.trim() || null,
+        universal: productUniversal,
+        especificaciones: productSpecs,
+        motosCompatibles: productMotos,
       });
 
       if (res.success) {
-        showFeedback("success", `Producto "${editingProduct.nombre}" guardado con éxito.`);
+        showFeedback(
+          "success",
+          `Producto "${productTituloComercial.trim() || editingProduct.nombre}" guardado con éxito.`
+        );
         await registrarAuditoriaAction(
           user.nombreCompleto || "Administrador",
           `Editó configuración comercial de "${editingProduct.nombre}"`,
           "Catálogo y Ofertas",
-          `Precio: $${productNormalPrice} · Oferta: ${productEnOferta ? `${productDescuentoPct}% OFF ($${precioOferta})` : "No"}`
+          `Título comercial: ${productTituloComercial.trim() || editingProduct.nombre} · Precio: $${productNormalPrice} · Oferta: ${productEnOferta ? `${productDescuentoPct}% OFF ($${precioOferta})` : "No"}`
         );
         setEditingProduct(null);
-        loadAllData();
+        loadProductsData(true);
       } else {
         showFeedback("error", res.error || "No se pudo actualizar el producto.");
       }
@@ -799,7 +1230,7 @@ export default function PanelPage() {
         showFeedback("success", `Categoría "${nuevaCatNombre}" creada.`);
         setNuevaCatNombre("");
         setShowNuevaCatModal(false);
-        loadAllData();
+        loadProductsData(true);
       } else {
         showFeedback("error", res.error || "No se pudo crear la categoría.");
       }
@@ -899,7 +1330,7 @@ export default function PanelPage() {
         );
         setShowBulkOfferModal(false);
         setSelectedProductIds([]);
-        loadAllData();
+        loadProductsData(true);
       } else {
         showFeedback("error", res.error || "No se pudo aplicar la oferta en lote.");
       }
@@ -925,7 +1356,7 @@ export default function PanelPage() {
           `Productos: [${selectedProductIds.join(", ")}]`
         );
         setSelectedProductIds([]);
-        loadAllData();
+        loadProductsData(true);
       } else {
         showFeedback("error", res.error || "No se pudo quitar la oferta en lote.");
       }
@@ -1053,7 +1484,7 @@ export default function PanelPage() {
         setNuevaMarcaNombre("");
         setNuevaMarcaLogo(null);
         setShowCrearMarcaModal(false);
-        loadAllData();
+        loadMarcasData(true);
       } else {
         showFeedback("error", res.error || "No se pudo agregar la marca.");
       }
@@ -1108,7 +1539,7 @@ export default function PanelPage() {
       if (res.success) {
         showFeedback("success", `Marca "${editingMarcaNombre}" actualizada.`);
         setEditingMarca(null);
-        loadAllData();
+        loadMarcasData(true);
       } else {
         showFeedback("error", res.error || "No se pudo actualizar la marca.");
       }
@@ -1305,7 +1736,7 @@ export default function PanelPage() {
           `Precio: $${comboPrecio} · Regular: $${comboPrecioRegularCalculado} (${comboDescuentoPct}% OFF)`
         );
         setShowComboModal(false);
-        loadAllData();
+        loadCombosData(true);
       } else {
         showFeedback("error", res.error || "No se pudo guardar el combo.");
       }
@@ -1685,7 +2116,7 @@ export default function PanelPage() {
           "Entregas",
           `DNI presentado: ${dniIngresado}`
         );
-        loadAllData();
+        loadPedidosData(true);
       } else {
         setCobroError(res.error || "No se pudo registrar el cobro en mostrador.");
       }
@@ -1763,7 +2194,7 @@ export default function PanelPage() {
           notasEntrega
         );
         setSelectedEntregaPedido(null);
-        loadAllData();
+        loadPedidosData(true);
       } else {
         setCobroError(res.error || "No se pudo confirmar la entrega.");
       }
@@ -2496,9 +2927,9 @@ export default function PanelPage() {
                 </div>
               </div>
               <button
-                onClick={loadAllData}
+                onClick={() => loadPedidosData(false)}
                 disabled={loading}
-                className="self-start sm:self-auto px-3 py-1.5 text-xs bg-[#16171c] border border-[#35363d] rounded-lg text-[#9a9ba3] hover:text-white flex items-center gap-1.5 transition-colors"
+                className="self-start sm:self-auto px-3 py-1.5 text-xs bg-[#16171c] border border-[#35363d] rounded-lg text-[#9a9ba3] hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
                 Actualizar
@@ -2928,12 +3359,24 @@ export default function PanelPage() {
                   Buscá cualquier producto, ajustá precios, gestioná ofertas y cargá hasta 4 fotos.
                 </p>
               </div>
-              <button
-                onClick={() => setShowNuevaCatModal(true)}
-                className="self-start sm:self-auto px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-lg shadow-red-600/20"
-              >
-                <Plus className="w-4 h-4" /> Nueva Categoría
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => loadProductsData(true)}
+                  disabled={loadingProducts}
+                  className="px-3.5 py-2 bg-[#16171c] hover:bg-[#26272e] border border-[#35363d] text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors shadow cursor-pointer disabled:opacity-50"
+                  title="Recargar catálogo de productos"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingProducts ? "animate-spin text-red-500" : ""}`} />
+                  <span className="hidden sm:inline">Actualizar</span>
+                </button>
+                <button
+                  onClick={() => setShowNuevaCatModal(true)}
+                  className="self-start sm:self-auto px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-lg shadow-red-600/20"
+                >
+                  <Plus className="w-4 h-4" /> Nueva Categoría
+                </button>
+              </div>
             </div>
 
             {/* Barra de Búsqueda y Filtros de Categoría */}
@@ -3031,6 +3474,18 @@ export default function PanelPage() {
             </div>
 
             {/* Listado de Productos con Selección y Botón de Edición */}
+            {loadingProducts && products.length === 0 ? (
+              <div className="flex flex-col items-center justify-center p-12 bg-[#1a1b20] border border-[#26272e] rounded-xl text-center space-y-3">
+                <RefreshCw className="w-8 h-8 text-red-500 animate-spin" />
+                <p className="text-sm font-semibold text-white">Cargando catálogo de productos...</p>
+                <p className="text-xs text-[#9a9ba3]">Obteniendo repuestos, marcas y compatibilidades</p>
+              </div>
+            ) : productosFiltrados.length === 0 ? (
+              <div className="text-center py-12 bg-[#1a1b20] border border-[#26272e] rounded-xl text-[#9a9ba3]">
+                <Package className="w-8 h-8 mx-auto mb-2 opacity-40 text-white" />
+                <p className="text-sm">No se encontraron productos con los filtros seleccionados.</p>
+              </div>
+            ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {productosFiltrados.map((p) => {
                 const imgs = parseImages(p.imagen);
@@ -3071,9 +3526,17 @@ export default function PanelPage() {
                           </span>
                           <span className="text-[10px] text-[#6b6c75] truncate">{p.categoriaNombre}</span>
                         </div>
-                        <h3 className="text-xs sm:text-sm font-semibold text-white truncate" title={p.nombre}>
-                          {p.nombre}
+                        <h3
+                          className="text-xs sm:text-sm font-semibold text-white truncate"
+                          title={p.tituloComercial ? `${p.tituloComercial} (SGI: ${p.nombre})` : p.nombre}
+                        >
+                          {p.tituloComercial || p.nombre}
                         </h3>
+                        {p.tituloComercial && p.tituloComercial !== p.nombre && (
+                          <span className="text-[10px] text-[#6b6c75] truncate block" title={`SGI: ${p.nombre}`}>
+                            SGI: {p.nombre}
+                          </span>
+                        )}
                         <div className="flex items-center gap-2 mt-1">
                           <span className="text-xs text-[#9a9ba3]">Stock: <b className="text-white">{p.cantidad}</b></span>
                           <span className="text-xs font-bold text-white">{formatPrice(p.precioVenta)}</span>
@@ -3105,6 +3568,7 @@ export default function PanelPage() {
                 );
               })}
             </div>
+            )}
 
             {/* MODAL OFERTA EN LOTE */}
             {showBulkOfferModal && (
@@ -3189,230 +3653,1251 @@ export default function PanelPage() {
               </div>
             )}
 
-            {/* MODAL / EDITOR DE PRODUCTO CALCADO AL PROTOTIPO */}
+            {/* MODAL / EDITOR DE PRODUCTO MODERNIZADO CON VISTA PREVIA Y DOS COLUMNAS */}
             {editingProduct && (
-              <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-                <div className="bg-[#16171c] border border-[#26272e] rounded-xl max-w-2xl w-full p-6 shadow-2xl space-y-5 my-8">
-                  <div className="flex items-start justify-between border-b border-[#26272e] pb-3">
-                    <div>
-                      <h2 className="text-xl font-bold text-white">Editar producto</h2>
-                      <p className="text-xs text-[#9a9ba3] mt-0.5">{editingProduct.nombre}</p>
-                    </div>
-                    <button
-                      onClick={() => setEditingProduct(null)}
-                      className="p-1 rounded-md text-[#9a9ba3] hover:text-white hover:bg-[#26272e]"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-
-                  {/* Card 1: Datos Base */}
-                  <div className="bg-[#1a1b20] border border-[#26272e] rounded-xl p-4 space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <label className="flex flex-col gap-1.5 text-xs text-[#b8b9c0]">
-                        Precio normal ($)
-                        <input
-                          type="number"
-                          value={productNormalPrice}
-                          onChange={(e) => setProductNormalPrice(Math.max(0, Number(e.target.value)))}
-                          className="bg-[#0f1012] border border-[#35363d] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-red-600 font-bold"
-                        />
-                      </label>
-
-                      <label className="flex flex-col gap-1.5 text-xs text-[#b8b9c0]">
-                        Stock físico (SGI)
-                        <input
-                          type="text"
-                          disabled
-                          value={`${editingProduct.cantidad} unidades`}
-                          className="bg-[#0f1012]/60 border border-[#26272e] rounded-lg px-3 py-2 text-sm text-[#6b6c75] cursor-not-allowed font-semibold"
-                        />
-                      </label>
-
-                      <label className="flex flex-col gap-1.5 text-xs text-[#b8b9c0]">
-                        Marca
-                        <input
-                          type="text"
-                          disabled
-                          value={editingProduct.marca}
-                          className="bg-[#0f1012]/60 border border-[#26272e] rounded-lg px-3 py-2 text-sm text-[#6b6c75] cursor-not-allowed font-semibold"
-                        />
-                      </label>
-                    </div>
-
-                    {/* Gestión de hasta 4 fotos */}
-                    <div className="pt-2 border-t border-[#26272e]">
-                      <div className="text-xs font-semibold text-[#b8b9c0] mb-2 flex items-center justify-between">
-                        <span>Fotos del producto (hasta 4):</span>
-                        <span className="text-[11px] text-[#6b6c75]">JPG, PNG, WEBP o URL</span>
+              <div
+                className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 md:p-6 animate-in fade-in duration-200 overflow-hidden"
+                onClick={(e) => {
+                  if (e.target === e.currentTarget) {
+                    setEditingProduct(null);
+                  }
+                }}
+              >
+                <div
+                  className="bg-white dark:bg-[#16171c] border border-slate-200 dark:border-[#26272e] rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col max-h-[92vh] sm:max-h-[88vh] overflow-hidden my-auto"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Cabecera Fija */}
+                  <div className="flex items-center justify-between px-5 sm:px-6 py-3.5 border-b border-slate-200 dark:border-[#26272e] bg-slate-50/70 dark:bg-[#16171c] shrink-0">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="p-2 rounded-xl bg-red-500/10 text-red-600 dark:text-red-500 border border-red-500/20 shrink-0">
+                        <Package className="w-5 h-5" />
                       </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                        {[0, 1, 2, 3].map((idx) => {
-                          const img = productImages[idx] || "";
-                          return (
-                            <div
-                              key={idx}
-                              className="relative bg-[#141519] border border-[#26272e] rounded-lg p-2 flex flex-col items-center justify-center gap-1.5 h-28 overflow-hidden group"
-                            >
-                              {img ? (
-                                <>
-                                  <img src={img} alt={`Foto ${idx + 1}`} className="w-full h-full object-cover rounded" />
-                                  <button
-                                    onClick={() => {
-                                      const updated = [...productImages];
-                                      updated.splice(idx, 1);
-                                      setProductImages(updated);
-                                    }}
-                                    className="absolute top-1 right-1 p-1 bg-black/70 hover:bg-red-600 rounded text-white"
-                                    title="Quitar foto"
-                                  >
-                                    <X className="w-3 h-3" />
-                                  </button>
-                                </>
-                              ) : (
-                                <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer text-[#6b6c75] hover:text-white transition-colors">
-                                  <Upload className="w-4 h-4 mb-1" />
-                                  <span className="text-[10px]">Subir foto {idx + 1}</span>
-                                  <input
-                                    type="file"
-                                    accept="image/*"
-                                    className="hidden"
-                                    onChange={(e) => {
-                                      const file = e.target.files?.[0];
-                                      if (file) handleUploadImageSlot(idx, file, "producto");
-                                    }}
-                                  />
-                                </label>
-                              )}
-                            </div>
-                          );
-                        })}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white truncate">
+                            Editar producto
+                          </h2>
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              productPublicado
+                                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
+                                : "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400 border-zinc-500/30"
+                            }`}
+                          >
+                            {productPublicado ? "Publicado online" : "Pausado"}
+                          </span>
+                          {productEnOferta && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30">
+                              🔥 {productDescuentoPct}% OFF
+                            </span>
+                          )}
+                          {productDestacado && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30">
+                              ⭐ Destacado
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-500 dark:text-[#9a9ba3] mt-0.5 truncate" title={editingProduct.nombre}>
+                          {productTituloComercial.trim() || editingProduct.nombre}
+                        </p>
                       </div>
                     </div>
-                  </div>
 
-                  {/* Card 2: Poner en Oferta (Estilo prototipo) */}
-                  <div className="bg-[#1a1b20] border-2 border-red-600/80 rounded-xl p-4 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Flame className="w-5 h-5 text-red-500 fill-red-500" />
-                        <b className="text-white text-sm">Poner en oferta</b>
-                      </div>
+                    <div className="flex items-center gap-2 shrink-0">
                       <button
                         type="button"
-                        onClick={() => setProductEnOferta(!productEnOferta)}
-                        className={`w-11 h-6 rounded-full transition-colors relative ${
-                          productEnOferta ? "bg-red-600" : "bg-[#26272e]"
+                        onClick={() => setShowProductPreview(!showProductPreview)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 border transition-colors cursor-pointer ${
+                          showProductPreview
+                            ? "bg-red-600 text-white border-red-600 shadow-sm"
+                            : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300 dark:bg-[#26272e] dark:hover:bg-[#35363d] dark:text-[#b8b9c0] dark:border-[#35363d]"
                         }`}
+                        title="Simular visualización en la tienda"
                       >
-                        <div
-                          className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-transform ${
-                            productEnOferta ? "right-1" : "left-1"
-                          }`}
-                        />
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>{showProductPreview ? "Volver al editor" : "Vista previa"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setEditingProduct(null)}
+                        className="text-slate-400 hover:text-slate-700 dark:text-[#9a9ba3] dark:hover:text-white p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-[#26272e] transition-colors cursor-pointer"
+                        title="Cerrar ventana"
+                      >
+                        <X className="w-5 h-5" />
                       </button>
                     </div>
+                  </div>
 
-                    {productEnOferta && (
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-                        <label className="flex flex-col gap-1.5 text-xs text-[#b8b9c0]">
-                          % Descuento
-                          <input
-                            type="number"
-                            min="1"
-                            max="90"
-                            value={productDescuentoPct}
-                            onChange={(e) => setProductDescuentoPct(Math.max(1, Math.min(90, Number(e.target.value))))}
-                            className="bg-[#0f1012] border border-[#35363d] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-red-600 font-bold"
-                          />
-                        </label>
-
-                        <div className="flex flex-col gap-1.5 text-xs text-[#b8b9c0]">
-                          Precio con oferta
-                          <div className="text-emerald-400 font-bold text-base pt-1.5">
-                            {formatPrice(Math.round(productNormalPrice * (1 - productDescuentoPct / 100)))}
-                          </div>
-                          <span className="text-[10px] text-[#6b6c75]">
-                            Ahorro: {formatPrice(Math.round((productNormalPrice * productDescuentoPct) / 100))}
+                  {/* Cuerpo Desplazable */}
+                  <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+                    {showProductPreview ? (
+                      /* ════════════════════════════════════════════════════════════ */
+                      /* VISTA PREVIA COMERCIAL (SIMULACIÓN ANTES DE GUARDAR) */
+                      /* ════════════════════════════════════════════════════════════ */
+                      <div className="space-y-6 max-w-4xl mx-auto">
+                        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center justify-between text-xs text-red-600 dark:text-red-400">
+                          <span className="flex items-center gap-2">
+                            <Eye className="w-4 h-4" />
+                            <strong>Modo vista previa:</strong> Así verán los clientes este repuesto en la tienda online.
                           </span>
+                          <button
+                            type="button"
+                            onClick={() => setShowProductPreview(false)}
+                            className="font-bold underline hover:text-red-700 dark:hover:text-red-300 cursor-pointer"
+                          >
+                            Volver a editar
+                          </button>
                         </div>
 
-                        <label className="flex flex-col gap-1.5 text-xs text-[#b8b9c0]">
-                          Etiqueta
-                          <select
-                            value={productBadge}
-                            onChange={(e) => setProductBadge(e.target.value)}
-                            className="bg-[#0f1012] border border-[#35363d] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-red-600"
-                          >
-                            {etiquetas
-                              .filter((e) => e.activa)
-                              .map((et) => (
-                                <option key={et.id} value={et.nombre}>
-                                  {formatBadgeWithEmoji(et.nombre, et.emoji)}
-                                </option>
-                              ))}
-                          </select>
-                        </label>
+                        {/* Ficha Comercial Simulada */}
+                        <div className="bg-slate-50 dark:bg-[#141519] border border-slate-200 dark:border-[#26272e] rounded-2xl p-5 sm:p-6 shadow-sm">
+                          <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+                            {/* Galería izquierda de vista previa */}
+                            <div className="md:col-span-5 space-y-3">
+                              <div className="aspect-square bg-white dark:bg-[#0f1012] border border-slate-200 dark:border-[#26272e] rounded-xl flex items-center justify-center p-3 overflow-hidden">
+                                {productImages.filter(Boolean)[0] ? (
+                                  <img
+                                    src={productImages.filter(Boolean)[0]}
+                                    alt="Vista previa portada"
+                                    className="w-full h-full object-contain"
+                                    onError={(e) => {
+                                      (e.currentTarget as HTMLImageElement).src = "/placeholder-product.png";
+                                    }}
+                                  />
+                                ) : (
+                                  <div className="flex flex-col items-center justify-center text-slate-400 dark:text-[#6b6c75] gap-2">
+                                    <ImageIcon className="w-10 h-10 stroke-1" />
+                                    <span className="text-xs">Sin foto cargada</span>
+                                  </div>
+                                )}
+                              </div>
+                              {productImages.filter(Boolean).length > 1 && (
+                                <div className="grid grid-cols-4 gap-2">
+                                  {productImages.filter(Boolean).map((img, i) => (
+                                    <div
+                                      key={i}
+                                      className={`aspect-square bg-white dark:bg-[#0f1012] border rounded-lg p-1 overflow-hidden ${
+                                        i === 0 ? "border-red-500 ring-1 ring-red-500/40" : "border-slate-200 dark:border-[#26272e]"
+                                      }`}
+                                    >
+                                      <img src={img} alt={`Miniatura ${i + 1}`} className="w-full h-full object-contain" />
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Datos comerciales derecha */}
+                            <div className="md:col-span-7 space-y-4">
+                              <div className="space-y-1.5">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-[11px] font-bold uppercase tracking-wider text-red-600 dark:text-red-500">
+                                    {editingProduct.categoriaNombre || "Repuestos"}
+                                  </span>
+                                  <span className="text-[11px] text-slate-400 dark:text-[#6b6c75]">•</span>
+                                  <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                                    {editingProduct.marca}
+                                  </span>
+                                  {productEnOferta && productBadge && (
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-500/15 text-red-700 dark:text-red-400 border border-red-500/30">
+                                      {productBadge}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <h1 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white leading-snug">
+                                  {productTituloComercial.trim() || editingProduct.nombre}
+                                </h1>
+
+                                {productTituloComercial.trim() && productTituloComercial.trim() !== editingProduct.nombre && (
+                                  <p className="text-[11px] text-slate-400 dark:text-[#6b6c75]">
+                                    Nombre original SGI: <span className="font-mono">{editingProduct.nombre}</span>
+                                  </p>
+                                )}
+                              </div>
+
+                              {/* Precios */}
+                              <div className="p-3.5 bg-white dark:bg-[#1a1b20] border border-slate-200 dark:border-[#26272e] rounded-xl space-y-1">
+                                {productEnOferta ? (
+                                  <>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs text-slate-400 line-through">
+                                        {formatPrice(productNormalPrice)}
+                                      </span>
+                                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500 text-white">
+                                        {productDescuentoPct}% OFF
+                                      </span>
+                                    </div>
+                                    <div className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400">
+                                      {formatPrice(Math.round(productNormalPrice * (1 - productDescuentoPct / 100)))}
+                                    </div>
+                                    <div className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
+                                      Ahorrás {formatPrice(Math.round((productNormalPrice * productDescuentoPct) / 100))}
+                                    </div>
+                                  </>
+                                ) : (
+                                  <div className="text-2xl font-extrabold text-slate-900 dark:text-white">
+                                    {formatPrice(productNormalPrice)}
+                                  </div>
+                                )}
+                                <div className="text-[11px] text-slate-500 dark:text-[#8e8f96] pt-1">
+                                  Stock físico actual: <b className="text-slate-800 dark:text-white">{editingProduct.cantidad} unidades</b>
+                                </div>
+                              </div>
+
+                              {/* Entrega */}
+                              <div className="grid grid-cols-2 gap-2 text-xs">
+                                <div className="p-2.5 rounded-lg border border-slate-200 dark:border-[#26272e] bg-white dark:bg-[#1a1b20] flex items-center gap-2">
+                                  <Store className="w-4 h-4 text-emerald-500 shrink-0" />
+                                  <div>
+                                    <div className="font-bold text-slate-900 dark:text-white text-[11px]">Retiro en el Local</div>
+                                    <div className="text-[10px] text-slate-500 dark:text-[#8e8f96]">Gratis en el mostrador</div>
+                                  </div>
+                                </div>
+                                <div className="p-2.5 rounded-lg border border-slate-200 dark:border-[#26272e] bg-white dark:bg-[#1a1b20] flex items-center gap-2">
+                                  <Truck className="w-4 h-4 text-red-500 shrink-0" />
+                                  <div>
+                                    <div className="font-bold text-slate-900 dark:text-white text-[11px]">Motomandado</div>
+                                    <div className="text-[10px] text-slate-500 dark:text-[#8e8f96]">Envío en el día</div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Sección inferior con pestañas de ficha comercial */}
+                          <div className="mt-6 pt-5 border-t border-slate-200 dark:border-[#26272e] space-y-3">
+                            <div className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-[#b8b9c0]">
+                              Contenido técnico de la ficha:
+                            </div>
+
+                            <div className="bg-white dark:bg-[#1a1b20] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 space-y-4">
+                              {/* Descripción */}
+                              <div>
+                                <h4 className="text-xs font-bold text-slate-900 dark:text-white mb-1.5 flex items-center gap-1.5">
+                                  <FileText className="w-3.5 h-3.5 text-red-500" /> Descripción
+                                </h4>
+                                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-line">
+                                  {productDescripcion.trim() || "Sin descripción cargada."}
+                                </p>
+                              </div>
+
+                              {/* Especificaciones */}
+                              {productSpecs.length > 0 && (
+                                <div className="pt-3 border-t border-slate-200 dark:border-[#26272e]">
+                                  <h4 className="text-xs font-bold text-slate-900 dark:text-white mb-2 flex items-center gap-1.5">
+                                    <SlidersHorizontal className="w-3.5 h-3.5 text-emerald-500" /> Especificaciones técnicas
+                                  </h4>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                                    {productSpecs.map((s, idx) => (
+                                      <div
+                                        key={idx}
+                                        className="flex items-center justify-between p-2 rounded bg-slate-50 dark:bg-[#141519] border border-slate-200 dark:border-[#26272e]"
+                                      >
+                                        <span className="text-slate-500 dark:text-[#8e8f96] font-medium">{s.caracteristica}:</span>
+                                        <span className="text-slate-800 dark:text-white font-semibold">{s.valor}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Motos compatibles o Aplicación Universal */}
+                              <div className="pt-3 border-t border-slate-200 dark:border-[#26272e]">
+                                <h4 className="text-xs font-bold text-slate-900 dark:text-white mb-2 flex items-center gap-1.5">
+                                  <Bike className="w-3.5 h-3.5 text-blue-500" /> Compatibilidad con Motos
+                                </h4>
+                                {productUniversal ? (
+                                  <div className="p-2.5 rounded-lg border border-sky-500/30 bg-sky-500/10 text-sky-800 dark:text-sky-300 text-xs flex items-center gap-2 font-medium">
+                                    <Sparkles className="w-4 h-4 text-sky-500 shrink-0" />
+                                    <span>Repuesto de aplicación universal (apto para todas las marcas y modelos).</span>
+                                  </div>
+                                ) : productMotos.length > 0 ? (
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {productMotos.map((m, idx) => (
+                                      <span
+                                        key={idx}
+                                        className="px-2.5 py-1 rounded-full text-[11px] font-medium bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20"
+                                      >
+                                        {m}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-[11px] text-slate-400 dark:text-[#6b6c75]">
+                                    Compatibilidad no especificada (se indicará al cliente consultar por WhatsApp).
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      /* ════════════════════════════════════════════════════════════ */
+                      /* MODO FORMULARIO: 2 COLUMNAS RESPONSIVE */
+                      /* ════════════════════════════════════════════════════════════ */
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                        {/* ──────── COLUMNA IZQUIERDA ──────── */}
+                        <div className="lg:col-span-6 space-y-4">
+                          {/* Card 1: Identificación y Precios */}
+                          <div className="bg-slate-50/80 dark:bg-[#141519] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 space-y-3.5">
+                            <div className="flex items-center justify-between border-b border-slate-200/80 dark:border-[#26272e] pb-2">
+                              <span className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-white flex items-center gap-1.5">
+                                <Sparkles className="w-4 h-4 text-red-500" /> Información comercial y base
+                              </span>
+                              <span className="text-[10px] text-slate-400 dark:text-[#6b6c75]">
+                                Identificación y precios
+                              </span>
+                            </div>
+
+                            {/* Nombre SGI (solo lectura) */}
+                            <label className="flex flex-col gap-1 text-xs text-slate-700 dark:text-[#b8b9c0] font-semibold">
+                              <div className="flex items-center justify-between">
+                                <span>Nombre original (SGI)</span>
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-500/15 text-zinc-600 dark:text-zinc-400 border border-zinc-500/30 font-medium">
+                                  Inmutable SGI
+                                </span>
+                              </div>
+                              <input
+                                type="text"
+                                disabled
+                                value={editingProduct.nombre}
+                                className="bg-slate-100 dark:bg-[#0f1012]/60 border border-slate-200 dark:border-[#26272e] rounded-lg px-3 py-2 text-xs text-slate-500 dark:text-[#7d7e87] cursor-not-allowed font-medium select-all"
+                              />
+                              <span className="text-[10px] text-slate-400 dark:text-[#6b6c75] font-normal">
+                                Nombre oficial del inventario SGI. Se preserva intacto para trazabilidad.
+                              </span>
+                            </label>
+
+                            {/* Título Comercial Editable */}
+                            <label className="flex flex-col gap-1 text-xs text-slate-700 dark:text-[#b8b9c0] font-semibold">
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-900 dark:text-white font-bold">Título comercial (Tienda online)</span>
+                                <span className="text-[10px] text-red-600 dark:text-red-400 font-normal">Opcional</span>
+                              </div>
+                              <input
+                                type="text"
+                                placeholder={`Ej: ${editingProduct.nombre}`}
+                                value={productTituloComercial}
+                                onChange={(e) => setProductTituloComercial(e.target.value)}
+                                className="bg-white dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-[#6b6c75] focus:outline-none focus:border-red-600"
+                              />
+                              <span className="text-[10px] text-slate-500 dark:text-[#8e8f96] font-normal">
+                                Si lo dejás en blanco, en el catálogo, buscador y ficha pública se usará el nombre original del SGI.
+                              </span>
+                            </label>
+
+                            {/* Precios y Stock SGI */}
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                              <label className="flex flex-col gap-1 text-xs text-slate-700 dark:text-[#b8b9c0] font-semibold">
+                                Precio normal ($) *
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={productNormalPrice}
+                                  onChange={(e) => setProductNormalPrice(Math.max(0, Number(e.target.value)))}
+                                  className="bg-white dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-red-600 font-bold"
+                                />
+                              </label>
+
+                              <label className="flex flex-col gap-1 text-xs text-slate-700 dark:text-[#b8b9c0] font-semibold">
+                                Stock físico (SGI)
+                                <input
+                                  type="text"
+                                  disabled
+                                  value={`${editingProduct.cantidad} unidades`}
+                                  className="bg-slate-100 dark:bg-[#0f1012]/60 border border-slate-200 dark:border-[#26272e] rounded-lg px-3 py-2 text-xs text-slate-500 dark:text-[#6b6c75] cursor-not-allowed font-semibold"
+                                />
+                              </label>
+
+                              <label className="flex flex-col gap-1 text-xs text-slate-700 dark:text-[#b8b9c0] font-semibold">
+                                Marca
+                                <input
+                                  type="text"
+                                  disabled
+                                  value={editingProduct.marca}
+                                  className="bg-slate-100 dark:bg-[#0f1012]/60 border border-slate-200 dark:border-[#26272e] rounded-lg px-3 py-2 text-xs text-slate-500 dark:text-[#6b6c75] cursor-not-allowed font-semibold"
+                                />
+                              </label>
+                            </div>
+
+                            {/* Código y Categoría */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                              <label className="flex flex-col gap-1 text-xs text-slate-700 dark:text-[#b8b9c0] font-semibold">
+                                Código de parte
+                                <input
+                                  type="text"
+                                  disabled
+                                  value={editingProduct.codigo || "Sin código"}
+                                  className="bg-slate-100 dark:bg-[#0f1012]/60 border border-slate-200 dark:border-[#26272e] rounded-lg px-3 py-2 text-xs text-slate-500 dark:text-[#6b6c75] cursor-not-allowed font-mono"
+                                />
+                              </label>
+                              <label className="flex flex-col gap-1 text-xs text-slate-700 dark:text-[#b8b9c0] font-semibold">
+                                Categoría SGI
+                                <input
+                                  type="text"
+                                  disabled
+                                  value={editingProduct.categoriaNombre || "General"}
+                                  className="bg-slate-100 dark:bg-[#0f1012]/60 border border-slate-200 dark:border-[#26272e] rounded-lg px-3 py-2 text-xs text-slate-500 dark:text-[#6b6c75] cursor-not-allowed font-medium"
+                                />
+                              </label>
+                            </div>
+                          </div>
+
+                          {/* Card 2: Poner en Oferta */}
+                          <div className="bg-slate-50/80 dark:bg-[#141519] border-2 border-red-500/30 rounded-xl p-4 space-y-3.5">
+                            <div className="flex items-center justify-between border-b border-slate-200/80 dark:border-[#26272e] pb-2">
+                              <div className="flex items-center gap-2">
+                                <Flame className="w-5 h-5 text-red-500 fill-red-500" />
+                                <span className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-white">
+                                  Promoción y Oferta
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setProductEnOferta(!productEnOferta)}
+                                className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer ${
+                                  productEnOferta ? "bg-red-600" : "bg-slate-300 dark:bg-[#26272e]"
+                                }`}
+                              >
+                                <div
+                                  className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-transform ${
+                                    productEnOferta ? "right-1" : "left-1"
+                                  }`}
+                                />
+                              </button>
+                            </div>
+
+                            {productEnOferta ? (
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                                <label className="flex flex-col gap-1 text-xs text-slate-700 dark:text-[#b8b9c0] font-semibold">
+                                  % Descuento
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max="90"
+                                    value={productDescuentoPct}
+                                    onChange={(e) => setProductDescuentoPct(Math.max(1, Math.min(90, Number(e.target.value))))}
+                                    className="bg-white dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-red-600 font-bold"
+                                  />
+                                </label>
+
+                                <div className="flex flex-col gap-1 text-xs text-slate-700 dark:text-[#b8b9c0] font-semibold">
+                                  Precio con oferta
+                                  <div className="text-emerald-600 dark:text-emerald-400 font-bold text-sm pt-1">
+                                    {formatPrice(Math.round(productNormalPrice * (1 - productDescuentoPct / 100)))}
+                                  </div>
+                                  <span className="text-[10px] text-slate-500 dark:text-[#6b6c75] font-normal">
+                                    Ahorro: {formatPrice(Math.round((productNormalPrice * productDescuentoPct) / 100))}
+                                  </span>
+                                </div>
+
+                                <label className="flex flex-col gap-1 text-xs text-slate-700 dark:text-[#b8b9c0] font-semibold">
+                                  Etiqueta
+                                  <select
+                                    value={productBadge}
+                                    onChange={(e) => setProductBadge(e.target.value)}
+                                    className="bg-white dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg px-2.5 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-red-600"
+                                  >
+                                    {etiquetas
+                                      .filter((e) => e.activa)
+                                      .map((et) => (
+                                        <option key={et.id} value={et.nombre}>
+                                          {formatBadgeWithEmoji(et.nombre, et.emoji)}
+                                        </option>
+                                      ))}
+                                  </select>
+                                </label>
+                              </div>
+                            ) : (
+                              <p className="text-[11px] text-slate-500 dark:text-[#8e8f96]">
+                                Activá este interruptor para asignarle porcentaje de rebaja y destacarlo en la sección de ofertas.
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Card 3: Visibilidad y Destacados */}
+                          <div className="bg-slate-50/80 dark:bg-[#141519] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 space-y-3">
+                            <div className="flex items-center justify-between border-b border-slate-200/80 dark:border-[#26272e] pb-2">
+                              <span className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-white flex items-center gap-1.5">
+                                <Eye className="w-4 h-4 text-emerald-500" /> Visibilidad en la tienda
+                              </span>
+                              <span className="text-[10px] text-slate-400 dark:text-[#6b6c75]">
+                                Canales públicos
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                              <label className="flex items-center gap-2 p-2.5 rounded-lg border border-slate-200 dark:border-[#2b2c35] bg-white dark:bg-[#1a1b20] cursor-pointer hover:border-emerald-500/50 transition-colors">
+                                <input
+                                  type="checkbox"
+                                  checked={productPublicado}
+                                  onChange={(e) => setProductPublicado(e.target.checked)}
+                                  className="rounded text-red-600 focus:ring-0 cursor-pointer"
+                                />
+                                <span className="text-xs font-semibold text-slate-800 dark:text-white">Publicado online</span>
+                              </label>
+
+                              <label className="flex items-center gap-2 p-2.5 rounded-lg border border-slate-200 dark:border-[#2b2c35] bg-white dark:bg-[#1a1b20] cursor-pointer hover:border-amber-500/50 transition-colors">
+                                <input
+                                  type="checkbox"
+                                  checked={productDestacado}
+                                  onChange={(e) => setProductDestacado(e.target.checked)}
+                                  className="rounded text-amber-500 focus:ring-0 cursor-pointer"
+                                />
+                                <span className="text-xs font-semibold text-slate-800 dark:text-white">Destacado</span>
+                              </label>
+
+                              <label className="flex items-center gap-2 p-2.5 rounded-lg border border-slate-200 dark:border-[#2b2c35] bg-white dark:bg-[#1a1b20] cursor-pointer hover:border-blue-500/50 transition-colors">
+                                <input
+                                  type="checkbox"
+                                  checked={productRecomendado}
+                                  onChange={(e) => setProductRecomendado(e.target.checked)}
+                                  className="rounded text-blue-600 focus:ring-0 cursor-pointer"
+                                />
+                                <span className="text-xs font-semibold text-slate-800 dark:text-white">Recomendado</span>
+                              </label>
+                            </div>
+
+                            <div className="bg-slate-100 dark:bg-[#0f1012] border border-slate-200 dark:border-[#26272e] rounded-lg p-2.5 text-[11px] text-slate-500 dark:text-[#9a9ba3]">
+                              <b className="text-slate-700 dark:text-[#e7e7ea]">Lo más vendido:</b> Se calcula automáticamente a partir de las ventas reales registradas en el SGI durante los últimos 30 días.
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* ──────── COLUMNA DERECHA ──────── */}
+                        <div className="lg:col-span-6 space-y-4">
+                          {/* Card 4: Galería de fotos (hasta 4) */}
+                          <div className="bg-slate-50/80 dark:bg-[#141519] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 space-y-3">
+                            <div className="flex items-center justify-between border-b border-slate-200/80 dark:border-[#26272e] pb-2">
+                              <span className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-white flex items-center gap-1.5">
+                                <ImageIcon className="w-4 h-4 text-red-500" /> Fotos del producto (hasta 4)
+                              </span>
+                              <span className="text-[10px] text-slate-400 dark:text-[#6b6c75]">
+                                Slot 1 = Portada
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                              {[0, 1, 2, 3].map((idx) => {
+                                const img = productImages[idx] || "";
+                                const isCover = idx === 0 && Boolean(img);
+
+                                return (
+                                  <div
+                                    key={idx}
+                                    className={`relative bg-white dark:bg-[#1a1b20] border rounded-xl p-2 flex flex-col items-center justify-between h-36 overflow-hidden transition-all ${
+                                      isCover
+                                        ? "border-red-500 ring-1 ring-red-500/30"
+                                        : "border-slate-200 dark:border-[#26272e]"
+                                    }`}
+                                  >
+                                    {/* Cabecera del Slot */}
+                                    <div className="w-full flex items-center justify-between text-[10px] mb-1">
+                                      <span className={`font-bold ${isCover ? "text-red-600 dark:text-red-400" : "text-slate-400 dark:text-[#6b6c75]"}`}>
+                                        {isCover ? "★ Portada" : `Foto ${idx + 1}`}
+                                      </span>
+                                      {img && (
+                                        <div className="flex items-center gap-1">
+                                          {idx > 0 && (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleMoverImagenProducto(idx, idx - 1)}
+                                              className="p-0.5 rounded text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#26272e] cursor-pointer"
+                                              title="Mover a la izquierda"
+                                            >
+                                              <ChevronLeft className="w-3 h-3" />
+                                            </button>
+                                          )}
+                                          {idx < 3 && (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleMoverImagenProducto(idx, idx + 1)}
+                                              className="p-0.5 rounded text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#26272e] cursor-pointer"
+                                              title="Mover a la derecha"
+                                            >
+                                              <ChevronRight className="w-3 h-3" />
+                                            </button>
+                                          )}
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const updated = [...productImages];
+                                              updated.splice(idx, 1);
+                                              setProductImages(updated);
+                                            }}
+                                            className="p-0.5 rounded text-red-500 hover:bg-red-500/10 cursor-pointer"
+                                            title="Eliminar foto"
+                                          >
+                                            <X className="w-3 h-3" />
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* Preview o Target para subir */}
+                                    {img ? (
+                                      <div className="relative w-full flex-1 flex items-center justify-center p-1 overflow-hidden">
+                                        <img
+                                          src={img}
+                                          alt={`Foto slot ${idx + 1}`}
+                                          className="h-full w-full object-contain rounded"
+                                          onError={(e) => {
+                                            (e.currentTarget as HTMLImageElement).src = "/placeholder-product.png";
+                                          }}
+                                        />
+                                      </div>
+                                    ) : (
+                                      <label className="w-full flex-1 flex flex-col items-center justify-center cursor-pointer text-slate-400 hover:text-slate-700 dark:text-[#6b6c75] dark:hover:text-white transition-colors">
+                                        <Upload className="w-4 h-4 mb-1 text-slate-400 dark:text-[#6b6c75]" />
+                                        <span className="text-[10px] font-medium">Subir foto</span>
+                                        <input
+                                          type="file"
+                                          accept="image/*"
+                                          className="hidden"
+                                          onChange={(e) => {
+                                            const file = e.target.files?.[0];
+                                            if (file) handleUploadImageSlot(idx, file, "producto");
+                                          }}
+                                        />
+                                      </label>
+                                    )}
+
+                                    {/* Botón rápido Hacer Portada */}
+                                    {img && !isCover && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleHacerPortadaProducto(idx)}
+                                        className="w-full text-[9px] font-bold py-0.5 rounded bg-red-500/10 hover:bg-red-500/20 text-red-700 dark:text-red-400 text-center transition-colors cursor-pointer mt-1"
+                                      >
+                                        Hacer portada
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Card 5: Pestañas de Información Técnica y Ficha */}
+                          <div className="bg-slate-50/80 dark:bg-[#141519] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 space-y-3">
+                            <div className="flex items-center justify-between border-b border-slate-200/80 dark:border-[#26272e] pb-2">
+                              <span className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-white flex items-center gap-1.5">
+                                <FileText className="w-4 h-4 text-emerald-500" /> Ficha y datos técnicos
+                              </span>
+                              <span className="text-[10px] text-slate-400 dark:text-[#6b6c75]">
+                                Información complementaria
+                              </span>
+                            </div>
+
+                            {/* Selector de sub-pestañas */}
+                            <div className="flex gap-1 border-b border-slate-200 dark:border-[#26272e] pb-1">
+                              <button
+                                type="button"
+                                onClick={() => setProdInfoTab("descripcion")}
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
+                                  prodInfoTab === "descripcion"
+                                    ? "bg-slate-200 dark:bg-[#26272e] text-slate-900 dark:text-white"
+                                    : "text-slate-500 hover:text-slate-800 dark:text-[#8e8f96] dark:hover:text-white"
+                                }`}
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                                <span>Descripción</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setProdInfoTab("specs")}
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
+                                  prodInfoTab === "specs"
+                                    ? "bg-slate-200 dark:bg-[#26272e] text-slate-900 dark:text-white"
+                                    : "text-slate-500 hover:text-slate-800 dark:text-[#8e8f96] dark:hover:text-white"
+                                }`}
+                              >
+                                <SlidersHorizontal className="w-3.5 h-3.5" />
+                                <span>Especificaciones ({productSpecs.length})</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setProdInfoTab("motos")}
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
+                                  prodInfoTab === "motos"
+                                    ? "bg-slate-200 dark:bg-[#26272e] text-slate-900 dark:text-white"
+                                    : "text-slate-500 hover:text-slate-800 dark:text-[#8e8f96] dark:hover:text-white"
+                                }`}
+                              >
+                                <Bike className="w-3.5 h-3.5" />
+                                <span>Motos compatibles ({productUniversal ? "Universal" : productMotos.length})</span>
+                              </button>
+                            </div>
+
+                            {/* Sub-tab 1: Descripción editable */}
+                            {prodInfoTab === "descripcion" && (
+                              <div className="space-y-2">
+                                <textarea
+                                  rows={5}
+                                  placeholder="Escribí una descripción detallada para el producto..."
+                                  value={productDescripcion}
+                                  onChange={(e) => setProductDescripcion(e.target.value)}
+                                  className="w-full bg-white dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-[#6b6c75] focus:outline-none focus:border-red-600 resize-none leading-relaxed"
+                                />
+                                <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-[#8e8f96]">
+                                  <span>Texto recuperado automáticamente de la ficha comercial.</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setProductDescripcion(getDefaultProductDescription(editingProduct.nombre, editingProduct.marca))}
+                                    className="text-red-600 dark:text-red-400 hover:underline font-medium cursor-pointer"
+                                  >
+                                    Restablecer sugerido
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Sub-tab 2: Especificaciones técnicas */}
+                            {prodInfoTab === "specs" && (
+                              <div className="space-y-3.5">
+                                {/* Atributos base SGI */}
+                                <div className="rounded-xl border border-slate-200 dark:border-[#26272e] bg-slate-100/70 dark:bg-[#0f1012] p-3 space-y-2 text-xs">
+                                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 dark:text-[#b8b9c0] uppercase tracking-wider">
+                                    <span className="flex items-center gap-1.5">
+                                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" /> Atributos base SGI (Ficha pública)
+                                    </span>
+                                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">Automático</span>
+                                  </div>
+                                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px]">
+                                    <div className="p-1.5 rounded bg-white dark:bg-[#1a1b20] border border-slate-200 dark:border-[#26272e]">
+                                      <span className="text-slate-400 dark:text-[#6b6c75] block text-[9px] uppercase">Marca</span>
+                                      <b className="text-slate-800 dark:text-white truncate block">{editingProduct.marca}</b>
+                                    </div>
+                                    <div className="p-1.5 rounded bg-white dark:bg-[#1a1b20] border border-slate-200 dark:border-[#26272e]">
+                                      <span className="text-slate-400 dark:text-[#6b6c75] block text-[9px] uppercase">Categoría</span>
+                                      <b className="text-slate-800 dark:text-white truncate block">{editingProduct.categoriaNombre}</b>
+                                    </div>
+                                    <div className="p-1.5 rounded bg-white dark:bg-[#1a1b20] border border-slate-200 dark:border-[#26272e]">
+                                      <span className="text-slate-400 dark:text-[#6b6c75] block text-[9px] uppercase">Código</span>
+                                      <b className="text-slate-800 dark:text-white font-mono truncate block">{editingProduct.codigo || "Sin código"}</b>
+                                    </div>
+                                    <div className="p-1.5 rounded bg-white dark:bg-[#1a1b20] border border-slate-200 dark:border-[#26272e]">
+                                      <span className="text-slate-400 dark:text-[#6b6c75] block text-[9px] uppercase">Condición</span>
+                                      <b className="text-emerald-600 dark:text-emerald-400 truncate block">Repuesto nuevo</b>
+                                    </div>
+                                    <div className="p-1.5 rounded bg-white dark:bg-[#1a1b20] border border-slate-200 dark:border-[#26272e] sm:col-span-2">
+                                      <span className="text-slate-400 dark:text-[#6b6c75] block text-[9px] uppercase">Garantía</span>
+                                      <b className="text-slate-800 dark:text-white truncate block">Garantía oficial del fabricante</b>
+                                    </div>
+                                  </div>
+                                  <p className="text-[10px] text-slate-500 dark:text-[#8e8f96] italic">
+                                    Estos atributos provienen del inventario base y se integran automáticamente. Podés sumar características técnicas personalizadas a continuación.
+                                  </p>
+                                </div>
+
+                                {/* Sugerencias de características frecuentes */}
+                                <div className="space-y-1.5">
+                                  <span className="text-[11px] font-bold text-slate-700 dark:text-[#b8b9c0] block">
+                                    Sugerencias de características frecuentes (clic para cargar):
+                                  </span>
+                                  <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
+                                    {specsSugeridas.slice(0, 12).map((sug, i) => (
+                                      <button
+                                        key={i}
+                                        type="button"
+                                        onClick={() => setNewProdSpecKey(sug)}
+                                        className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 hover:bg-slate-200 dark:bg-[#26272e] dark:hover:bg-[#35363d] text-slate-700 dark:text-[#b8b9c0] border border-slate-200 dark:border-[#35363d] transition-colors cursor-pointer"
+                                      >
+                                        + {sug}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                {/* Formulario para agregar nueva especificación */}
+                                <div className="flex flex-col sm:flex-row gap-2">
+                                  <input
+                                    type="text"
+                                    placeholder="Característica (ej: Material, Posición)"
+                                    value={newProdSpecKey}
+                                    onChange={(e) => setNewProdSpecKey(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        e.preventDefault();
+                                        handleAddProductSpec();
+                                      }
+                                    }}
+                                    className="flex-1 bg-white dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg px-2.5 py-1.5 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-[#6b6c75] focus:outline-none focus:border-red-600"
+                                  />
+                                  <input
+                                    type="text"
+                                    placeholder="Valor (ej: Acero 1045, Trasera)"
+                                    value={newProdSpecVal}
+                                    onChange={(e) => setNewProdSpecVal(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        e.preventDefault();
+                                        handleAddProductSpec();
+                                      }
+                                    }}
+                                    className="flex-1 bg-white dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg px-2.5 py-1.5 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-[#6b6c75] focus:outline-none focus:border-red-600"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={handleAddProductSpec}
+                                    className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer shrink-0"
+                                  >
+                                    Agregar
+                                  </button>
+                                </div>
+
+                                {/* Lista editable de especificaciones cargadas */}
+                                {productSpecs.length > 0 ? (
+                                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                                    {productSpecs.map((s, idx) => (
+                                      <div
+                                        key={idx}
+                                        className="p-2 rounded-lg bg-white dark:bg-[#1a1b20] border border-slate-200 dark:border-[#26272e] text-xs transition-colors"
+                                      >
+                                        {editingSpecIdx === idx ? (
+                                          <div className="flex flex-col sm:flex-row gap-2">
+                                            <input
+                                              type="text"
+                                              value={editSpecKey}
+                                              onChange={(e) => setEditSpecKey(e.target.value)}
+                                              className="flex-1 bg-slate-50 dark:bg-[#0f1012] border border-red-500 rounded px-2 py-1 text-xs text-slate-900 dark:text-white focus:outline-none"
+                                            />
+                                            <input
+                                              type="text"
+                                              value={editSpecVal}
+                                              onChange={(e) => setEditSpecVal(e.target.value)}
+                                              className="flex-1 bg-slate-50 dark:bg-[#0f1012] border border-red-500 rounded px-2 py-1 text-xs text-slate-900 dark:text-white focus:outline-none"
+                                            />
+                                            <div className="flex items-center gap-1 shrink-0">
+                                              <button
+                                                type="button"
+                                                onClick={handleSaveEditSpec}
+                                                className="p-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+                                                title="Guardar cambio"
+                                              >
+                                                <Check className="w-3.5 h-3.5" />
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={handleCancelEditSpec}
+                                                className="p-1 rounded bg-slate-200 hover:bg-slate-300 dark:bg-[#26272e] dark:hover:bg-[#35363d] text-slate-700 dark:text-white cursor-pointer"
+                                                title="Cancelar"
+                                              >
+                                                <X className="w-3.5 h-3.5" />
+                                              </button>
+                                            </div>
+                                          </div>
+                                        ) : (
+                                          <div className="flex items-center justify-between gap-2">
+                                            <div className="flex items-center gap-2 truncate">
+                                              <span className="font-semibold text-slate-800 dark:text-white">{s.caracteristica}:</span>
+                                              <span className="text-slate-600 dark:text-[#9a9ba3] truncate">{s.valor}</span>
+                                            </div>
+                                            <div className="flex items-center gap-1 shrink-0">
+                                              <button
+                                                type="button"
+                                                onClick={() => handleStartEditSpec(idx)}
+                                                className="text-slate-400 hover:text-slate-700 dark:hover:text-white p-1 rounded hover:bg-slate-100 dark:hover:bg-[#26272e] cursor-pointer"
+                                                title="Modificar especificación"
+                                              >
+                                                <Edit className="w-3.5 h-3.5" />
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => handleRemoveProductSpec(idx)}
+                                                className="text-red-500 hover:text-red-600 p-1 rounded hover:bg-red-500/10 cursor-pointer"
+                                                title="Eliminar especificación"
+                                              >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                              </button>
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div className="text-[11px] text-slate-400 dark:text-[#6b6c75] py-2.5 text-center border border-dashed border-slate-200 dark:border-[#26272e] rounded-lg">
+                                    No hay especificaciones personalizadas adicionales cargadas.
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Sub-tab 3: Motos compatibles */}
+                            {prodInfoTab === "motos" && (
+                              <div className="space-y-3.5">
+                                {/* Toggle destacado de Compatibilidad Universal */}
+                                <div
+                                  className={`p-3 rounded-xl border transition-all ${
+                                    productUniversal
+                                      ? "border-sky-500/40 bg-sky-50/70 dark:bg-sky-950/20"
+                                      : "border-slate-200 dark:border-[#26272e] bg-slate-50/60 dark:bg-[#141519]"
+                                  }`}
+                                >
+                                  <label className="flex items-start sm:items-center justify-between gap-3 cursor-pointer">
+                                    <div className="space-y-0.5">
+                                      <div className="flex items-center gap-2">
+                                        <Sparkles
+                                          className={`w-4 h-4 shrink-0 ${
+                                            productUniversal ? "text-sky-600 dark:text-sky-400" : "text-slate-400"
+                                          }`}
+                                        />
+                                        <span className="text-xs font-bold text-slate-900 dark:text-white">
+                                          Compatible con todas las motos (universal)
+                                        </span>
+                                      </div>
+                                      <p className="text-[11px] text-slate-500 dark:text-[#8e8f96] leading-relaxed">
+                                        Marcá esta opción si el repuesto o accesorio tiene aplicación general (aceites, herramientas, tornillería, lámparas universales, etc.).
+                                      </p>
+                                    </div>
+                                    <input
+                                      type="checkbox"
+                                      checked={productUniversal}
+                                      onChange={(e) => setProductUniversal(e.target.checked)}
+                                      className="mt-0.5 w-4 h-4 text-sky-600 rounded border-slate-300 dark:border-[#35363d] focus:ring-sky-500 cursor-pointer shrink-0"
+                                    />
+                                  </label>
+                                </div>
+
+                                {/* Breve explicación compacta */}
+                                <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-[#8e8f96] px-1">
+                                  <Info className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                                  <span>
+                                    {productUniversal
+                                      ? "Marcado como universal. No requiere asociar modelos para su venta, pero podés asociar referencias frecuentes si lo deseás."
+                                      : "Asociá los modelos exactos para mostrar confirmación técnica verificada. Si queda vacío, se mostrará «Compatibilidad no especificada»."}
+                                  </span>
+                                </div>
+
+                                {/* Cabecera y botón para crear moto */}
+                                <div className="space-y-2 pt-1 border-t border-slate-200 dark:border-[#26272e]">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-xs font-bold text-slate-800 dark:text-white">
+                                      Modelos del catálogo compartido
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowNuevaMotoForm(!showNuevaMotoForm)}
+                                      className="text-[11px] text-red-600 dark:text-red-400 hover:underline font-bold flex items-center gap-1 cursor-pointer"
+                                    >
+                                      <Plus className="w-3 h-3" />
+                                      <span>{showNuevaMotoForm ? "Cerrar formulario" : "Crear moto nueva"}</span>
+                                    </button>
+                                  </div>
+
+                                  {/* Formulario colapsable para agregar una moto nueva al catálogo compartido */}
+                                  {showNuevaMotoForm && (
+                                    <div className="p-3 rounded-xl border border-red-500/30 bg-red-500/5 space-y-2.5 text-xs animate-in fade-in duration-150">
+                                      <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                                        <Plus className="w-3.5 h-3.5 text-red-500" />
+                                        <span>Agregar nuevo modelo al catálogo reutilizable</span>
+                                      </div>
+                                      <p className="text-[10px] text-slate-500 dark:text-[#8e8f96]">
+                                        Se guardará en el catálogo general persistente y quedará disponible para asociar a cualquier repuesto de la tienda.
+                                      </p>
+                                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                        <div>
+                                          <label className="text-[10px] font-semibold text-slate-500 dark:text-[#8e8f96] block mb-1">
+                                            Marca
+                                          </label>
+                                          <select
+                                            value={nuevaMotoMarca}
+                                            onChange={(e) => setNuevaMotoMarca(e.target.value)}
+                                            className="w-full bg-white dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-red-600"
+                                          >
+                                            <option value="Honda">Honda</option>
+                                            <option value="Yamaha">Yamaha</option>
+                                            <option value="Motomel">Motomel</option>
+                                            <option value="Gilera">Gilera</option>
+                                            <option value="Corven">Corven</option>
+                                            <option value="Zanella">Zanella</option>
+                                            <option value="Bajaj">Bajaj</option>
+                                            <option value="Suzuki">Suzuki</option>
+                                            <option value="Mondial">Mondial</option>
+                                            <option value="Guerrero">Guerrero</option>
+                                            <option value="Kawasaki">Kawasaki</option>
+                                            <option value="KTM">KTM</option>
+                                            <option value="Benelli">Benelli</option>
+                                            <option value="Royal Enfield">Royal Enfield</option>
+                                            <option value="Otra">Otra marca...</option>
+                                          </select>
+                                        </div>
+                                        {nuevaMotoMarca === "Otra" && (
+                                          <div>
+                                            <label className="text-[10px] font-semibold text-slate-500 dark:text-[#8e8f96] block mb-1">
+                                              Nombre de la marca
+                                            </label>
+                                            <input
+                                              type="text"
+                                              placeholder="Ej: Brava, Keller, Beta"
+                                              value={nuevaMotoMarcaCustom}
+                                              onChange={(e) => setNuevaMotoMarcaCustom(e.target.value)}
+                                              className="w-full bg-white dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-red-600"
+                                            />
+                                          </div>
+                                        )}
+                                        <div>
+                                          <label className="text-[10px] font-semibold text-slate-500 dark:text-[#8e8f96] block mb-1">
+                                            Modelo *
+                                          </label>
+                                          <input
+                                            type="text"
+                                            placeholder="Ej: Twister, FZ-FI, Skua"
+                                            value={nuevaMotoModelo}
+                                            onChange={(e) => setNuevaMotoModelo(e.target.value)}
+                                            className="w-full bg-white dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-red-600"
+                                          />
+                                        </div>
+                                        <div>
+                                          <label className="text-[10px] font-semibold text-slate-500 dark:text-[#8e8f96] block mb-1">
+                                            Cilindrada (opcional)
+                                          </label>
+                                          <input
+                                            type="text"
+                                            placeholder="Ej: 110cc, 150cc, 250cc"
+                                            value={nuevaMotoCilindrada}
+                                            onChange={(e) => setNuevaMotoCilindrada(e.target.value)}
+                                            className="w-full bg-white dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-red-600"
+                                          />
+                                        </div>
+                                      </div>
+                                      <div className="flex justify-end gap-2 pt-1">
+                                        <button
+                                          type="button"
+                                          onClick={() => setShowNuevaMotoForm(false)}
+                                          className="px-2.5 py-1 text-slate-600 dark:text-[#b8b9c0] text-xs hover:underline cursor-pointer"
+                                        >
+                                          Cancelar
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={guardandoNuevaMoto}
+                                          onClick={handleCrearNuevaMoto}
+                                          className="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                                        >
+                                          {guardandoNuevaMoto ? "Guardando..." : "Guardar en catálogo y asociar"}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Buscador con Dropdown de autocompletado */}
+                                  <div className="relative">
+                                    <div className="relative flex items-center">
+                                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 pointer-events-none" />
+                                      <input
+                                        type="text"
+                                        placeholder="Buscar modelo en el catálogo (ej: Titan, Wave, YBR, Smash, Rouser)..."
+                                        value={busquedaMoto}
+                                        onChange={(e) => {
+                                          setBusquedaMoto(e.target.value);
+                                          setMostrarDropdownMotos(true);
+                                        }}
+                                        onFocus={() => setMostrarDropdownMotos(true)}
+                                        className="w-full bg-white dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg pl-8 pr-8 py-2 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-[#6b6c75] focus:outline-none focus:border-red-600"
+                                      />
+                                      {busquedaMoto && (
+                                        <button
+                                          type="button"
+                                          onClick={() => setBusquedaMoto("")}
+                                          className="absolute right-2.5 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer"
+                                        >
+                                          <X className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
+                                    </div>
+
+                                    {/* Dropdown flotante con motos filtradas */}
+                                    {mostrarDropdownMotos && (
+                                      <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-[#16171c] border border-slate-200 dark:border-[#26272e] rounded-xl shadow-xl z-20 max-h-56 overflow-y-auto p-1.5 space-y-0.5 text-xs">
+                                        <div className="px-2 py-1 text-[10px] uppercase font-bold text-slate-400 dark:text-[#6b6c75] flex items-center justify-between">
+                                          <span>Opciones disponibles ({catalogoMotos.filter((m) => !productMotos.includes(m)).length})</span>
+                                          <button
+                                            type="button"
+                                            onClick={() => setMostrarDropdownMotos(false)}
+                                            className="hover:text-slate-800 dark:hover:text-white cursor-pointer"
+                                          >
+                                            Cerrar ✕
+                                          </button>
+                                        </div>
+
+                                        {catalogoMotos
+                                          .filter((m) => !productMotos.includes(m))
+                                          .filter((m) => !busquedaMoto.trim() || m.toLowerCase().includes(busquedaMoto.trim().toLowerCase()))
+                                          .slice(0, 25)
+                                          .map((moto, i) => (
+                                            <div
+                                              key={i}
+                                              className="w-full px-2.5 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-[#26272e] flex items-center justify-between text-slate-800 dark:text-white transition-colors group"
+                                            >
+                                              <button
+                                                type="button"
+                                                onClick={() => handleSelectMoto(moto)}
+                                                className="flex items-center gap-2 flex-1 text-left cursor-pointer min-w-0"
+                                              >
+                                                <Bike className="w-3.5 h-3.5 text-slate-400 group-hover:text-red-500 transition-colors shrink-0" />
+                                                <span className="font-medium truncate">{moto}</span>
+                                              </button>
+
+                                              <div className="flex items-center gap-1.5 shrink-0">
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => handleOpenEditMotoModal(moto, e)}
+                                                  className="p-1 text-slate-400 hover:text-amber-500 dark:hover:text-amber-400 rounded hover:bg-slate-200 dark:hover:bg-[#35363d] cursor-pointer transition-colors"
+                                                  title="Corregir nombre en el catálogo compartido"
+                                                >
+                                                  <Edit className="w-3 h-3" />
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handleSelectMoto(moto)}
+                                                  className="text-[10px] text-red-600 dark:text-red-400 font-bold hover:underline cursor-pointer px-1 py-0.5"
+                                                >
+                                                  + Asociar
+                                                </button>
+                                              </div>
+                                            </div>
+                                          ))}
+
+                                        {catalogoMotos
+                                          .filter((m) => !productMotos.includes(m))
+                                          .filter((m) => !busquedaMoto.trim() || m.toLowerCase().includes(busquedaMoto.trim().toLowerCase())).length === 0 && (
+                                          <div className="p-3 text-center text-slate-500 dark:text-[#8e8f96] space-y-2">
+                                            <p className="text-[11px]">
+                                              No se encontró <b>"{busquedaMoto}"</b> en el catálogo.
+                                            </p>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setNuevaMotoModelo(busquedaMoto);
+                                                setShowNuevaMotoForm(true);
+                                                setMostrarDropdownMotos(false);
+                                              }}
+                                              className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-bold cursor-pointer"
+                                            >
+                                              + Crear "{busquedaMoto}"
+                                            </button>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Sugerencias rápidas para re-asociar motos populares que no estén agregadas */}
+                                  {catalogoMotos.filter((m) => !productMotos.includes(m)).length > 0 && !busquedaMoto && (
+                                    <div className="space-y-1 pt-1">
+                                      <span className="text-[10px] uppercase font-bold text-slate-400 dark:text-[#6b6c75]">
+                                        Modelos frecuentes del catálogo (clic para asociar):
+                                      </span>
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {catalogoMotos
+                                          .filter((m) => !productMotos.includes(m))
+                                          .slice(0, 8)
+                                          .map((m, idx) => (
+                                            <button
+                                              key={idx}
+                                              type="button"
+                                              onClick={() => handleSelectMoto(m)}
+                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-slate-100 hover:bg-red-50 hover:text-red-600 dark:bg-[#1a1b20] dark:hover:bg-[#26272e] text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-[#26272e] transition-colors cursor-pointer"
+                                            >
+                                              <span>+ {m}</span>
+                                            </button>
+                                          ))}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Lista de motos asociadas a este producto */}
+                                  <div className="pt-2">
+                                    <div className="text-[11px] font-bold text-slate-700 dark:text-[#b8b9c0] mb-1.5 flex items-center justify-between">
+                                      <span>Motos asociadas a este producto ({productMotos.length}):</span>
+                                      {productMotos.length > 0 && (
+                                        <span className="text-[10px] text-slate-400 dark:text-[#6b6c75] font-normal">
+                                          Hacé clic en ✕ para quitar de este producto
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {productMotos.length > 0 ? (
+                                      <div className="flex flex-wrap gap-1.5 max-h-44 overflow-y-auto pr-1">
+                                        {productMotos.map((m, idx) => (
+                                          <span
+                                            key={idx}
+                                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-white dark:bg-[#1a1b20] border border-blue-500/30 text-blue-900 dark:text-blue-300 shadow-sm"
+                                          >
+                                            <Bike className="w-3 h-3 text-blue-500 shrink-0" />
+                                            <span>{m}</span>
+                                            <button
+                                              type="button"
+                                              onClick={(e) => handleOpenEditMotoModal(m, e)}
+                                              className="text-slate-400 hover:text-amber-500 p-0.5 rounded cursor-pointer"
+                                              title="Corregir este modelo en el catálogo compartido"
+                                            >
+                                              <Edit className="w-2.5 h-2.5" />
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleRemoveProductMoto(idx)}
+                                              className="text-slate-400 hover:text-red-500 p-0.5 rounded cursor-pointer"
+                                              title="Quitar de este producto (podrás volver a agregarlo cuando quieras)"
+                                            >
+                                              <X className="w-3 h-3" />
+                                            </button>
+                                          </span>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <div className="text-[11px] text-slate-400 dark:text-[#6b6c75] py-3 text-center border border-dashed border-slate-200 dark:border-[#26272e] rounded-lg">
+                                        {productUniversal
+                                          ? "Este repuesto está configurado como universal. No requiere modelos específicos asignados."
+                                          : "Sin modelos específicos asociados. En la tienda pública se mostrará «Compatibilidad no especificada» recomendando consultar por WhatsApp."}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
 
-                  {/* Card 3: Visibilidad y Destacados */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-[#1a1b20] border border-[#26272e] rounded-xl p-4">
-                    <label className="flex items-center gap-2 text-xs text-white cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={productPublicado}
-                        onChange={(e) => setProductPublicado(e.target.checked)}
-                        className="rounded bg-[#0f1012] border-[#35363d] text-red-600 focus:ring-0"
-                      />
-                      Publicado online
-                    </label>
+                  {/* Pie Fijo (Sticky Footer) */}
+                  <div className="flex items-center justify-between px-5 sm:px-6 py-3.5 border-t border-slate-200 dark:border-[#26272e] bg-slate-50/70 dark:bg-[#16171c] shrink-0">
+                    <div className="text-[11px] text-slate-500 dark:text-[#8e8f96] hidden sm:block">
+                      {productTituloComercial.trim() ? (
+                        <span>
+                          Guardando como: <b className="text-slate-800 dark:text-white">{productTituloComercial.trim()}</b>
+                        </span>
+                      ) : (
+                        <span>Usará el nombre del SGI por defecto.</span>
+                      )}
+                    </div>
 
-                    <label className="flex items-center gap-2 text-xs text-white cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={productDestacado}
-                        onChange={(e) => setProductDestacado(e.target.checked)}
-                        className="rounded bg-[#0f1012] border-[#35363d] text-red-600 focus:ring-0"
-                      />
-                      Destacado en inicio
-                    </label>
-
-                    <label className="flex items-center gap-2 text-xs text-white cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={productRecomendado}
-                        onChange={(e) => setProductRecomendado(e.target.checked)}
-                        className="rounded bg-[#0f1012] border-[#35363d] text-red-600 focus:ring-0"
-                      />
-                      Recomendado
-                    </label>
-                  </div>
-
-                  {/* Nota informativa de Lo más vendido calcada al prototipo */}
-                  <div className="bg-[#141519] border border-[#26272e] rounded-xl p-3.5 text-xs text-[#9a9ba3]">
-                    <b className="text-[#e7e7ea]">Lo más vendido:</b> se calcula solo contando ventas reales de los últimos 30 días — no se carga a mano.{" "}
-                    <span className="text-emerald-400 font-semibold">Cálculo automatizado activo.</span>
-                  </div>
-
-                  {/* Botones de acción */}
-                  <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[#26272e]">
-                    <button
-                      type="button"
-                      onClick={() => setEditingProduct(null)}
-                      className="px-4 py-2 bg-transparent border border-[#35363d] hover:bg-[#26272e] text-[#b8b9c0] rounded-lg text-xs font-semibold transition-colors"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleSaveProduct}
-                      disabled={saving}
-                      className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition-colors shadow-lg shadow-red-600/20"
-                    >
-                      {saving ? "Guardando..." : "Guardar cambios"}
-                    </button>
+                    <div className="flex items-center gap-2.5 ml-auto">
+                      <button
+                        type="button"
+                        onClick={() => setEditingProduct(null)}
+                        className="px-4 py-2 bg-transparent border border-slate-300 dark:border-[#35363d] hover:bg-slate-100 dark:hover:bg-[#26272e] text-slate-700 dark:text-[#b8b9c0] rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSaveProduct}
+                        disabled={saving}
+                        className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition-colors shadow-lg shadow-red-600/20 cursor-pointer flex items-center gap-1.5"
+                      >
+                        <Check className="w-4 h-4" />
+                        <span>{saving ? "Guardando..." : "Guardar cambios"}</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -3826,6 +5311,122 @@ export default function PanelPage() {
                     >
                       <Plus className="w-4 h-4" />
                       <span>{saving ? "Guardando..." : "Agregar marca"}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Modal Editar Modelo en Catálogo Compartido */}
+            {showEditMotoModal && (
+              <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-white dark:bg-[#16171c] border border-slate-200 dark:border-[#26272e] rounded-xl max-w-md w-full p-6 shadow-2xl space-y-4 text-xs">
+                  <div className="flex items-center justify-between border-b border-slate-200 dark:border-[#26272e] pb-3">
+                    <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold text-sm">
+                      <Bike className="w-5 h-5 text-red-600 dark:text-red-400" />
+                      <span>Corregir modelo en el catálogo</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowEditMotoModal(false)}
+                      className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#26272e] transition-colors cursor-pointer"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-500 dark:text-[#8e8f96] mb-1">
+                        Nombre actual
+                      </label>
+                      <input
+                        type="text"
+                        disabled
+                        value={motoToEditOriginal}
+                        className="w-full bg-slate-100 dark:bg-[#0f1012] border border-slate-200 dark:border-[#35363d] rounded-lg px-3 py-2 text-xs text-slate-500 dark:text-[#8e8f96] cursor-not-allowed"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 dark:text-[#b8b9c0] mb-1">
+                        Nuevo nombre corregido *
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ej: Honda Wave 110S"
+                        value={motoToEditNewName}
+                        onChange={(e) => setMotoToEditNewName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleConfirmEditMoto();
+                        }}
+                        className="w-full bg-white dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-red-600 font-medium"
+                      />
+                    </div>
+
+                    {/* Verificación de impacto */}
+                    <div className="rounded-xl border border-slate-200 dark:border-[#26272e] bg-slate-50 dark:bg-[#141519] p-3 space-y-2">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-slate-800 dark:text-white">
+                        <span>Impacto en publicaciones:</span>
+                        {verificandoImpactoMoto ? (
+                          <span className="flex items-center gap-1 text-slate-400 font-normal">
+                            <RefreshCw className="w-3 h-3 animate-spin text-red-500" /> Verificando...
+                          </span>
+                        ) : impactoMotoInfo ? (
+                          <span className={impactoMotoInfo.count > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}>
+                            {impactoMotoInfo.count} {impactoMotoInfo.count === 1 ? "publicación usa" : "publicaciones usan"} este modelo
+                          </span>
+                        ) : null}
+                      </div>
+
+                      {impactoMotoInfo && impactoMotoInfo.count > 0 && (
+                        <div className="space-y-2">
+                          <p className="text-[10px] text-slate-500 dark:text-[#8e8f96]">
+                            Publicaciones detectadas: {impactoMotoInfo.productos.slice(0, 3).map((p) => p.nombre).join(", ")}
+                            {impactoMotoInfo.productos.length > 3 ? ` y ${impactoMotoInfo.productos.length - 3} más...` : "."}
+                          </p>
+
+                          <label className="flex items-start gap-2 text-[11px] text-slate-700 dark:text-[#b8b9c0] cursor-pointer pt-1 border-t border-slate-200 dark:border-[#26272e]">
+                            <input
+                              type="checkbox"
+                              checked={actualizarMotosExistentes}
+                              onChange={(e) => setActualizarMotosExistentes(e.target.checked)}
+                              className="mt-0.5 w-3.5 h-3.5 text-red-600 rounded border-slate-300 dark:border-[#35363d] focus:ring-red-500 cursor-pointer shrink-0"
+                            />
+                            <span>
+                              Actualizar también automáticamente todas las publicaciones que ya usan este nombre (Recomendado para mantener coherencia).
+                            </span>
+                          </label>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-[#26272e]">
+                    <button
+                      type="button"
+                      onClick={() => setShowEditMotoModal(false)}
+                      className="px-3.5 py-1.5 bg-transparent border border-slate-300 dark:border-[#35363d] hover:bg-slate-100 dark:hover:bg-[#26272e] text-slate-700 dark:text-[#b8b9c0] rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={guardandoEditMoto || !motoToEditNewName.trim() || motoToEditNewName.trim().length < 3}
+                      onClick={handleConfirmEditMoto}
+                      className="px-4 py-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      {guardandoEditMoto ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Guardando...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Guardar corrección</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
@@ -5885,14 +7486,14 @@ export default function PanelPage() {
             </div>
 
             {/* 3. GESTIÓN DE BANNERS DEL INICIO (HERO Y TEMPORADA) */}
-            <div className="bg-[#16171c] border border-[#26272e] rounded-2xl p-6 sm:p-8 space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-[#26272e]">
+            <div className="bg-white dark:bg-[#16171c] border border-slate-200 dark:border-[#26272e] rounded-2xl p-6 sm:p-8 space-y-6 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-200 dark:border-[#26272e]">
                 <div>
-                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
                     <ImageIcon className="w-5 h-5 text-red-500" />
                     Banners del Inicio y Temporada
                   </h2>
-                  <p className="text-xs text-[#9a9ba3] mt-0.5">
+                  <p className="text-xs text-slate-500 dark:text-[#9a9ba3] mt-0.5">
                     Administrá los banners principales de la página principal, promociones de temporada, imágenes de fondo y enlaces directos a ofertas.
                   </p>
                 </div>
@@ -5934,8 +7535,8 @@ export default function PanelPage() {
                           <span
                             className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                               b.activo
-                                ? "bg-emerald-500/15 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
-                                : "bg-slate-200 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 border-slate-300 dark:border-zinc-700"
+                                ? "bg-emerald-500/15 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-400 border-emerald-500/30"
+                                : "bg-slate-200 dark:bg-zinc-800 text-slate-700 dark:text-zinc-400 border-slate-300 dark:border-zinc-700"
                             }`}
                           >
                             {b.activo ? "Activo en tienda" : "Pausado"}
@@ -5975,16 +7576,23 @@ export default function PanelPage() {
                       <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
                         <button
                           type="button"
+                          disabled={saving}
                           onClick={() => handleToggleBanner(b.id, !b.activo)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                             b.activo
-                              ? "bg-slate-200 hover:bg-slate-300 text-slate-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700 border border-slate-300/80 dark:border-transparent"
-                              : "bg-emerald-50 dark:bg-emerald-600/20 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-500/30 hover:bg-emerald-100 dark:hover:bg-emerald-600/30"
+                              ? "bg-slate-200 hover:bg-slate-300 text-slate-800 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700 border border-slate-300/90 dark:border-transparent focus:outline-none focus:ring-2 focus:ring-slate-400/40"
+                              : "bg-emerald-100 hover:bg-emerald-200 !text-emerald-950 border border-emerald-600 shadow-xs dark:bg-emerald-500/20 dark:!text-emerald-400 dark:border-emerald-500/30 dark:hover:bg-emerald-500/30 dark:shadow-none focus:outline-none focus:ring-2 focus:ring-emerald-500/40 dark:focus:ring-emerald-400/30"
                           }`}
                           title={b.activo ? "Pausar banner" : "Activar banner"}
                         >
-                          {b.activo ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                          <span>{b.activo ? "Pausar" : "Activar"}</span>
+                          {b.activo ? (
+                            <EyeOff className="w-3.5 h-3.5 text-slate-600 dark:text-zinc-400 shrink-0" />
+                          ) : (
+                            <Eye className="w-3.5 h-3.5 !text-emerald-800 dark:!text-emerald-400 shrink-0" />
+                          )}
+                          <span className={b.activo ? "" : "font-bold !text-emerald-950 dark:!text-emerald-400"}>
+                            {b.activo ? "Pausar" : "Activar"}
+                          </span>
                         </button>
 
                         <button
@@ -6162,33 +7770,146 @@ export default function PanelPage() {
                       </label>
                     </div>
 
-                    {/* Previsualización rápida */}
-                    <div className="pt-2 border-t border-slate-200 dark:border-[#26272e] space-y-1">
-                      <span className="text-[10px] text-slate-500 dark:text-[#6b6c75] font-semibold uppercase tracking-wider block">
-                        Previsualización aproximada:
-                      </span>
-                      <div className="relative overflow-hidden p-3.5 rounded-xl border border-red-500/25 bg-gradient-to-r from-red-50 via-white to-slate-50 dark:from-red-950/30 dark:to-[#16171c] shadow-xs space-y-1.5">
-                        {bannerImagenUrl && (
-                          <div
-                            className="absolute inset-0 bg-cover bg-center opacity-15 dark:opacity-25 pointer-events-none"
-                            style={{ backgroundImage: `url(${bannerImagenUrl})` }}
-                          />
-                        )}
-                        <div className="relative z-10 space-y-1">
-                          {bannerBadge && (
-                            <span className="text-[9px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400 block">
-                              {bannerBadge}
+                    {/* Previsualización del banner en la tienda */}
+                    {(() => {
+                      const isDarkPreview =
+                        bannerPreviewTheme === "dark" ||
+                        (bannerPreviewTheme === "auto" && currentAppTheme === "dark");
+
+                      return (
+                        <div className="pt-2 border-t border-slate-200 dark:border-[#26272e] space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] text-slate-600 dark:text-[#8a8b94] font-bold uppercase tracking-wider flex items-center gap-1.5">
+                              <Eye className="w-3.5 h-3.5 text-red-500" />
+                              Previsualización en la tienda:
                             </span>
-                          )}
-                          <h4 className="text-xs font-bold text-slate-900 dark:text-white leading-tight">
-                            {bannerTitulo || "Título de ejemplo"}
-                          </h4>
-                          <p className="text-[11px] text-slate-600 dark:text-[#9a9ba3] line-clamp-2">
-                            {bannerDescripcion || "Descripción de ejemplo del banner..."}
-                          </p>
+
+                            {/* Selector de modo para previsualizar */}
+                            <div className="flex items-center bg-slate-100 dark:bg-[#1a1b21] p-0.5 rounded-lg border border-slate-200 dark:border-[#2c2d36] text-[10px]">
+                              <button
+                                type="button"
+                                onClick={() => setBannerPreviewTheme("auto")}
+                                className={`px-2 py-0.5 rounded-md font-semibold transition-all cursor-pointer ${
+                                  bannerPreviewTheme === "auto"
+                                    ? "bg-white dark:bg-[#2c2d36] text-slate-900 dark:text-white shadow-xs"
+                                    : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
+                                }`}
+                              >
+                                Auto
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setBannerPreviewTheme("light")}
+                                className={`px-2 py-0.5 rounded-md font-semibold transition-all cursor-pointer ${
+                                  bannerPreviewTheme === "light"
+                                    ? "bg-white text-slate-900 shadow-xs"
+                                    : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
+                                }`}
+                              >
+                                ☀️ Claro
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setBannerPreviewTheme("dark")}
+                                className={`px-2 py-0.5 rounded-md font-semibold transition-all cursor-pointer ${
+                                  bannerPreviewTheme === "dark"
+                                    ? "bg-[#2c2d36] text-white shadow-xs keep-white"
+                                    : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
+                                }`}
+                              >
+                                🌙 Oscuro
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Contenedor del banner previsualizado */}
+                          <div
+                            className={`relative overflow-hidden rounded-2xl border transition-all duration-200 p-4 sm:p-5 space-y-2.5 ${
+                              isDarkPreview
+                                ? "bg-gradient-to-br from-[#17181d] via-[#14151a] to-[#0f1013] border-[#2b2c35] text-white shadow-lg shadow-black/30 keep-white"
+                                : "bg-gradient-to-br from-red-50/70 via-white to-slate-50 border-slate-200/90 text-slate-900 shadow-sm"
+                            }`}
+                          >
+                            {/* Imagen de fondo con gradiente protector de contraste */}
+                            {bannerImagenUrl && (
+                              <>
+                                <div
+                                  className={`absolute right-0 top-0 bottom-0 w-3/5 sm:w-1/2 bg-cover bg-center pointer-events-none transition-opacity ${
+                                    isDarkPreview ? "opacity-30" : "opacity-25"
+                                  }`}
+                                  style={{ backgroundImage: `url(${bannerImagenUrl})` }}
+                                />
+                                <div
+                                  className={`absolute inset-0 pointer-events-none ${
+                                    isDarkPreview
+                                      ? "bg-gradient-to-r from-[#14151a] via-[#14151a]/90 to-transparent"
+                                      : "bg-gradient-to-r from-white via-white/85 to-transparent"
+                                  }`}
+                                />
+                              </>
+                            )}
+
+                            <div className="relative z-10 space-y-2">
+                              {/* Badge con ícono de llama */}
+                              <div
+                                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider shadow-xs ${
+                                  isDarkPreview
+                                    ? "border border-red-500/40 bg-red-500/15 text-red-400 keep-white"
+                                    : "border border-red-200 bg-red-100/90 text-red-700"
+                                }`}
+                              >
+                                <Flame
+                                  size={12}
+                                  className={`shrink-0 ${
+                                    isDarkPreview ? "fill-red-400 text-red-400" : "fill-red-600 text-red-600"
+                                  }`}
+                                />
+                                <span className="truncate max-w-[280px]">
+                                  {bannerBadge || "CHOPPER REPUESTOS · POSADAS, MISIONES"}
+                                </span>
+                              </div>
+
+                              {/* Título comercial */}
+                              <h4
+                                className={`text-sm sm:text-base font-black leading-tight tracking-tight ${
+                                  isDarkPreview ? "text-white keep-white" : "text-slate-900"
+                                }`}
+                              >
+                                {bannerTitulo || "Hacé tu pedido y retiralo en el local"}
+                              </h4>
+
+                              {/* Descripción */}
+                              <p
+                                className={`text-xs font-normal leading-relaxed line-clamp-2 ${
+                                  isDarkPreview ? "text-slate-300 keep-white" : "text-slate-600"
+                                }`}
+                              >
+                                {bannerDescripcion ||
+                                  "Buscá tu repuesto, armá el pedido online y pasá a retirarlo por nuestro local o pedí envío con Motomandado..."}
+                              </p>
+
+                              {/* Botones simulados de acción */}
+                              <div className="flex flex-wrap items-center gap-2 pt-1">
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-600 text-white text-[11px] font-bold shadow-sm shadow-red-600/30 keep-white">
+                                  <span>Ver productos</span>
+                                  <ArrowRight size={11} />
+                                </span>
+                                <span
+                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-semibold border ${
+                                    isDarkPreview
+                                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400 keep-white"
+                                      : "border-emerald-500/30 bg-emerald-50 text-emerald-800"
+                                  }`}
+                                >
+                                  <MessageCircle size={11} />
+                                  <span>WhatsApp</span>
+                                </span>
+                              </div>
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    </div>
+                      );
+                    })()}
                   </div>
 
                   <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-200 dark:border-[#26272e]">
@@ -6271,11 +7992,11 @@ export default function PanelPage() {
                 <span className="text-2xl font-bold text-emerald-400 mt-1 block">{usuariosAuditoriaDisponibles.length}</span>
               </div>
               <button
-                onClick={loadAllData}
-                disabled={loading}
-                className="self-start sm:self-auto px-4 py-2 text-xs bg-[#16171c] hover:bg-[#26272e] border border-[#35363d] rounded-lg text-[#d7d8dd] flex items-center gap-2 transition-colors shadow-sm"
+                onClick={() => loadAuditoriaData(true)}
+                disabled={loadingAudit}
+                className="self-start sm:self-auto px-4 py-2 text-xs bg-[#16171c] hover:bg-[#26272e] border border-[#35363d] rounded-lg text-[#d7d8dd] flex items-center gap-2 transition-colors shadow-sm cursor-pointer"
               >
-                <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingAudit ? "animate-spin" : ""}`} />
                 <span>Refrescar logs</span>
               </button>
             </div>
@@ -7804,6 +9525,18 @@ export default function PanelPage() {
                         </div>
                       </div>
                     </div>
+
+                    {extraerNotaUtil(selectedPedido.notas) && (
+                      <div className="pt-2 border-t border-[#26272e] space-y-1">
+                        <span className="text-[#6b6c75] text-[10px] uppercase font-bold tracking-wider">
+                          Observaciones del cliente:
+                        </span>
+                        <div className="text-white font-medium bg-[#141519] p-2.5 rounded-lg border border-amber-500/20 flex items-start gap-2 text-xs leading-relaxed">
+                          <FileText className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                          <span className="text-amber-200">{extraerNotaUtil(selectedPedido.notas)}</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -8004,86 +9737,38 @@ export default function PanelPage() {
                   )}
                 </div>
 
-                {/* Preparador + Observaciones / Historial */}
-                {(() => {
-                  const isEntregaView = activeView === "entrega";
-                  const obsUtil = extraerNotaUtil(selectedPedido.notas);
-                  return (
-                    <div className="bg-[#1a1b20] border border-[#26272e] rounded-xl p-4 space-y-3 text-xs flex flex-col justify-between">
-                      <div className="space-y-2.5">
-                        <div className="flex items-center justify-between pb-2 border-b border-[#26272e]">
-                          <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                            <UserCheck className="w-3.5 h-3.5 text-indigo-400" /> Preparación y Control
-                          </span>
-                          <span className="text-[11px] text-[#9a9ba3]">Stock</span>
-                        </div>
-
-                        <div className="flex items-center justify-between">
-                          <span className="text-[#6b6c75]">Preparado por:</span>
-                          <span className="text-white font-semibold">
-                            {selectedPedido.preparadorNombre || <span className="text-[#6b6c75] italic">Sin asignar</span>}
-                          </span>
-                        </div>
-
-                        <div className="flex items-center justify-between">
-                          <span className="text-[#6b6c75]">Estado de preparación:</span>
-                          <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            {selectedPedido.estado === "ENTREGADO"
-                              ? "Entregado al cliente"
-                              : selectedPedido.estado === "LISTO_ENTREGA" || selectedPedido.estado === "LISTO_PARA_RETIRAR"
-                              ? "Paquete listo y controlado"
-                              : selectedPedido.estado === "PREPARANDO"
-                              ? "En preparación en depósito"
-                              : "Pendiente de armado"}
-                          </span>
-                        </div>
-
-                        {/* En vista Entrega de pedidos: mostrar ÚNICAMENTE observaciones útiles (si existen) */}
-                        {isEntregaView ? (
-                          obsUtil ? (
-                            <div className="pt-2.5 border-t border-[#26272e]">
-                              <span className="text-xs font-semibold text-amber-400 flex items-center gap-1.5 mb-1.5">
-                                <FileText className="w-3.5 h-3.5 text-amber-400" /> Observaciones
-                              </span>
-                              <div className="text-xs text-[#d1d2dc] bg-[#141519] p-2.5 rounded-lg border border-amber-500/20 leading-relaxed">
-                                {obsUtil}
-                              </div>
-                            </div>
-                          ) : null
-                        ) : (
-                          /* En otras vistas: mantener historial completo y notas */
-                          selectedPedido.notas && (
-                            <div className="pt-2 border-t border-[#26272e] space-y-2">
-                              <div className="flex items-center justify-between">
-                                <span className="text-xs font-semibold text-white flex items-center gap-1.5">
-                                  <FileText className="w-3.5 h-3.5 text-red-500" /> Notas e Historial de Movimientos
-                                </span>
-                              </div>
-                              {obsUtil && (
-                                <div className="text-[11px] bg-amber-500/10 border border-amber-500/30 p-2 rounded text-amber-200">
-                                  <span className="text-amber-400 font-semibold block mb-0.5">Nota registrada:</span>
-                                  {obsUtil}
-                                </div>
-                              )}
-                              <div className="bg-[#141519] p-2.5 rounded-lg border border-[#26272e] max-h-36 overflow-y-auto space-y-1.5 text-[11px]">
-                                <span className="text-[10px] uppercase tracking-wider text-[#6b6c75] font-semibold block">
-                                  Historial de auditoría completo
-                                </span>
-                                {selectedPedido.notas.split(" | ").map((movimiento, mIdx) => (
-                                  <div key={mIdx} className="flex items-start gap-1.5 text-[#b8b9c0] leading-snug">
-                                    <span className="text-red-500 font-bold shrink-0">•</span>
-                                    <span>{movimiento.trim()}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )
-                        )}
-                      </div>
+                {/* Preparador y Control de Stock */}
+                <div className="bg-[#1a1b20] border border-[#26272e] rounded-xl p-4 space-y-3 text-xs flex flex-col justify-between">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between pb-2 border-b border-[#26272e]">
+                      <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <UserCheck className="w-3.5 h-3.5 text-indigo-400" /> Preparación y Control
+                      </span>
+                      <span className="text-[11px] text-[#9a9ba3]">Stock</span>
                     </div>
-                  );
-                })()}
+
+                    <div className="flex items-center justify-between py-1 border-b border-[#26272e]/50">
+                      <span className="text-[#6b6c75]">Preparado por:</span>
+                      <span className="text-white font-semibold">
+                        {selectedPedido.preparadorNombre || <span className="text-[#6b6c75] italic">Sin asignar</span>}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between py-1">
+                      <span className="text-[#6b6c75]">Estado de preparación:</span>
+                      <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        {selectedPedido.estado === "ENTREGADO"
+                          ? "Entregado al cliente"
+                          : selectedPedido.estado === "LISTO_ENTREGA" || selectedPedido.estado === "LISTO_PARA_RETIRAR"
+                          ? "Paquete listo y controlado"
+                          : selectedPedido.estado === "PREPARANDO"
+                          ? "En preparación en depósito"
+                          : "Pendiente de armado"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Tabla de Repuestos del Pedido */}
