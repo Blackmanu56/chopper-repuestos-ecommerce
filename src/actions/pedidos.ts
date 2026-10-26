@@ -1453,12 +1453,17 @@ export async function actualizarEstadoPedidoAction(
 
       // Disparar correo al cliente y notificación a staff según estado confirmado
       if (estadoResult === "CONFIRMADO") {
-        enviarEmailPedidoEvento({ pedido: p, evento: "TRANSFERENCIA_APROBADA" }).catch((e) => console.error("Error email CONFIRMADO:", e));
+        // En efectivo en mostrador, el cobro real se registra al retirar; no anunciar pago confirmado antes de tiempo
+        if (p.metodoPago !== "EFECTIVO_LOCAL") {
+          enviarEmailPedidoEvento({ pedido: p, evento: "TRANSFERENCIA_APROBADA" }).catch((e) => console.error("Error email CONFIRMADO:", e));
+        }
         crearNotificacionStaffInternal({
           tipo: "PEDIDO_CONFIRMADO_ARMAR",
           rolDestino: "STOCK",
           titulo: `Pedido #ORD-${p.numero} confirmado`,
-          mensaje: `Pago verificado por Ventas. Listo para iniciar armado en depósito.`,
+          mensaje: p.metodoPago === "EFECTIVO_LOCAL"
+            ? `Reserva en mostrador. Listo para iniciar armado en depósito.`
+            : `Pago verificado por Ventas. Listo para iniciar armado en depósito.`,
           pedidoId: p.id,
           pedidoNumero: p.numero,
           moduloDestino: "preparacion",
@@ -1690,6 +1695,22 @@ export async function subirComprobantePedidoAction(
       pedidoNumero: pedido.numero,
       moduloDestino: "pedidos",
     }).catch((err) => console.error("Error al notificar comprobante a staff:", err));
+
+    enviarEmailPedidoEvento({
+      pedido: {
+        id: pedido.id,
+        numero: pedido.numero,
+        nombreCliente: pedido.nombreCliente,
+        emailCliente: pedido.emailCliente,
+        modalidadEntrega: pedido.modalidadEntrega,
+        metodoPago: pedido.metodoPago,
+        costoEnvio: pedido.costoEnvio,
+        total: pedido.total,
+        direccionEnvio: pedido.direccionEnvio,
+        estadoPago: pedido.estadoPago,
+      },
+      evento: "COMPROBANTE_RECIBIDO",
+    }).catch((err) => console.error("Error al disparar correo de comprobante recibido:", err));
 
     try {
       revalidatePath("/mis-pedidos");
@@ -2223,6 +2244,24 @@ export async function registrarCobroEfectivoAction(
       where: { id: pedidoActual.id },
       include: { items: true },
     });
+
+    if (updated) {
+      enviarEmailPedidoEvento({
+        pedido: {
+          id: updated.id,
+          numero: updated.numero,
+          nombreCliente: updated.nombreCliente,
+          emailCliente: updated.emailCliente,
+          modalidadEntrega: updated.modalidadEntrega,
+          metodoPago: updated.metodoPago,
+          costoEnvio: updated.costoEnvio,
+          total: updated.total,
+          direccionEnvio: updated.direccionEnvio,
+          estadoPago: updated.estadoPago,
+        },
+        evento: "TRANSFERENCIA_APROBADA",
+      }).catch((err) => console.error("Error al disparar correo de cobro efectivo en mostrador:", err));
+    }
 
     try {
       revalidatePath("/panel");

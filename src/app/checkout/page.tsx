@@ -192,13 +192,44 @@ export default function CheckoutPage() {
 
       // 3. Si pagó por transferencia y adjuntó comprobante, subir el archivo de inmediato
       if (formData.pago === "TRANSFERENCIA" && archivoComprobante) {
+        if (archivoComprobante.size > 5 * 1024 * 1024) {
+          setCheckoutError(
+            "El comprobante seleccionado supera el límite máximo permitido de 5 MB. Por favor adjuntá un archivo más liviano."
+          );
+          return;
+        }
+
         const compFd = new FormData();
         compFd.append("comprobante", archivoComprobante);
-        const resSubida = await subirComprobanteDirectoAction(compFd);
-        if (!resSubida.success || !resSubida.comprobanteUrl) {
+
+        let resSubida: { success: boolean; comprobanteUrl?: string; error?: string } | null = null;
+        try {
+          resSubida = await subirComprobanteDirectoAction(compFd);
+        } catch (uploadErr) {
+          console.warn("Server Action de comprobante no completó, reintentando vía endpoint directo:", uploadErr);
+          try {
+            const apiRes = await fetch("/api/comprobantes/upload", {
+              method: "POST",
+              body: compFd,
+            });
+            if (apiRes.ok) {
+              resSubida = await apiRes.json();
+            } else {
+              const errJson = await apiRes.json().catch(() => ({}));
+              resSubida = {
+                success: false,
+                error: errJson.error || "No se pudo subir el archivo.",
+              };
+            }
+          } catch (apiErr) {
+            console.error("Fallo de red en subida de comprobante:", apiErr);
+          }
+        }
+
+        if (!resSubida || !resSubida.success || !resSubida.comprobanteUrl) {
           setCheckoutError(
-            resSubida.error ||
-              "No se pudo procesar el comprobante adjuntado. Por favor, verificá que sea un formato válido (JPG, PNG, WEBP o PDF)."
+            resSubida?.error ||
+              "No se pudo procesar el comprobante adjuntado. Por favor, verificá que sea un formato válido (JPG, PNG, WEBP o PDF, máx. 5 MB)."
           );
           return;
         }
@@ -259,13 +290,20 @@ export default function CheckoutPage() {
     } catch (err: any) {
       console.error("Error en checkout:", err);
       if (comprobanteSubidoUrl) {
-        await limpiarComprobanteHuerfanoAction(comprobanteSubidoUrl);
+        await limpiarComprobanteHuerfanoAction(comprobanteSubidoUrl).catch(() => {});
       }
-      setCheckoutError(
-        err?.message
-          ? `Error al procesar el pedido: ${err.message}`
-          : "Ocurrió un error al procesar el pedido. Por favor, verificá los datos ingresados."
-      );
+      const rawMsg = err?.message || "";
+      if (rawMsg.includes("Failed to fetch") || rawMsg.includes("fetch failed")) {
+        setCheckoutError(
+          "No se pudo completar la comunicación con el servidor al procesar el pedido o el comprobante. Por favor verificá tu conexión a internet o intentá con un archivo más liviano (máx. 5 MB)."
+        );
+      } else {
+        setCheckoutError(
+          rawMsg
+            ? `Error al procesar el pedido: ${rawMsg}`
+            : "Ocurrió un error al procesar el pedido. Por favor, verificá los datos ingresados."
+        );
+      }
     } finally {
       setVerificandoPrecios(false);
       setIsSubmitting(false);
@@ -586,6 +624,16 @@ export default function CheckoutPage() {
                       onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (file) {
+                          if (file.size > 5 * 1024 * 1024) {
+                            setCheckoutError(
+                              "El archivo seleccionado supera el límite máximo de 5 MB. Por favor seleccioná un archivo más liviano."
+                            );
+                            e.target.value = "";
+                            setArchivoComprobante(null);
+                            setPreviewComprobante(null);
+                            return;
+                          }
+                          setCheckoutError(null);
                           setArchivoComprobante(file);
                           if (file.type.startsWith("image/")) {
                             setPreviewComprobante(URL.createObjectURL(file));
