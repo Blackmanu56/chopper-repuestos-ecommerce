@@ -58,6 +58,7 @@ export default function UserProfileModal() {
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [emailNotice, setEmailNotice] = useState<string | null>(null);
   const [showPasswordFields, setShowPasswordFields] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -68,16 +69,18 @@ export default function UserProfileModal() {
       setNombre(user.nombreCompleto || "");
       setUsername(user.username || "");
       setCorreo(user.correo || "");
-      setTelefono(user.telefono || "376 524-3554");
-      setDireccion(user.direccion || "Calle Félix de Azara 1890, Posadas, Misiones");
-      setDni(user.dni || "34.567.890");
+      setTelefono(user.telefono || "");
+      setDireccion(user.direccion || "");
+      setDni(user.dni || "");
       setCuit(user.cuit || "");
       setAvatar(user.avatar || "");
       setPassword("");
       setNewPassword("");
       setShowCurrentPassword(false);
       setShowNewPassword(false);
+      setShowPasswordFields(false);
       setSavedSuccess(false);
+      setEmailNotice(null);
       setErrorMsg("");
     }
   }, [user, isProfileOpen]);
@@ -87,34 +90,63 @@ export default function UserProfileModal() {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (user.rol !== "CLIENTE") {
-        setIsUploadingPhoto(true);
-        setErrorMsg("");
-        const res = await uploadProfilePhoto(file);
-        setIsUploadingPhoto(false);
-        if (res.success && res.fotoUrl) {
-          setAvatar(res.fotoUrl);
-          setSavedSuccess(true);
-          setTimeout(() => setSavedSuccess(false), 2000);
-        } else {
-          setErrorMsg(res.error || "Error al subir la imagen");
-        }
+      setIsUploadingPhoto(true);
+      setErrorMsg("");
+      const res = await uploadProfilePhoto(file);
+      setIsUploadingPhoto(false);
+      if (res.success && res.fotoUrl) {
+        setAvatar(res.fotoUrl);
+        setSavedSuccess(true);
+        setTimeout(() => setSavedSuccess(false), 2000);
       } else {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          if (typeof reader.result === "string") {
-            setAvatar(reader.result);
-          }
-        };
-        reader.readAsDataURL(file);
+        setErrorMsg(res.error || "Error al subir la imagen");
       }
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSaving(true);
     setErrorMsg("");
+    setEmailNotice(null);
+
+    // Validaciones locales antes de enviar
+    if (showPasswordFields || newPassword || password) {
+      if (newPassword && !password) {
+        setErrorMsg("Ingresá tu contraseña actual para confirmar el cambio.");
+        return;
+      }
+      if (password && !newPassword) {
+        setErrorMsg("Ingresá la nueva contraseña.");
+        return;
+      }
+      if (newPassword && newPassword.length < 6) {
+        setErrorMsg("La nueva contraseña debe tener al menos 6 caracteres.");
+        return;
+      }
+    }
+
+    if (dni.trim()) {
+      const cleanDni = dni.replace(/\D/g, "");
+      if (cleanDni.length < 7 || cleanDni.length > 8) {
+        setErrorMsg("El DNI debe contener 7 u 8 dígitos numéricos.");
+        return;
+      }
+    }
+
+    if (cuit.trim()) {
+      const cleanCuit = cuit.replace(/\D/g, "");
+      if (cleanCuit.length !== 11) {
+        setErrorMsg("El CUIT/CUIL debe contener 11 dígitos numéricos (o podés dejar el campo en blanco si no lo tenés).");
+        return;
+      }
+    }
+
+    if (username.trim() && username.trim().length < 3) {
+      setErrorMsg("El nombre de usuario debe tener al menos 3 caracteres.");
+      return;
+    }
+
+    setIsSaving(true);
 
     const res = await updateUserProfile({
       nombreCompleto: nombre.trim() || user.nombreCompleto,
@@ -135,11 +167,24 @@ export default function UserProfileModal() {
       return;
     }
 
-    setSavedSuccess(true);
-    setTimeout(() => {
-      setSavedSuccess(false);
-      closeProfile();
-    }, 1200);
+    if (res.emailChangePending && res.nuevoEmail) {
+      setEmailNotice(
+        `Te enviamos un correo con un enlace de confirmación a ${res.nuevoEmail}. Tu correo actual seguirá activo para iniciar sesión hasta que hagas clic en dicho enlace.`
+      );
+      setSavedSuccess(true);
+      setPassword("");
+      setNewPassword("");
+      setShowPasswordFields(false);
+    } else {
+      setSavedSuccess(true);
+      setPassword("");
+      setNewPassword("");
+      setShowPasswordFields(false);
+      setTimeout(() => {
+        setSavedSuccess(false);
+        closeProfile();
+      }, 1300);
+    }
   };
 
   return (
@@ -176,6 +221,16 @@ export default function UserProfileModal() {
           <div className="rounded-xl border border-emerald-500/40 bg-emerald-50 dark:bg-emerald-950/30 p-3 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2 animate-in fade-in">
             <CheckCircle2 size={16} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
             <span className="font-bold">¡Datos de perfil y foto actualizados con éxito!</span>
+          </div>
+        )}
+
+        {emailNotice && (
+          <div className="rounded-xl border border-sky-500/40 bg-sky-50 dark:bg-sky-950/30 p-3.5 text-xs text-sky-900 dark:text-sky-200 flex items-start gap-2.5 animate-in fade-in shadow-sm">
+            <Mail size={18} className="text-sky-600 dark:text-sky-400 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p className="font-black text-sky-950 dark:text-white">Confirmación de cambio de correo</p>
+              <p className="text-[11px] leading-relaxed text-sky-800 dark:text-sky-200">{emailNotice}</p>
+            </div>
           </div>
         )}
 

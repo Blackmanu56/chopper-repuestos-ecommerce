@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 
 export type EmailEventoPedido =
   | "PEDIDO_CREADO"
+  | "COMPROBANTE_RECIBIDO"
   | "TRANSFERENCIA_APROBADA"
   | "PEDIDO_EN_PREPARACION"
   | "PEDIDO_LISTO"
@@ -33,37 +34,113 @@ export interface DatosEmailPedido {
   estadoPago?: string;
 }
 
+export interface SmtpConfigInfo {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  from: string;
+}
+
+/**
+ * Obtiene la configuración SMTP desde variables de entorno del servidor.
+ * Soporta de forma transparente nombres estándar (SMTP_USER, SMTP_PASS)
+ * y alias de Gmail (GMAIL_USER, GMAIL_APP_PASSWORD).
+ * NUNCA expone ni retorna la contraseña en texto plano en logs o diagnósticos.
+ */
+export function getSmtpConfig(): SmtpConfigInfo | null {
+  const user = (process.env.SMTP_USER || process.env.GMAIL_USER || "").trim();
+  const pass = (process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || "").trim();
+  if (!user || !pass) return null;
+
+  const host = (process.env.SMTP_HOST || "smtp.gmail.com").trim();
+  const port = parseInt(process.env.SMTP_PORT || "465", 10);
+  const secure = process.env.SMTP_SECURE !== undefined
+    ? process.env.SMTP_SECURE === "true"
+    : port === 465;
+  const from = (process.env.SMTP_FROM || `"Chopper Repuestos" <${user}>`).trim();
+
+  return { host, port, secure, user, from };
+}
+
 /**
  * Valida si las credenciales SMTP de Gmail están configuradas por variables de entorno
  */
 export function isSmtpConfigured(): boolean {
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-  return Boolean(user && user.trim() && pass && pass.trim());
+  return getSmtpConfig() !== null;
 }
 
 /**
- * Crea el transporter de Nodemailer utilizando exclusivamente variables de entorno
+ * Crea el transporter de Nodemailer utilizando exclusivamente variables de entorno.
+ * Configurado con Gmail SMTP (smtp.gmail.com:465 SSL).
  */
 function createTransporter() {
-  if (!isSmtpConfigured()) return null;
+  const config = getSmtpConfig();
+  if (!config) return null;
 
-  const host = process.env.SMTP_HOST || "smtp.gmail.com";
-  const port = parseInt(process.env.SMTP_PORT || "465", 10);
-  const secure = process.env.SMTP_SECURE === "false" ? false : port === 465;
+  const pass = (process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || "").trim();
 
   return nodemailer.createTransport({
-    host,
-    port,
-    secure,
+    host: config.host,
+    port: config.port,
+    secure: config.secure, // true para puerto 465 (SSL directo)
     auth: {
-      user: process.env.SMTP_USER?.trim(),
-      pass: process.env.SMTP_PASS?.trim(),
+      user: config.user,
+      pass,
     },
-    tls: {
-      rejectUnauthorized: false,
-    },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
   });
+}
+
+/**
+ * Verifica la conexión y autenticación con el servidor SMTP de forma segura,
+ * sin exponer credenciales en la respuesta.
+ */
+export async function verificarConexionSmtp(): Promise<{
+  configured: boolean;
+  connected: boolean;
+  host?: string;
+  port?: number;
+  userMasked?: string;
+  error?: string;
+}> {
+  const config = getSmtpConfig();
+  if (!config) {
+    return {
+      configured: false,
+      connected: false,
+      error: "Variables de entorno SMTP no configuradas (SMTP_USER y SMTP_PASS ausentes). El sistema opera en modo simulación (DRY-RUN).",
+    };
+  }
+
+  const [usuario, dominio] = config.user.split("@");
+  const userMasked = usuario ? `${usuario.slice(0, 2)}***@${dominio || "gmail.com"}` : "Configurado";
+
+  try {
+    const transporter = createTransporter();
+    if (!transporter) {
+      return { configured: false, connected: false, error: "No se pudo instanciar el transporte SMTP." };
+    }
+    await transporter.verify();
+    return {
+      configured: true,
+      connected: true,
+      host: config.host,
+      port: config.port,
+      userMasked,
+    };
+  } catch (err: any) {
+    return {
+      configured: true,
+      connected: false,
+      host: config.host,
+      port: config.port,
+      userMasked,
+      error: err?.message || "Error al verificar conexión SMTP con Gmail.",
+    };
+  }
 }
 
 /**
@@ -109,13 +186,24 @@ export function renderEmailTemplate(
         : "Tu pedido está registrado y pendiente de validación comercial por nuestro equipo de Ventas.";
       break;
 
+    case "COMPROBANTE_RECIBIDO":
+      subject = `Comprobante recibido · Pedido #ORD-${datos.numero} · Chopper Repuestos`;
+      statusBadge = "COMPROBANTE EN REVISIÓN";
+      badgeColor = "#0284c7";
+      mainTitle = "Recibimos tu comprobante de pago";
+      introMessage = `Hola <strong>${datos.nombreCliente}</strong>, registramos el comprobante de transferencia para tu pedido <strong>#ORD-${datos.numero}</strong>.`;
+      calloutMessage = "<strong>Transferencia pendiente de verificación:</strong> Nuestro equipo de Ventas revisará la acreditación en nuestra cuenta bancaria en el horario de atención para confirmar tu compra y derivar el pedido a depósito para su preparación.";
+      break;
+
     case "TRANSFERENCIA_APROBADA":
       subject = `Pago confirmado para tu pedido #ORD-${datos.numero} · Chopper Repuestos`;
       statusBadge = "PAGO CONFIRMADO";
       badgeColor = "#16a34a";
       mainTitle = "¡Tu pago fue aprobado con éxito!";
-      introMessage = `Hola <strong>${datos.nombreCliente}</strong>, el equipo de Ventas verificó y aprobó el pago de tu pedido <strong>#ORD-${datos.numero}</strong>.`;
-      calloutMessage = "Tu pedido pasó a estado <strong>Confirmado</strong> y ya fue derivado a nuestro sector de Depósito/Stock para su preparación física.";
+      introMessage = `Hola <strong>${datos.nombreCliente}</strong>, registramos la confirmación del pago de tu pedido <strong>#ORD-${datos.numero}</strong>.`;
+      calloutMessage = datos.metodoPago === "EFECTIVO_LOCAL"
+        ? `Registramos el cobro en efectivo de <strong>${formatCurrency(datos.total)}</strong> en nuestro mostrador. Tu compra y garantía oficial quedan formalmente asentadas.`
+        : "El equipo de Ventas verificó la acreditación de tu pago. Tu pedido pasó a estado <strong>Confirmado</strong> y ya fue derivado a nuestro sector de Depósito para su preparación física.";
       break;
 
     case "PEDIDO_EN_PREPARACION":
@@ -481,23 +569,20 @@ export async function enviarEmailPedidoEvento(params: {
   // Si no hay credenciales SMTP configuradas (modo local/dev/mock)
   if (!isSmtpConfigured()) {
     console.log(
-      `[EMAIL_SERVICE: SIMULACIÓN/DRY-RUN] Para: ${emailDestino} | Asunto: "${template.subject}" | Evento: ${evento} (SMTP no configurado en .env)`
+      `[EMAIL_SERVICE: DRY-RUN] Para: ${emailDestino} | Asunto: "${template.subject}" | Evento: ${evento} (SMTP no configurado en entorno: defina SMTP_USER y SMTP_PASS para envíos reales)`
     );
-    await markEmailAsSent(idempotencyKey, evento);
-    return { success: true, simulated: true, reason: "SMTP_USER/SMTP_PASS no configurado; envío simulado correctamente sin errores." };
+    return { success: true, simulated: true, reason: "SMTP_USER/SMTP_PASS no configurado; evento simulado (DRY-RUN)." };
   }
 
   try {
     const transporter = createTransporter();
-    if (!transporter) {
-      await markEmailAsSent(idempotencyKey, evento);
-      return { success: true, simulated: true, reason: "Transporter no inicializado." };
+    const config = getSmtpConfig();
+    if (!transporter || !config) {
+      return { success: false, error: "Transporter SMTP no pudo ser inicializado con la configuración provista." };
     }
 
-    const fromAddress = process.env.SMTP_FROM || `"Chopper Repuestos" <${process.env.SMTP_USER}>`;
-
     await transporter.sendMail({
-      from: fromAddress,
+      from: config.from,
       to: emailDestino,
       subject: template.subject,
       text: template.text,
@@ -509,6 +594,125 @@ export async function enviarEmailPedidoEvento(params: {
   } catch (err: any) {
     console.error(`[EMAIL_SERVICE: ERROR SMTP] No se pudo enviar correo de evento ${evento} a ${emailDestino}:`, err?.message || err);
     // Un error de correo no debe romper el flujo de la aplicación
+    return { success: false, error: err?.message || "Fallo de conexión SMTP." };
+  }
+}
+
+/**
+ * Envía un correo con token de verificación cuando un cliente solicita cambiar su correo electrónico.
+ */
+export async function enviarEmailVerificacionCambioCorreo(params: {
+  nombreCliente: string;
+  emailNuevo: string;
+  token: string;
+  appUrl?: string;
+}): Promise<{ success: boolean; simulated?: boolean; error?: string }> {
+  const { nombreCliente, emailNuevo, token, appUrl: customAppUrl } = params;
+  const baseUrl = (
+    customAppUrl ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.APP_URL ||
+    "http://localhost:3001"
+  ).replace(/\/$/, "");
+  const linkVerificacion = `${baseUrl}/verificar-correo?token=${token}`;
+
+  const subject = "Confirmá tu nuevo correo electrónico · Chopper Repuestos";
+
+  const html = `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>${subject}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1e293b;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f8fafc; padding: 24px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width: 560px; background-color: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+          <tr>
+            <td style="background-color: #dc2626; padding: 24px 28px; text-align: left;">
+              <span style="display: inline-block; background-color: rgba(255,255,255,0.2); color: #ffffff; font-size: 11px; font-weight: 800; letter-spacing: 1px; padding: 3px 8px; border-radius: 6px; text-transform: uppercase;">
+                Seguridad de Cuenta
+              </span>
+              <h1 style="margin: 8px 0 0 0; color: #ffffff; font-size: 22px; font-weight: 900;">
+                CHOPPER REPUESTOS
+              </h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 28px;">
+              <h2 style="margin: 0 0 12px 0; color: #0f172a; font-size: 18px; font-weight: 800;">
+                Confirmación de cambio de correo
+              </h2>
+              <p style="margin: 0 0 16px 0; color: #475569; font-size: 14px; line-height: 1.6;">
+                Hola <strong>${nombreCliente}</strong>, solicitaste actualizar tu dirección de correo electrónico en Chopper Repuestos a:
+              </p>
+              <div style="background-color: #f1f5f9; border-left: 4px solid #dc2626; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; font-size: 14px; color: #0f172a; font-weight: 700;">
+                ${emailNuevo}
+              </div>
+              <p style="margin: 0 0 24px 0; color: #475569; font-size: 13px; line-height: 1.5;">
+                Por motivos de seguridad, tu correo anterior seguirá activo para iniciar sesión hasta que confirmes este cambio haciendo clic en el siguiente botón:
+              </p>
+              <div style="text-align: center; margin: 28px 0;">
+                <a href="${linkVerificacion}" style="background-color: #dc2626; color: #ffffff; text-decoration: none; padding: 13px 28px; font-size: 14px; font-weight: 800; border-radius: 10px; display: inline-block; box-shadow: 0 4px 10px rgba(220, 38, 38, 0.25);">
+                  Confirmar mi nuevo correo →
+                </a>
+              </div>
+              <p style="margin: 24px 0 0 0; color: #94a3b8; font-size: 11px; line-height: 1.4;">
+                Este enlace es válido por 24 horas. Si no solicitaste este cambio, podés ignorar este mensaje; tu cuenta permanecerá protegida.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #0f172a; padding: 18px 24px; text-align: center; color: #94a3b8; font-size: 11px;">
+              Chopper Repuestos · Av. Roque Sáenz Peña 1500, Posadas, Misiones<br/>
+              WhatsApp: +54 9 376 524-3554
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `.trim();
+
+  const text = `
+CHOPPER REPUESTOS · Posadas, Misiones
+Confirmación de cambio de correo electrónico
+----------------------------------------
+Hola ${nombreCliente}, solicitaste actualizar tu correo en Chopper Repuestos a: ${emailNuevo}.
+
+Para confirmar este cambio, ingresá al siguiente enlace:
+${linkVerificacion}
+
+Este enlace es válido por 24 horas. Si no solicitaste este cambio, ignorá este mensaje.
+  `.trim();
+
+  if (!isSmtpConfigured()) {
+    console.log(
+      `[EMAIL_SERVICE: DRY-RUN] Verificación de correo para ${emailNuevo}. Link: ${linkVerificacion}`
+    );
+    return { success: true, simulated: true };
+  }
+
+  try {
+    const transporter = createTransporter();
+    const config = getSmtpConfig();
+    if (!transporter || !config) {
+      return { success: false, error: "Transporter SMTP no configurado." };
+    }
+    await transporter.sendMail({
+      from: config.from,
+      to: emailNuevo,
+      subject,
+      text,
+      html,
+    });
+    return { success: true };
+  } catch (err: any) {
+    console.error("[EMAIL_SERVICE: ERROR SMTP] Error al enviar verificación de correo:", err?.message || err);
     return { success: false, error: err?.message || "Fallo de conexión SMTP." };
   }
 }

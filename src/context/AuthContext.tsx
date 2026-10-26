@@ -54,7 +54,7 @@ interface AuthContextType {
   loginStaff: (username: string, pass: string) => Promise<{ success: boolean; error?: string }>;
   updateUserProfile: (
     data: Partial<UserSession> & { currentPassword?: string; newPassword?: string }
-  ) => Promise<{ success: boolean; error?: string }>;
+  ) => Promise<{ success: boolean; error?: string; emailChangePending?: boolean; nuevoEmail?: string }>;
   uploadProfilePhoto: (file: File) => Promise<{ success: boolean; fotoUrl?: string; error?: string }>;
   removeProfilePhoto: () => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
@@ -311,11 +311,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    */
   const updateUserProfile = async (
     data: Partial<UserSession> & { currentPassword?: string; newPassword?: string }
-  ): Promise<{ success: boolean; error?: string }> => {
+  ): Promise<{ success: boolean; error?: string; emailChangePending?: boolean; nuevoEmail?: string }> => {
     if (!user) return { success: false, error: "No hay sesión activa." };
 
     const res = await updateStaffProfileAction(user.id, {
       nombreCompleto: data.nombreCompleto,
+      username: data.username,
+      dni: data.dni,
+      cuit: data.cuit,
       correo: data.correo,
       telefono: data.telefono,
       direccion: data.direccion,
@@ -331,30 +334,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (res.user) {
       const updated: UserSession = {
         ...user,
+        username: res.user.username || user.username,
         nombreCompleto: res.user.nombreCompleto,
         correo: res.user.correo || user.correo,
         telefono: res.user.telefono || user.telefono,
         direccion: res.user.direccion || user.direccion,
+        dni: res.user.dni ?? user.dni,
+        cuit: res.user.cuit ?? user.cuit,
         avatar: res.user.fotoUrl || user.avatar,
         cargo: res.user.cargo || user.cargo,
       };
       setUser(updated);
       localStorage.setItem("chopper_user", JSON.stringify(updated));
-      return { success: true };
+      return {
+        success: true,
+        emailChangePending: res.emailChangePending,
+        nuevoEmail: res.nuevoEmail,
+      };
     }
 
-    return { success: true };
+    return {
+      success: true,
+      emailChangePending: res.emailChangePending,
+      nuevoEmail: res.nuevoEmail,
+    };
   };
 
   /**
-   * Subida de foto de perfil
+   * Subida de foto de perfil (Staff o Cliente) con validación y guardado en servidor
    */
   const uploadProfilePhoto = async (
     file: File
   ): Promise<{ success: boolean; fotoUrl?: string; error?: string }> => {
     if (!user) return { success: false, error: "No hay sesión activa." };
 
-    if (user.rol !== "CLIENTE") {
+    try {
       const formData = new FormData();
       formData.append("foto", file);
       const res = await uploadStaffPhotoAction(user.id, formData);
@@ -365,31 +379,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { success: true, fotoUrl: res.fotoUrl };
       }
       return { success: false, error: res.error || "No se pudo subir la foto." };
+    } catch (err) {
+      console.error("Error al subir foto de perfil:", err);
+      return { success: false, error: "Error de red al subir la imagen." };
     }
-
-    // Para cliente, guardar como dataURL validado en el servidor
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        if (typeof reader.result === "string") {
-          const dataUrl = reader.result;
-          await updateStaffProfileAction(user.id, { avatar: dataUrl });
-          const updated = { ...user, avatar: dataUrl };
-          setUser(updated);
-          localStorage.setItem("chopper_user", JSON.stringify(updated));
-          resolve({ success: true, fotoUrl: dataUrl });
-        } else {
-          resolve({ success: false, error: "Error al procesar la imagen." });
-        }
-      };
-      reader.readAsDataURL(file);
-    });
   };
 
   const removeProfilePhoto = async (): Promise<{ success: boolean; error?: string }> => {
     if (!user) return { success: false, error: "No hay sesión activa." };
 
-    if (user.rol !== "CLIENTE") {
+    try {
       const res = await deleteStaffPhotoAction(user.id);
       if (res.success) {
         const updated = { ...user, avatar: undefined };
@@ -398,13 +397,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { success: true };
       }
       return { success: false, error: res.error || "No se pudo eliminar la foto." };
+    } catch (err) {
+      console.error("Error al eliminar foto de perfil:", err);
+      return { success: false, error: "Error al eliminar la foto." };
     }
-
-    await updateStaffProfileAction(user.id, { avatar: "" });
-    const updated = { ...user, avatar: undefined };
-    setUser(updated);
-    localStorage.setItem("chopper_user", JSON.stringify(updated));
-    return { success: true };
   };
 
   const logout = async () => {

@@ -53,3 +53,6 @@ next-env.d.ts
 
 # scratch
 /scratch
+/backups
+/scripts/aplicar-compatibilidades.ts
+/scripts/verificar-compatibilidades.ts

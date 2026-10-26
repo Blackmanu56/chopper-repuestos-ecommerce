@@ -2,9 +2,11 @@
 
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import fs from "fs/promises";
 import path from "path";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
+import { enviarEmailVerificacionCambioCorreo } from "@/lib/email";
 import {
   setServerSessionCookie,
   clearServerSessionCookie,
@@ -115,6 +117,187 @@ async function saveClientCredentialsMap(map: Record<string, StoredClientCredenti
   });
 }
 
+export interface SolicitudCambioEmail {
+  token: string;
+  clienteId: number;
+  emailAnterior: string;
+  emailNuevo: string;
+  creadoEn: string;
+  expiraEn: string;
+  estado: "PENDIENTE" | "CONFIRMADO" | "CANCELADO" | "EXPIRADO";
+  utilizadoEn?: string;
+  canceladoEn?: string;
+}
+
+export type ConfirmarEmailCode =
+  | "CONFIRMADO_EXITOSO"
+  | "YA_CONFIRMADO"
+  | "ENLACE_CANCELADO"
+  | "ENLACE_VENCIDO"
+  | "ENLACE_INVALIDO"
+  | "CORREO_EN_USO"
+  | "ERROR_SERVIDOR";
+
+export interface ConfirmarEmailResult {
+  success: boolean;
+  code: ConfirmarEmailCode;
+  email?: string;
+  message?: string;
+  error?: string;
+}
+
+const PENDING_EMAIL_KEY = "cambios_email_pendientes";
+
+async function getPendingEmailChanges(): Promise<Record<string, SolicitudCambioEmail>> {
+  try {
+    const row = await prisma.configuracionEcommerce.findUnique({
+      where: { clave: PENDING_EMAIL_KEY },
+    });
+    if (row?.valor) {
+      return JSON.parse(row.valor);
+    }
+  } catch (err) {
+    console.error("Error al leer cambios_email_pendientes:", err);
+  }
+  return {};
+}
+
+async function savePendingEmailChanges(map: Record<string, SolicitudCambioEmail>): Promise<void> {
+  try {
+    await prisma.configuracionEcommerce.upsert({
+      where: { clave: PENDING_EMAIL_KEY },
+      update: { valor: JSON.stringify(map) },
+      create: {
+        clave: PENDING_EMAIL_KEY,
+        valor: JSON.stringify(map),
+        descripcion: "Solicitudes de verificación de cambio de correo electrónico",
+      },
+    });
+  } catch (err) {
+    console.error("Error al guardar cambios_email_pendientes:", err);
+  }
+}
+
+/**
+ * Confirma el cambio de correo electrónico a través de un token criptográfico seguro
+ * con idempotencia estricta, tolerancia a recargas y mensajes diferenciados por estado.
+ */
+export async function confirmarCambioEmailAction(token: string): Promise<ConfirmarEmailResult> {
+  try {
+    const cleanToken = (token || "").trim();
+    if (!cleanToken) {
+      return {
+        success: false,
+        code: "ENLACE_INVALIDO",
+        error: "Token de verificación no proporcionado o enlace incompleto.",
+      };
+    }
+
+    const pending = await getPendingEmailChanges();
+    const solicitud = pending[cleanToken];
+    if (!solicitud) {
+      return {
+        success: false,
+        code: "ENLACE_INVALIDO",
+        error: "El enlace de verificación no es válido o no existe en el sistema.",
+      };
+    }
+
+    const estado = solicitud.estado || "PENDIENTE";
+
+    // 1. Caso: El enlace ya fue utilizado y confirmado (idempotencia ante recargas o doble invocación en StrictMode)
+    if (estado === "CONFIRMADO") {
+      return {
+        success: true,
+        code: "YA_CONFIRMADO",
+        email: solicitud.emailNuevo,
+        message: "Este enlace ya fue confirmado anteriormente y tu dirección de correo ya se encuentra activa.",
+      };
+    }
+
+    // 2. Caso: La solicitud fue cancelada porque el usuario generó un cambio posterior más reciente (Requisito 8)
+    if (estado === "CANCELADO") {
+      return {
+        success: false,
+        code: "ENLACE_CANCELADO",
+        error: "Este enlace ya no es válido porque solicitaste un cambio de correo más reciente. Por favor revisá y utilizá el último correo recibido.",
+      };
+    }
+
+    // 3. Caso: Vencimiento de las 24 horas
+    const now = Date.now();
+    const expires = new Date(solicitud.expiraEn).getTime();
+    if (estado === "EXPIRADO" || now > expires) {
+      solicitud.estado = "EXPIRADO";
+      await savePendingEmailChanges(pending);
+      return {
+        success: false,
+        code: "ENLACE_VENCIDO",
+        error: "El enlace de verificación ha expirado (validez máxima de 24 horas). Por favor solicitá nuevamente el cambio desde tu perfil.",
+      };
+    }
+
+    // 4. Caso PENDIENTE: procesar actualización
+    const emailNuevo = solicitud.emailNuevo.trim().toLowerCase();
+
+    // Validar que el nuevo correo no haya sido registrado mientras tanto por otro cliente
+    const conflict = await prisma.cliente.findFirst({
+      where: {
+        email: { equals: emailNuevo, mode: "insensitive" },
+        id: { not: solicitud.clienteId },
+      },
+    });
+    if (conflict) {
+      return {
+        success: false,
+        code: "CORREO_EN_USO",
+        error: "El correo electrónico solicitado ya se encuentra registrado por otra cuenta.",
+      };
+    }
+
+    // 4.A. Actualizar en PostgreSQL tabla `clientes`
+    await prisma.cliente.update({
+      where: { id: solicitud.clienteId },
+      data: { email: emailNuevo },
+    });
+
+    // 4.B. Actualizar en mapa de credenciales del e-commerce
+    const credsMap = await getClientCredentialsMap();
+    if (credsMap[String(solicitud.clienteId)]) {
+      credsMap[String(solicitud.clienteId)].email = emailNuevo;
+      await saveClientCredentialsMap(credsMap);
+    }
+
+    // 4.C. Marcar la solicitud como CONFIRMADA (se conserva en histórico para que clics o recargas posteriores sigan dando éxito)
+    solicitud.estado = "CONFIRMADO";
+    solicitud.utilizadoEn = new Date().toISOString();
+    await savePendingEmailChanges(pending);
+
+    // 4.D. Si la sesión activa en el navegador corresponde a este cliente, actualizar cookie de sesión
+    const currentSession = await getServerSession();
+    if (currentSession && currentSession.kind === "CLIENTE" && currentSession.id === solicitud.clienteId) {
+      await setServerSessionCookie({
+        ...currentSession,
+        correo: emailNuevo,
+      });
+    }
+
+    return {
+      success: true,
+      code: "CONFIRMADO_EXITOSO",
+      email: emailNuevo,
+      message: "¡Tu correo electrónico ha sido verificado y actualizado con éxito!",
+    };
+  } catch (error: any) {
+    console.error("Error en confirmarCambioEmailAction:", error);
+    return {
+      success: false,
+      code: "ERROR_SERVIDOR",
+      error: "Ocurrió un error inesperado al procesar la confirmación del correo.",
+    };
+  }
+}
+
 /**
  * Autentica un Cliente contra PostgreSQL con verificación bcrypt en el servidor y emite cookie httpOnly
  */
@@ -138,26 +321,24 @@ export async function loginClientAction(
 
     // Resolver el registro de Cliente en PostgreSQL
     let targetClienteId: number | null = null;
-    if (
+
+    // 1. Buscar prioritariamente en el mapa de credenciales registradas (soporta cambios de username o email)
+    const entry = Object.values(credsMap).find(
+      (c) =>
+        c.email.toLowerCase() === cleanInput ||
+        c.username.toLowerCase() === cleanInput ||
+        c.dni === cleanDni
+    );
+    if (entry) {
+      targetClienteId = entry.clienteId;
+    } else if (
       cleanInput === "cliente" ||
-      cleanInput === "cliente@gmail.com" ||
       cleanInput === "carlos.mortero@gmail.com" ||
       cleanDni === "34567890"
     ) {
       targetClienteId = 7;
     } else if (cleanInput === "carlos.motero@gmail.com" || cleanInput === "carlos.motero" || cleanDni === "38999888") {
       targetClienteId = 6;
-    } else {
-      // Buscar en el mapa de credenciales registradas
-      const entry = Object.values(credsMap).find(
-        (c) =>
-          c.email.toLowerCase() === cleanInput ||
-          c.username.toLowerCase() === cleanInput ||
-          c.dni === cleanDni
-      );
-      if (entry) {
-        targetClienteId = entry.clienteId;
-      }
     }
 
     let cliente = targetClienteId
@@ -179,6 +360,15 @@ export async function loginClientAction(
     const cred = credsMap[String(cliente.id)];
     if (!cred || !cred.passwordHash) {
       return { success: false, error: "Usuario o contraseña incorrectos." };
+    }
+
+    // Si el usuario intentó ingresar mediante un correo que ya no coincide con el cliente ni sus credenciales, denegar acceso
+    if (cleanInput.includes("@")) {
+      const emailCliente = (cliente.email || "").toLowerCase().trim();
+      const emailCred = (cred.email || "").toLowerCase().trim();
+      if (emailCliente !== cleanInput && emailCred !== cleanInput) {
+        return { success: false, error: "Usuario o contraseña incorrectos." };
+      }
     }
 
     const isMatch = await bcrypt.compare(cleanPass, cred.passwordHash);
@@ -428,22 +618,33 @@ export async function logoutAction(): Promise<{ success: boolean }> {
   return { success: true };
 }
 
+export interface UpdateProfileData {
+  nombreCompleto?: string;
+  username?: string;
+  correo?: string;
+  telefono?: string;
+  direccion?: string;
+  dni?: string;
+  cuit?: string;
+  currentPassword?: string;
+  newPassword?: string;
+  avatar?: string;
+}
+
 /**
- * Actualiza los datos permitidos del perfil del usuario autenticado (Staff o Cliente)
- * Verifica la identidad exclusivamente desde la sesión del servidor.
+ * Actualiza los datos permitidos del perfil del usuario autenticado (Staff o Cliente).
+ * Verifica la identidad exclusivamente desde la sesión activa del servidor.
  */
 export async function updateStaffProfileAction(
   _ignoredUserId: number,
-  data: {
-    nombreCompleto?: string;
-    correo?: string;
-    telefono?: string;
-    direccion?: string;
-    currentPassword?: string;
-    newPassword?: string;
-    avatar?: string;
-  }
-): Promise<{ success: boolean; user?: AuthUserResponse; error?: string }> {
+  data: UpdateProfileData
+): Promise<{
+  success: boolean;
+  user?: AuthUserResponse;
+  emailChangePending?: boolean;
+  nuevoEmail?: string;
+  error?: string;
+}> {
   try {
     const session = await getServerSession();
     if (!session) {
@@ -458,9 +659,89 @@ export async function updateStaffProfileAction(
         return { success: false, error: "Cuenta de cliente no encontrada." };
       }
 
+      const clienteActual = await prisma.cliente.findUnique({ where: { id: session.id } });
+      if (!clienteActual) {
+        return { success: false, error: "Cliente no encontrado en el sistema." };
+      }
+
+      // 1. Nombre y Apellido
+      let newNombre = clienteActual.nombre;
+      if (data.nombreCompleto !== undefined) {
+        const cleanNombre = data.nombreCompleto.trim();
+        if (!cleanNombre || cleanNombre.length < 2) {
+          return { success: false, error: "Ingresá un nombre y apellido válido (mínimo 2 caracteres)." };
+        }
+        newNombre = cleanNombre;
+      }
+
+      // 2. Nombre de usuario
+      if (data.username !== undefined) {
+        const cleanUser = data.username.trim().toLowerCase();
+        if (cleanUser && cleanUser !== cred.username.toLowerCase()) {
+          if (cleanUser.length < 3) {
+            return { success: false, error: "El nombre de usuario debe tener al menos 3 caracteres." };
+          }
+          if (!/^[a-zA-Z0-9_.-]+$/.test(cleanUser)) {
+            return { success: false, error: "El nombre de usuario solo puede contener letras, números, guiones y puntos." };
+          }
+          const conflictUser = Object.values(credsMap).find(
+            (c) => c.clienteId !== session.id && c.username.toLowerCase() === cleanUser
+          );
+          if (conflictUser) {
+            return { success: false, error: "El nombre de usuario ingresado ya está en uso por otra cuenta." };
+          }
+          cred.username = cleanUser;
+        }
+      }
+
+      // 3. DNI (formato numérico y unicidad)
+      let newDni = clienteActual.dni;
+      if (data.dni !== undefined) {
+        const cleanDni = data.dni.replace(/\D/g, "");
+        if (cleanDni && cleanDni !== clienteActual.dni.replace(/\D/g, "")) {
+          if (cleanDni.length < 7 || cleanDni.length > 8) {
+            return { success: false, error: "El DNI debe contener 7 u 8 dígitos numéricos." };
+          }
+          const conflictDni = await prisma.cliente.findFirst({
+            where: { dni: cleanDni, id: { not: session.id } },
+          });
+          if (conflictDni) {
+            return { success: false, error: "El DNI ingresado ya pertenece a otro cliente registrado." };
+          }
+          newDni = cleanDni;
+          cred.dni = cleanDni;
+        }
+      }
+
+      // 4. CUIT / CUIL (opcional, formato y unicidad)
+      let newCuit: string | null = clienteActual.cuit;
+      if (data.cuit !== undefined) {
+        const cleanCuit = data.cuit.trim().replace(/\s/g, "");
+        if (cleanCuit) {
+          const digits = cleanCuit.replace(/\D/g, "");
+          if (digits.length !== 11) {
+            return { success: false, error: "El CUIT/CUIL debe contener 11 dígitos numéricos (o podés dejar el campo en blanco si no lo tenés)." };
+          }
+          const conflictCuit = await prisma.cliente.findFirst({
+            where: { cuit: cleanCuit, id: { not: session.id } },
+          });
+          if (conflictCuit) {
+            return { success: false, error: "El CUIT/CUIL ingresado ya pertenece a otro cliente registrado." };
+          }
+          newCuit = cleanCuit;
+        } else {
+          newCuit = null;
+        }
+      }
+
+      // 5. Teléfono y Dirección
+      const newTelefono = data.telefono !== undefined ? (data.telefono.trim() || null) : clienteActual.telefono;
+      const newDireccion = data.direccion !== undefined ? (data.direccion.trim() || null) : clienteActual.direccion;
+
+      // 6. Contraseña
       if (data.newPassword && data.newPassword.trim()) {
         if (!data.currentPassword) {
-          return { success: false, error: "Ingresá tu contraseña actual para confirmar el cambio." };
+          return { success: false, error: "Ingresá tu contraseña actual para confirmar el cambio de clave." };
         }
         const match = await bcrypt.compare(data.currentPassword.trim(), cred.passwordHash);
         if (!match) {
@@ -472,28 +753,111 @@ export async function updateStaffProfileAction(
         cred.passwordHash = await bcrypt.hash(data.newPassword.trim(), 10);
       }
 
+      // 7. Avatar (emoji o URL)
       if (data.avatar !== undefined) {
         cred.avatar = data.avatar || null;
       }
 
-      await saveClientCredentialsMap(credsMap);
+      // 8. Correo Electrónico (con enlace de verificación SMTP)
+      let emailChangePending = false;
+      let nuevoEmailPending: string | undefined = undefined;
+      const emailActual = (clienteActual.email || cred.email || "").trim().toLowerCase();
 
-      // No alterar nombre ni DNI de cuentas históricas sin necesidad, solo actualizar contacto seguro
-      const clienteActual = await prisma.cliente.findUnique({ where: { id: session.id } });
-      if (!clienteActual) {
-        return { success: false, error: "Cliente no encontrado." };
+      if (data.correo !== undefined) {
+        const cleanCorreo = data.correo.trim().toLowerCase();
+        if (cleanCorreo && cleanCorreo !== emailActual) {
+          if (!cleanCorreo.includes("@") || !cleanCorreo.includes(".")) {
+            return { success: false, error: "El correo electrónico no tiene un formato válido." };
+          }
+          const conflictEmail = await prisma.cliente.findFirst({
+            where: { email: { equals: cleanCorreo, mode: "insensitive" }, id: { not: session.id } },
+          });
+          if (conflictEmail) {
+            return { success: false, error: "El correo electrónico ya está registrado por otra cuenta." };
+          }
+          const conflictCred = Object.values(credsMap).find(
+            (c) => c.clienteId !== session.id && c.email.toLowerCase() === cleanCorreo
+          );
+          if (conflictCred) {
+            return { success: false, error: "El correo electrónico ya está registrado por otra cuenta." };
+          }
+
+          // Generar token criptográfico seguro y registrar solicitud pendiente (validez 24 hs)
+          const token = crypto.randomBytes(24).toString("hex");
+          const pending = await getPendingEmailChanges();
+
+          // REQUISITO 8: Invalidar solicitudes pendientes anteriores para este cliente
+          for (const key of Object.keys(pending)) {
+            if (pending[key].clienteId === session.id && pending[key].estado === "PENDIENTE") {
+              pending[key].estado = "CANCELADO";
+              pending[key].canceladoEn = new Date().toISOString();
+            }
+          }
+
+          pending[token] = {
+            token,
+            clienteId: session.id,
+            emailAnterior: emailActual,
+            emailNuevo: cleanCorreo,
+            creadoEn: new Date().toISOString(),
+            expiraEn: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+            estado: "PENDIENTE",
+          };
+          await savePendingEmailChanges(pending);
+
+          // REQUISITO 4: Detectar dinámicamente host y puerto exactos de la solicitud actual
+          let appUrl: string | undefined = undefined;
+          try {
+            const headersList = await headers();
+            const host = headersList.get("x-forwarded-host") || headersList.get("host");
+            const proto = headersList.get("x-forwarded-proto") || (host?.includes("localhost") || host?.includes("127.0.0.1") ? "http" : "https");
+            if (host) {
+              appUrl = `${proto}://${host}`;
+            }
+          } catch {}
+
+          if (!appUrl) {
+            appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "http://localhost:3001";
+          }
+
+          // Enviar correo con enlace de confirmación
+          await enviarEmailVerificacionCambioCorreo({
+            nombreCliente: newNombre,
+            emailNuevo: cleanCorreo,
+            token,
+            appUrl,
+          });
+
+          emailChangePending = true;
+          nuevoEmailPending = cleanCorreo;
+        }
       }
 
+      // 9. Persistir datos actualizados en la tabla `clientes` de PostgreSQL
+      const updatedCliente = await prisma.cliente.update({
+        where: { id: session.id },
+        data: {
+          nombre: newNombre,
+          dni: newDni,
+          cuit: newCuit,
+          telefono: newTelefono,
+          direccion: newDireccion,
+        },
+      });
+
+      cred.dni = updatedCliente.dni;
+      await saveClientCredentialsMap(credsMap);
+
       const responseUser: AuthUserResponse = {
-        id: clienteActual.id,
+        id: updatedCliente.id,
         username: cred.username,
-        nombreCompleto: clienteActual.nombre,
+        nombreCompleto: updatedCliente.nombre,
         rol: "CLIENTE",
-        correo: clienteActual.email || cred.email,
-        telefono: data.telefono !== undefined ? data.telefono.trim() : clienteActual.telefono,
-        direccion: data.direccion !== undefined ? data.direccion.trim() : clienteActual.direccion,
-        dni: clienteActual.dni,
-        cuit: clienteActual.cuit,
+        correo: updatedCliente.email || cred.email,
+        telefono: updatedCliente.telefono,
+        direccion: updatedCliente.direccion,
+        dni: updatedCliente.dni,
+        cuit: updatedCliente.cuit,
         fotoUrl: cred.avatar || null,
       };
 
@@ -513,7 +877,12 @@ export async function updateStaffProfileAction(
         exp: session.exp,
       });
 
-      return { success: true, user: responseUser };
+      return {
+        success: true,
+        user: responseUser,
+        emailChangePending,
+        nuevoEmail: nuevoEmailPending,
+      };
     }
 
     // Si la sesión activa es de STAFF
@@ -606,18 +975,17 @@ export async function updateStaffProfileAction(
 }
 
 /**
- * Sube o reemplaza la foto de perfil del usuario de staff autenticado en el disco y en PostgreSQL
+ * Sube o reemplaza la foto de perfil del usuario autenticado (Staff o Cliente) en el disco y en PostgreSQL
  */
 export async function uploadStaffPhotoAction(
   _ignoredUserId: number,
   formData: FormData
 ): Promise<{ success: boolean; fotoUrl?: string; error?: string }> {
   try {
-    const staffAuth = await requireStaffSession();
-    if (!staffAuth.authorized || !staffAuth.user) {
-      return { success: false, error: staffAuth.error || "Acceso denegado." };
+    const session = await getServerSession();
+    if (!session) {
+      return { success: false, error: "Acceso denegado: no hay una sesión activa." };
     }
-    const realUserId = staffAuth.user.id;
 
     const file = formData.get("foto") as File | null;
     const validation = await validateUploadedFile(file, {
@@ -630,12 +998,44 @@ export async function uploadStaffPhotoAction(
       return { success: false, error: validation.error || "Imagen no válida." };
     }
 
+    await fs.mkdir(UPLOAD_DIR, { recursive: true });
+
+    if (session.kind === "CLIENTE") {
+      const credsMap = await getClientCredentialsMap();
+      const cred = credsMap[String(session.id)];
+      if (!cred) {
+        return { success: false, error: "Cuenta de cliente no encontrada." };
+      }
+
+      const filename = `avatar-cliente-${session.id}-${Date.now()}${validation.ext}`;
+      const filePath = path.join(UPLOAD_DIR, filename);
+      await fs.writeFile(filePath, validation.buffer);
+
+      if (cred.avatar && cred.avatar.startsWith("/uploads/avatars/")) {
+        const oldFilename = path.basename(cred.avatar);
+        try {
+          await fs.unlink(path.join(UPLOAD_DIR, oldFilename));
+        } catch {}
+      }
+
+      const publicUrl = `/uploads/avatars/${filename}`;
+      cred.avatar = publicUrl;
+      await saveClientCredentialsMap(credsMap);
+
+      await setServerSessionCookie({
+        ...session,
+        fotoUrl: publicUrl,
+      });
+
+      return { success: true, fotoUrl: publicUrl };
+    }
+
+    // Si es STAFF
+    const realUserId = session.id;
     const usuario = await prisma.usuario.findUnique({ where: { id: realUserId } });
     if (!usuario) {
       return { success: false, error: "Usuario no encontrado." };
     }
-
-    await fs.mkdir(UPLOAD_DIR, { recursive: true });
 
     const filename = `avatar-${realUserId}-${Date.now()}${validation.ext}`;
     const filePath = path.join(UPLOAD_DIR, filename);
@@ -684,12 +1084,31 @@ export async function deleteStaffPhotoAction(
   _ignoredUserId?: number
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const staffAuth = await requireStaffSession();
-    if (!staffAuth.authorized || !staffAuth.user) {
-      return { success: false, error: staffAuth.error || "Acceso denegado." };
+    const session = await getServerSession();
+    if (!session) {
+      return { success: false, error: "Acceso denegado: no hay una sesión activa." };
     }
-    const realUserId = staffAuth.user.id;
 
+    if (session.kind === "CLIENTE") {
+      const credsMap = await getClientCredentialsMap();
+      const cred = credsMap[String(session.id)];
+      if (cred && cred.avatar && cred.avatar.startsWith("/uploads/avatars/")) {
+        const filename = path.basename(cred.avatar);
+        try {
+          await fs.unlink(path.join(UPLOAD_DIR, filename));
+        } catch {}
+        cred.avatar = null;
+        await saveClientCredentialsMap(credsMap);
+      }
+      await setServerSessionCookie({
+        ...session,
+        fotoUrl: null,
+      });
+      return { success: true };
+    }
+
+    // Si es STAFF
+    const realUserId = session.id;
     const usuario = await prisma.usuario.findUnique({ where: { id: realUserId } });
     if (!usuario) {
       return { success: false, error: "Usuario no encontrado." };
