@@ -195,6 +195,8 @@ export default function CombosSection({ initialCombos }: CombosSectionProps) {
                 <img
                   src={combo.imagen || "/combos/combo-service-motul.jpg"}
                   alt={combo.nombre}
+                  loading="lazy"
+                  decoding="async"
                   onError={(e) => {
                     (e.currentTarget as HTMLImageElement).src = "/combos/combo-service-motul.jpg";
                   }}

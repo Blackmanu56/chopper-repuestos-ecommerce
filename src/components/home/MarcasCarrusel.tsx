@@ -76,6 +76,8 @@ export default function MarcasCarrusel() {
                 <img
                   src={m.logo}
                   alt={`Logo oficial de ${m.name}`}
+                  loading="lazy"
+                  decoding="async"
                   className="max-h-9 max-w-full w-auto object-contain transition-transform group-hover:scale-105"
                 />
               </div>

@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 import { prisma } from "@/lib/prisma";
+import { generarComprobantePdfPorPedidoId } from "@/lib/comprobantePdf";
 
 export type EmailEventoPedido =
   | "PEDIDO_CREADO"
@@ -32,6 +33,7 @@ export interface DatosEmailPedido {
   direccionEnvio?: string | null;
   motivoCancelacion?: string;
   estadoPago?: string;
+  adjuntoComprobante?: boolean;
 }
 
 export interface SmtpConfigInfo {
@@ -151,7 +153,7 @@ function formatCurrency(amount: number): string {
 }
 
 /**
- * Genera el template HTML y texto plano con la identidad oficial de Chopper Repuestos
+ * Genera el template HTML y texto plano con la identidad de Chopper Repuestos
  */
 export function renderEmailTemplate(
   evento: EmailEventoPedido,
@@ -172,6 +174,14 @@ export function renderEmailTemplate(
   let calloutMessage = "";
   let subject = "";
 
+  const metodoPagoTexto = datos.metodoPago === "TRANSFERENCIA"
+    ? "Transferencia bancaria"
+    : datos.metodoPago === "EFECTIVO_LOCAL"
+    ? "Efectivo al retirar en local"
+    : datos.metodoPago === "TARJETA"
+    ? "Tarjeta de débito/crédito"
+    : datos.metodoPago || "A convenir";
+
   switch (evento) {
     case "PEDIDO_CREADO":
       subject = `Pedido recibido #ORD-${datos.numero} · Chopper Repuestos`;
@@ -180,9 +190,9 @@ export function renderEmailTemplate(
       mainTitle = "¡Recibimos tu pedido en Chopper Repuestos!";
       introMessage = `Hola <strong>${datos.nombreCliente}</strong>, registramos tu pedido <strong>#ORD-${datos.numero}</strong> en nuestra tienda online.`;
       calloutMessage = datos.metodoPago === "TRANSFERENCIA"
-        ? "<strong>Pago por transferencia:</strong> Nuestro equipo de Ventas revisará tu comprobante para confirmar la operación y dar paso al armado del paquete."
+        ? "<strong>Pago por transferencia:</strong> Podés adjuntar tu comprobante desde la web o responder a este correo. El equipo de Ventas revisará la acreditación para confirmar tu compra y dar paso al armado en depósito."
         : datos.metodoPago === "EFECTIVO_LOCAL"
-        ? "<strong>Pago en efectivo:</strong> Tu reserva fue registrada con éxito. Pagás en mano al retirar en nuestro local de Av. Roque Sáenz Peña 1500."
+        ? "<strong>Pago en efectivo:</strong> Tu reserva fue registrada con éxito. Abonás en mano al retirar en nuestro local de Av. Roque Sáenz Peña 1500."
         : "Tu pedido está registrado y pendiente de validación comercial por nuestro equipo de Ventas.";
       break;
 
@@ -192,7 +202,7 @@ export function renderEmailTemplate(
       badgeColor = "#0284c7";
       mainTitle = "Recibimos tu comprobante de pago";
       introMessage = `Hola <strong>${datos.nombreCliente}</strong>, registramos el comprobante de transferencia para tu pedido <strong>#ORD-${datos.numero}</strong>.`;
-      calloutMessage = "<strong>Transferencia pendiente de verificación:</strong> Nuestro equipo de Ventas revisará la acreditación en nuestra cuenta bancaria en el horario de atención para confirmar tu compra y derivar el pedido a depósito para su preparación.";
+      calloutMessage = "<strong>En revisión:</strong> Nuestro equipo de Ventas revisará la acreditación bancaria en el horario de atención para confirmar la compra. El pedido continúa pendiente hasta su validación.";
       break;
 
     case "TRANSFERENCIA_APROBADA":
@@ -201,9 +211,10 @@ export function renderEmailTemplate(
       badgeColor = "#16a34a";
       mainTitle = "¡Tu pago fue aprobado con éxito!";
       introMessage = `Hola <strong>${datos.nombreCliente}</strong>, registramos la confirmación del pago de tu pedido <strong>#ORD-${datos.numero}</strong>.`;
-      calloutMessage = datos.metodoPago === "EFECTIVO_LOCAL"
-        ? `Registramos el cobro en efectivo de <strong>${formatCurrency(datos.total)}</strong> en nuestro mostrador. Tu compra y garantía oficial quedan formalmente asentadas.`
-        : "El equipo de Ventas verificó la acreditación de tu pago. Tu pedido pasó a estado <strong>Confirmado</strong> y ya fue derivado a nuestro sector de Depósito para su preparación física.";
+      const comprobanteAviso = datos.adjuntoComprobante
+        ? "<br/><br/>📄 <em>Adjuntamos a este correo tu comprobante de compra en formato PDF.</em>"
+        : "";
+      calloutMessage = `<strong>Importe acreditado:</strong> ${formatCurrency(datos.total)}.<br/><strong>Siguiente paso:</strong> El equipo comercial verificó tu pago y el pedido pasó a Depósito para comenzar su preparación física.${comprobanteAviso}`;
       break;
 
     case "PEDIDO_EN_PREPARACION":
@@ -212,7 +223,7 @@ export function renderEmailTemplate(
       badgeColor = "#2563eb";
       mainTitle = "Estamos armando tu paquete en depósito";
       introMessage = `Hola <strong>${datos.nombreCliente}</strong>, nuestro personal de Stock comenzó a seleccionar y controlar los repuestos de tu pedido <strong>#ORD-${datos.numero}</strong>.`;
-      calloutMessage = "Verificamos cada producto contra nuestro checklist de calidad antes de sellar el paquete. Te avisaremos apenas esté listo.";
+      calloutMessage = "Verificamos cada producto contra nuestro checklist de calidad antes de sellar el paquete. Te avisaremos apenas esté listo para entregar.";
       break;
 
     case "PEDIDO_LISTO":
@@ -221,15 +232,15 @@ export function renderEmailTemplate(
         statusBadge = "LISTO PARA DESPACHO";
         badgeColor = "#7c3aed";
         mainTitle = "Tu paquete está listo para motomandado";
-        introMessage = `Hola <strong>${datos.nombreCliente}</strong>, tu pedido <strong>#ORD-${datos.numero}</strong> ya fue empaquetado y se encuentra listo en depósito esperando la asignación de cadetería/Moto Uber.`;
-        calloutMessage = `<strong>Dirección de entrega:</strong> ${datos.direccionEnvio || "Posadas, Misiones"}.<br/><br/>⚠️ <em>Aviso importante:</em> El pedido se encuentra listo en local; en breve saldrá hacia tu domicilio. Recordá tener el dinero disponible si abonás al recibir.`;
+        introMessage = `Hola <strong>${datos.nombreCliente}</strong>, tu pedido <strong>#ORD-${datos.numero}</strong> ya fue empaquetado y se encuentra en depósito esperando asignación de cadetería/Moto Uber.`;
+        calloutMessage = `<strong>Modalidad de envío:</strong> Motomandado en el día.<br/><strong>Dirección de destino:</strong> ${datos.direccionEnvio || "Posadas, Misiones"}.<br/>El cadete saldrá en el transcurso del día hacia tu domicilio. Recordá tener el dinero disponible si abonás al recibir.`;
       } else {
         subject = `¡Tu pedido #ORD-${datos.numero} está listo para retirar! · Chopper Repuestos`;
         statusBadge = "LISTO PARA RETIRAR";
         badgeColor = "#16a34a";
-        mainTitle = "¡Tu pedido está listo para retirar!";
+        mainTitle = "¡Tu compra está lista para retirar!";
         introMessage = `Hola <strong>${datos.nombreCliente}</strong>, tu compra <strong>#ORD-${datos.numero}</strong> está lista en el mostrador de Chopper Repuestos.`;
-        calloutMessage = "<strong>Punto de retiro:</strong> Av. Roque Sáenz Peña 1500 (Posadas, Misiones).<br/><strong>Horarios:</strong> Lunes a Sábado de 8:00 a 12:30 y de 16:30 a 20:30 hs.<br/>Presentá tu DNI o informá el número de pedido al llegar.";
+        calloutMessage = "<strong>Punto de retiro:</strong> Av. Roque Sáenz Peña 1500 (Posadas, Misiones).<br/><strong>Horarios:</strong> Lunes a Sábados de 8:00 a 12:30 y de 16:30 a 20:30 hs.<br/>Presentá tu DNI o informá el número de pedido al llegar.";
       }
       break;
 
@@ -238,8 +249,8 @@ export function renderEmailTemplate(
       statusBadge = "ENTREGADO";
       badgeColor = "#059669";
       mainTitle = "¡Tu pedido fue entregado!";
-      introMessage = `Hola <strong>${datos.nombreCliente}</strong>, confirmamos que el pedido <strong>#ORD-${datos.numero}</strong> fue entregado con éxito.`;
-      calloutMessage = "¡Muchas gracias por confiar en Chopper Repuestos! Todos nuestros repuestos cuentan con garantía oficial de fábrica.";
+      introMessage = `Hola <strong>${datos.nombreCliente}</strong>, confirmamos que tu compra <strong>#ORD-${datos.numero}</strong> fue entregada con éxito.`;
+      calloutMessage = "¡Gracias por comprar en Chopper Repuestos! Esperamos que disfrutes tus productos y vuelvas a elegirnos para equipar tu moto.";
       break;
 
     case "CANCELACION_SOLICITADA":
@@ -248,7 +259,7 @@ export function renderEmailTemplate(
       badgeColor = "#d97706";
       mainTitle = "Recibimos tu solicitud de cancelación";
       introMessage = `Hola <strong>${datos.nombreCliente}</strong>, registramos tu solicitud para cancelar el pedido <strong>#ORD-${datos.numero}</strong>.`;
-      calloutMessage = `<strong>Motivo manifestado:</strong> "${datos.motivoCancelacion || "A pedido del cliente"}".<br/><br/>Nuestro equipo de Ventas y Administración revisará el estado del pedido y te notificará la resolución a la brevedad.`;
+      calloutMessage = `<strong>Motivo manifestado:</strong> "${datos.motivoCancelacion || "A pedido del cliente"}".<br/><br/>Nuestro equipo de Ventas revisará el estado del pedido y te notificará la resolución a la brevedad.`;
       break;
 
     case "CANCELACION_APROBADA":
@@ -273,10 +284,11 @@ export function renderEmailTemplate(
       break;
   }
 
-  // Generación de la tabla de items si existen
+  // Generación de la tabla de items únicamente para PEDIDO_CREADO (Requisito 3)
+  const esPedidoCreado = evento === "PEDIDO_CREADO";
   let itemsHtml = "";
   let itemsText = "";
-  if (datos.items && datos.items.length > 0) {
+  if (esPedidoCreado && datos.items && datos.items.length > 0) {
     itemsHtml = `
       <table style="width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 13px; text-align: left;">
         <thead>
@@ -374,18 +386,27 @@ export function renderEmailTemplate(
                 ${calloutMessage}
               </div>
 
-              <!-- Modalidad de entrega -->
+              ${
+                esPedidoCreado
+                  ? `
+              <!-- Modalidad de entrega y medio de pago (solo pedido inicial) -->
               <div style="background-color: #fafafa; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px 16px; margin-bottom: 20px; font-size: 13px;">
-                <span style="color: #6b7280; font-size: 11px; text-transform: uppercase; font-weight: 700; display: block; margin-bottom: 4px;">Modalidad de entrega:</span>
-                <strong style="color: #111827;">${modalidadTexto}</strong>
+                <div style="margin-bottom: 6px;">
+                  <span style="color: #6b7280; font-size: 11px; text-transform: uppercase; font-weight: 700; display: block; margin-bottom: 2px;">Modalidad de entrega:</span>
+                  <strong style="color: #111827;">${modalidadTexto}</strong>
+                </div>
+                <div>
+                  <span style="color: #6b7280; font-size: 11px; text-transform: uppercase; font-weight: 700; display: block; margin-bottom: 2px;">Medio de pago:</span>
+                  <strong style="color: #111827;">${metodoPagoTexto}</strong>
+                </div>
               </div>
 
-              <!-- Resumen de items si corresponde -->
+              <!-- Resumen completo de items para Pedido Recibido -->
               ${
                 itemsHtml
                   ? `
                 <div style="margin-top: 20px; margin-bottom: 20px;">
-                  <span style="color: #64748b; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Resumen de compra:</span>
+                  <span style="color: #64748b; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Productos del pedido:</span>
                   ${itemsHtml}
                   
                   <table width="100%" style="margin-top: 12px; font-size: 14px;">
@@ -407,6 +428,44 @@ export function renderEmailTemplate(
                 </div>
               `
                   : ""
+              }
+              `
+                  : `
+              <!-- Resumen compacto para cambios de estado (sin repetir tabla completa de productos) -->
+              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 20px; margin-bottom: 24px;">
+                <span style="color: #64748b; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 10px;">
+                  Resumen de la orden
+                </span>
+                <table width="100%" cellspacing="0" cellpadding="0" style="font-size: 13px; line-height: 1.6;">
+                  <tr>
+                    <td style="color: #64748b; padding: 4px 0;">Número de pedido:</td>
+                    <td style="text-align: right; font-weight: 800; color: #0f172a;">#ORD-${datos.numero}</td>
+                  </tr>
+                  <tr>
+                    <td style="color: #64748b; padding: 4px 0;">Estado actual:</td>
+                    <td style="text-align: right; font-weight: 800; color: ${badgeColor};">${statusBadge}</td>
+                  </tr>
+                  <tr>
+                    <td style="color: #64748b; padding: 4px 0;">Modalidad:</td>
+                    <td style="text-align: right; font-weight: 600; color: #334155;">${esMotomandado ? "Motomandado Posadas" : "Retiro en local"}</td>
+                  </tr>
+                  ${
+                    evento === "TRANSFERENCIA_APROBADA"
+                      ? `
+                  <tr>
+                    <td style="color: #64748b; padding: 8px 0 0 0; font-size: 14px; font-weight: 700; border-top: 1px dashed #cbd5e1;">
+                      Importe acreditado:
+                    </td>
+                    <td style="text-align: right; font-size: 16px; font-weight: 900; color: #dc2626; padding: 8px 0 0 0; border-top: 1px dashed #cbd5e1;">
+                      ${formatCurrency(datos.total)}
+                    </td>
+                  </tr>
+                  `
+                      : ""
+                  }
+                </table>
+              </div>
+              `
               }
 
               <!-- Botón CTA a Mis Pedidos -->
@@ -439,7 +498,8 @@ export function renderEmailTemplate(
 </html>
   `.trim();
 
-  const text = `
+  const text = esPedidoCreado
+    ? `
 CHOPPER REPUESTOS · Posadas, Misiones
 Pedido #ORD-${datos.numero}
 Estado: ${statusBadge}
@@ -451,16 +511,87 @@ ${introMessage.replace(/<[^>]+>/g, "")}
 ${calloutMessage.replace(/<[^>]+>/g, "")}
 
 Modalidad: ${modalidadTexto}
+Medio de pago: ${metodoPagoTexto}
 
-${itemsText ? `Items:\n${itemsText}\nTotal: ${formatCurrency(datos.total)}\n` : `Total: ${formatCurrency(datos.total)}\n`}
+${itemsText ? `Items:\n${itemsText}\n` : ""}Total: ${formatCurrency(datos.total)}
 
 Podés ver el seguimiento en: ${pedidosUrl}
 
 Chopper Repuestos · Av. Roque Sáenz Peña 1500, Posadas, Misiones
 WhatsApp: +54 9 376 524-3554
-  `.trim();
+    `.trim()
+    : `
+CHOPPER REPUESTOS · Posadas, Misiones
+Pedido #ORD-${datos.numero}
+Estado: ${statusBadge}
+----------------------------------------
+${mainTitle}
+
+${introMessage.replace(/<[^>]+>/g, "")}
+
+${calloutMessage.replace(/<[^>]+>/g, "")}
+
+Resumen:
+- Pedido: #ORD-${datos.numero}
+- Estado: ${statusBadge}
+- Modalidad: ${modalidadTexto}${evento === "TRANSFERENCIA_APROBADA" ? `\n- Importe acreditado: ${formatCurrency(datos.total)}` : ""}
+
+Podés ver el detalle en: ${pedidosUrl}
+
+Chopper Repuestos · Av. Roque Sáenz Peña 1500, Posadas, Misiones
+WhatsApp: +54 9 376 524-3554
+    `.trim();
 
   return { subject, html, text };
+}
+
+/**
+ * Lista de correos autorizados en modo de prueba / demo (Requisito 1).
+ * Configurable mediante la variable de entorno SMTP_ALLOWED_EMAILS (separada por comas).
+ * Por defecto, en entorno de demostración protege contra rebotes admitiendo solo las 3 cuentas reales:
+ * - Manu (acumanu56@gmail.com / manuacu56@gmail.com)
+ * - Lionel García (lionelgarcia3333@gmail.com)
+ * - Santi (santi_777@hotmail.es)
+ */
+export function getAllowedEmails(): string[] {
+  const envAllowed = process.env.SMTP_ALLOWED_EMAILS;
+  if (envAllowed) {
+    const parsed = envAllowed
+      .split(",")
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+    if (parsed.length > 0) return parsed;
+  }
+
+  // Direcciones oficiales identificadas de los 3 usuarios de prueba
+  return [
+    "acumanu56@gmail.com",
+    "manuacu56@gmail.com",
+    "lionelgarcia3333@gmail.com",
+    "santi_777@hotmail.es",
+  ];
+}
+
+/**
+ * Determina si el entorno está operando con filtro de destinatarios (modo prueba / demo).
+ * En producción (cuando SMTP_TEST_MODE !== "true" y no está definida una lista restrictiva),
+ * se permiten todas las direcciones de clientes reales.
+ */
+export function isEmailAllowed(email: string): boolean {
+  const clean = (email || "").trim().toLowerCase();
+  if (!clean || !clean.includes("@")) return false;
+
+  const isTestMode =
+    process.env.SMTP_TEST_MODE === "true" ||
+    process.env.NODE_ENV !== "production" ||
+    Boolean(process.env.SMTP_ALLOWED_EMAILS);
+
+  if (!isTestMode) {
+    return true; // En producción sin modo de pruebas, se admite cualquier cliente real
+  }
+
+  const allowed = getAllowedEmails();
+  return allowed.includes(clean);
 }
 
 /**
@@ -503,6 +634,53 @@ async function markEmailAsSent(key: string, evento: string) {
 }
 
 /**
+ * Registro de auditoría interna de correos omitidos/bloqueados en modo pruebas
+ * para verificar que se detuvieron sin generar reintentos ni marcarlos como enviados.
+ */
+export async function getBlockedEmailLogs(): Promise<Record<string, { fecha: string; evento: string; email: string; motivo: string }>> {
+  try {
+    const record = await prisma.configuracionEcommerce.findUnique({
+      where: { clave: "correos_bloqueados_log" },
+    });
+    if (record?.valor) {
+      return JSON.parse(record.valor);
+    }
+  } catch (err) {
+    console.error("Error al leer logs de correos bloqueados:", err);
+  }
+  return {};
+}
+
+async function markEmailAsBlocked(key: string, evento: string, email: string, motivo: string) {
+  try {
+    const logs = await getBlockedEmailLogs();
+    logs[key] = {
+      fecha: new Date().toISOString(),
+      evento,
+      email,
+      motivo,
+    };
+
+    const entries = Object.entries(logs);
+    const trimmed = entries.length > 300 ? Object.fromEntries(entries.slice(-300)) : logs;
+
+    await prisma.configuracionEcommerce.upsert({
+      where: { clave: "correos_bloqueados_log" },
+      update: { valor: JSON.stringify(trimmed) },
+      create: { clave: "correos_bloqueados_log", valor: JSON.stringify(trimmed) },
+    });
+  } catch (err) {
+    console.error("Error al registrar auditoría de correo bloqueado:", err);
+  }
+}
+
+export interface EmailAdjunto {
+  filename: string;
+  content: Buffer | string;
+  contentType?: string;
+}
+
+/**
  * Envía el correo automático al cliente garantizando estricta idempotencia y tolerancia a fallos
  */
 export async function enviarEmailPedidoEvento(params: {
@@ -528,6 +706,7 @@ export async function enviarEmailPedidoEvento(params: {
   evento: EmailEventoPedido;
   motivoCancelacion?: string;
   forzarReenvio?: boolean;
+  adjuntos?: EmailAdjunto[];
 }): Promise<{
   success: boolean;
   skipped?: boolean;
@@ -545,12 +724,52 @@ export async function enviarEmailPedidoEvento(params: {
   // Clave única de idempotencia: pedido_{id}_{evento}
   const idempotencyKey = `pedido_${pedido.id}_${evento}`;
 
+  // Filtro estricto de seguridad para entorno de demostración / pruebas (Requisito 1)
+  // Omite envíos a correos ficticios de pedidos anteriores sin generar reintentos ni marcarlos como enviados
+  if (!isEmailAllowed(emailDestino)) {
+    console.warn(
+      `[EMAIL_SERVICE: OMITIDO (MODO DEMO)] Pedido #ORD-${pedido.numero}: destinatario '${emailDestino}' no autorizado en lista blanca. Envío bloqueado sin reintentos.`
+    );
+    await markEmailAsBlocked(
+      idempotencyKey,
+      evento,
+      emailDestino,
+      "Destinatario no autorizado en lista blanca de pruebas (SMTP_ALLOWED_EMAILS)"
+    );
+    return {
+      success: true,
+      skipped: true,
+      reason: `Destinatario '${emailDestino}' omitido por filtro de pruebas/demo. No se generarán reintentos ni fallos SMTP.`,
+    };
+  }
+
   if (!forzarReenvio) {
     const logs = await getSentEmailLogs();
     if (logs[idempotencyKey]) {
       return { success: true, skipped: true, reason: `Correo para '${evento}' ya fue enviado previamente a ${emailDestino}.` };
     }
   }
+
+  // Para Pago Confirmado, adjuntar automáticamente el Comprobante de Compra PDF adaptado del SGI (Requisitos 1 a 4)
+  let adjuntosFinales = params.adjuntos ? [...params.adjuntos] : [];
+  if (evento === "TRANSFERENCIA_APROBADA" && adjuntosFinales.length === 0) {
+    try {
+      const pdfBuffer = await generarComprobantePdfPorPedidoId(pedido.id);
+      if (pdfBuffer && pdfBuffer.length > 0) {
+        adjuntosFinales.push({
+          filename: `Comprobante-Compra-ORD-${pedido.numero}.pdf`,
+          content: pdfBuffer,
+          contentType: "application/pdf",
+        });
+      }
+    } catch (pdfErr) {
+      console.error(`[COMPROBANTE_PDF] Error al adjuntar comprobante para pedido #${pedido.numero}:`, pdfErr);
+    }
+  }
+
+  const tieneComprobanteAdjunto = adjuntosFinales.some(
+    (a) => a.contentType === "application/pdf" || a.filename?.toLowerCase().endsWith(".pdf")
+  );
 
   const template = renderEmailTemplate(evento, {
     numero: pedido.numero,
@@ -564,6 +783,7 @@ export async function enviarEmailPedidoEvento(params: {
     direccionEnvio: pedido.direccionEnvio,
     motivoCancelacion,
     estadoPago: pedido.estadoPago,
+    adjuntoComprobante: tieneComprobanteAdjunto,
   });
 
   // Si no hay credenciales SMTP configuradas (modo local/dev/mock)
@@ -587,6 +807,11 @@ export async function enviarEmailPedidoEvento(params: {
       subject: template.subject,
       text: template.text,
       html: template.html,
+      attachments: adjuntosFinales.map((a) => ({
+        filename: a.filename,
+        content: a.content,
+        contentType: a.contentType,
+      })),
     });
 
     await markEmailAsSent(idempotencyKey, evento);
@@ -695,6 +920,17 @@ Este enlace es válido por 24 horas. Si no solicitaste este cambio, ignorá este
       `[EMAIL_SERVICE: DRY-RUN] Verificación de correo para ${emailNuevo}. Link: ${linkVerificacion}`
     );
     return { success: true, simulated: true };
+  }
+
+  // Filtro de lista blanca en modo pruebas/demo
+  if (!isEmailAllowed(emailNuevo)) {
+    console.warn(
+      `[EMAIL_SERVICE: OMITIDO (MODO DEMO)] Verificación de correo para '${emailNuevo}' omitida (destinatario no autorizado en modo pruebas). Link: ${linkVerificacion}`
+    );
+    return {
+      success: true,
+      simulated: true,
+    };
   }
 
   try {

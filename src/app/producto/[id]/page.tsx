@@ -23,12 +23,19 @@ export default async function ProductDetailPage({ params }: PageProps) {
     notFound();
   }
 
-  // Traer productos recomendados (de la misma categoría o catálogo general)
-  const allProds = await getProducts({ categoriaId: product.categoriaId });
-  const fallbackProds = allProds.length > 1 ? allProds : await getProducts({});
-  const recommended = fallbackProds
-    .filter((p) => p.id !== product.id)
-    .slice(0, 5);
+  // Traer hasta 5 productos recomendados (de la misma categoría o catálogo general)
+  let recommended = await getProducts({
+    categoriaId: product.categoriaId,
+    excludeId: product.id,
+    take: 5,
+  });
+
+  if (recommended.length === 0) {
+    recommended = await getProducts({
+      excludeId: product.id,
+      take: 5,
+    });
+  }
 
   return (
     <ProductDetailClient

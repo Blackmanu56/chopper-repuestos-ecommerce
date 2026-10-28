@@ -127,6 +127,8 @@ export default function MasVendidosSection({ products }: { products: ProductItem
                   <img
                     src={prod.imagen}
                     alt={prod.nombre}
+                    loading="lazy"
+                    decoding="async"
                     className="h-full w-full object-contain group-hover:scale-105 transition-transform"
                   />
                 ) : (

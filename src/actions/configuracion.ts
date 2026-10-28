@@ -1,5 +1,6 @@
 "use server";
 
+import { cache } from "react";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import fs from "fs/promises";
@@ -71,7 +72,7 @@ async function verifyStaff(
 /**
  * Obtiene la configuración completa de la tienda
  */
-export async function getConfiguracionAction(): Promise<TiendaConfig> {
+const getCachedConfig = cache(async (): Promise<TiendaConfig> => {
   try {
     const configs = await prisma.configuracionEcommerce.findMany();
     const result: TiendaConfig = { ...DEFAULT_CONFIG };
@@ -103,6 +104,10 @@ export async function getConfiguracionAction(): Promise<TiendaConfig> {
     console.error("Error al obtener configuración de la tienda:", error);
     return DEFAULT_CONFIG;
   }
+});
+
+export async function getConfiguracionAction(): Promise<TiendaConfig> {
+  return getCachedConfig();
 }
 
 /**
@@ -250,7 +255,7 @@ const DEFAULT_ETIQUETAS: EtiquetaOferta[] = [
   { id: "recomendado", nombre: "Recomendado Posadas", emoji: "⭐", activa: true },
 ];
 
-export async function getEtiquetasOfertaAction(): Promise<EtiquetaOferta[]> {
+const getCachedEtiquetas = cache(async (): Promise<EtiquetaOferta[]> => {
   try {
     const config = await prisma.configuracionEcommerce.findUnique({
       where: { clave: "etiquetas_oferta" },
@@ -273,6 +278,10 @@ export async function getEtiquetasOfertaAction(): Promise<EtiquetaOferta[]> {
     }
   } catch {}
   return DEFAULT_ETIQUETAS;
+});
+
+export async function getEtiquetasOfertaAction(): Promise<EtiquetaOferta[]> {
+  return getCachedEtiquetas();
 }
 
 /**
@@ -581,7 +590,7 @@ const DEFAULT_BANNERS_HOME: BannerHome[] = [
 /**
  * Obtiene todos los banners configurados para la página de inicio
  */
-export async function getBannersHomeAction(): Promise<BannerHome[]> {
+const getCachedBannersHome = cache(async (): Promise<BannerHome[]> => {
   try {
     const config = await prisma.configuracionEcommerce.findUnique({
       where: { clave: "banners_home" },
@@ -605,6 +614,10 @@ export async function getBannersHomeAction(): Promise<BannerHome[]> {
     console.error("Error al obtener banners home:", e);
   }
   return DEFAULT_BANNERS_HOME;
+});
+
+export async function getBannersHomeAction(): Promise<BannerHome[]> {
+  return getCachedBannersHome();
 }
 
 /**

@@ -42,6 +42,7 @@ export default function LoginModal() {
   const [showRegisterPassword, setShowRegisterPassword] = useState(false);
   const [showStaffPassword, setShowStaffPassword] = useState(false);
   const [nombreCompleto, setNombreCompleto] = useState("");
+  const [dni, setDni] = useState("");
   const [telefono, setTelefono] = useState("");
   const [email, setEmail] = useState("");
   const [recoveryCode, setRecoveryCode] = useState("");
@@ -59,6 +60,7 @@ export default function LoginModal() {
       setShowRegisterPassword(false);
       setShowStaffPassword(false);
       setNombreCompleto("");
+      setDni("");
       setTelefono("");
       setEmail("");
       setRecoveryCode("");
@@ -122,6 +124,7 @@ export default function LoginModal() {
         email,
         telefono,
         password,
+        dni: dni.trim() || undefined,
       });
       if (!res.success) {
         setError(res.error || "No se pudo crear la cuenta.");
@@ -341,6 +344,18 @@ export default function LoginModal() {
                 value={telefono}
                 onChange={(e) => setTelefono(e.target.value)}
                 placeholder="Ej: 376 412-3456"
+                className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-white placeholder-slate-500 outline-none focus:border-brand"
+              />
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-semibold mb-1">
+                DNI (para facturación y retiro)
+              </label>
+              <input
+                value={dni}
+                onChange={(e) => setDni(e.target.value)}
+                placeholder="Ej: 34.567.890"
                 className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-white placeholder-slate-500 outline-none focus:border-brand"
               />
             </div>

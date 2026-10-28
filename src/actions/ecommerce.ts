@@ -92,6 +92,8 @@ export async function getProducts(params?: {
   categoriaNombre?: string;
   soloOfertas?: boolean;
   soloDestacados?: boolean;
+  excludeId?: number;
+  take?: number;
 }): Promise<ProductItem[]> {
   try {
     const where: any = {
@@ -102,6 +104,10 @@ export async function getProducts(params?: {
         { ecommerce: { publicadoOnline: true } },
       ],
     };
+
+    if (params?.excludeId) {
+      where.id = { not: params.excludeId };
+    }
 
     if (params?.categoriaId) {
       where.categoriaId = params.categoriaId;
@@ -132,6 +138,7 @@ export async function getProducts(params?: {
     const [products, etiquetas] = await Promise.all([
       prisma.producto.findMany({
         where,
+        take: params?.take,
         include: {
           categoria: { select: { id: true, nombre: true } },
           marcaRelacionada: { select: { id: true, nombre: true } },

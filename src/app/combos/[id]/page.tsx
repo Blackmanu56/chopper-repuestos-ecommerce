@@ -18,7 +18,10 @@ export default async function ComboDetailPage({ params }: PageProps) {
     notFound();
   }
 
-  const combo = await getComboByIdAction(comboId);
+  const [combo, allCombos] = await Promise.all([
+    getComboByIdAction(comboId),
+    getPublicCombosAction(),
+  ]);
 
   if (!combo) {
     notFound();
@@ -32,7 +35,6 @@ export default async function ComboDetailPage({ params }: PageProps) {
     }
   }
 
-  const allCombos = await getPublicCombosAction();
   const otherCombos = allCombos.filter((c) => c.id !== combo.id);
 
   return <ComboDetailClient combo={combo} otherCombos={otherCombos} />;

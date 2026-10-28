@@ -1038,9 +1038,9 @@ export async function actualizarEstadoPedidoAction(
             data: updateSimple,
             include: { items: true },
           });
-          return { success: true, pedido: mapPedidoToDTO(up) };
+          return { success: true, pedido: mapPedidoToDTO(up), estadoAnterior: pedidoActual.estado };
         }
-        return { success: true, pedido: mapPedidoToDTO(pedidoActual) };
+        return { success: true, pedido: mapPedidoToDTO(pedidoActual), estadoAnterior: pedidoActual.estado };
       }
 
       // Reglas de Estados Terminales
@@ -1160,7 +1160,7 @@ export async function actualizarEstadoPedidoAction(
           include: { items: true },
         });
 
-        return { success: true, pedido: mapPedidoToDTO(updatedCancel) };
+        return { success: true, pedido: mapPedidoToDTO(updatedCancel), estadoAnterior: pedidoActual.estado };
       }
 
       // ─── REGLAS DE LA MÁQUINA DE ESTADOS SECUENCIAL ───
@@ -1421,6 +1421,7 @@ export async function actualizarEstadoPedidoAction(
           return {
             success: true,
             pedido: mapPedidoToDTO(yaConfirmado!),
+            estadoAnterior: pedidoActual.estado,
           };
         }
 
@@ -1444,47 +1445,52 @@ export async function actualizarEstadoPedidoAction(
       return {
         success: true,
         pedido: mapPedidoToDTO(updated),
+        estadoAnterior: pedidoActual.estado,
       };
     });
 
     if (result.success && result.pedido) {
       const p = result.pedido;
       const estadoResult = p.estado;
+      const huboCambioEstado = result.estadoAnterior !== estadoResult;
 
-      // Disparar correo al cliente y notificación a staff según estado confirmado
-      if (estadoResult === "CONFIRMADO") {
-        // En efectivo en mostrador, el cobro real se registra al retirar; no anunciar pago confirmado antes de tiempo
-        if (p.metodoPago !== "EFECTIVO_LOCAL") {
-          enviarEmailPedidoEvento({ pedido: p, evento: "TRANSFERENCIA_APROBADA" }).catch((e) => console.error("Error email CONFIRMADO:", e));
+      // Disparar correo al cliente y notificación a staff únicamente si hubo una transición real de estado
+      // Evita duplicar eventos o reintentos cuando solo se actualizan notas o preparador en el panel
+      if (huboCambioEstado) {
+        if (estadoResult === "CONFIRMADO") {
+          // En efectivo en mostrador, el cobro real se registra al retirar; no anunciar pago confirmado antes de tiempo
+          if (p.metodoPago !== "EFECTIVO_LOCAL") {
+            enviarEmailPedidoEvento({ pedido: p, evento: "TRANSFERENCIA_APROBADA" }).catch((e) => console.error("Error email CONFIRMADO:", e));
+          }
+          crearNotificacionStaffInternal({
+            tipo: "PEDIDO_CONFIRMADO_ARMAR",
+            rolDestino: "STOCK",
+            titulo: `Pedido #ORD-${p.numero} confirmado`,
+            mensaje: p.metodoPago === "EFECTIVO_LOCAL"
+              ? `Reserva en mostrador. Listo para iniciar armado en depósito.`
+              : `Pago verificado por Ventas. Listo para iniciar armado en depósito.`,
+            pedidoId: p.id,
+            pedidoNumero: p.numero,
+            moduloDestino: "preparacion",
+          }).catch((e) => console.error("Error notif STOCK:", e));
+        } else if (estadoResult === "PREPARANDO") {
+          enviarEmailPedidoEvento({ pedido: p, evento: "PEDIDO_EN_PREPARACION" }).catch((e) => console.error("Error email PREPARANDO:", e));
+        } else if (estadoResult === "LISTO_ENTREGA") {
+          enviarEmailPedidoEvento({ pedido: p, evento: "PEDIDO_LISTO" }).catch((e) => console.error("Error email LISTO_ENTREGA:", e));
+          crearNotificacionStaffInternal({
+            tipo: "PEDIDO_LISTO_ENTREGA",
+            rolDestino: "VENTAS",
+            titulo: `Pedido #ORD-${p.numero} listo para entrega`,
+            mensaje: `Checklist de depósito completado. Paquete listo para ${p.modalidadEntrega === "MOTOMANDADO" ? "cadetería/Moto Uber" : "retiro en mostrador"}.`,
+            pedidoId: p.id,
+            pedidoNumero: p.numero,
+            moduloDestino: "entrega",
+          }).catch((e) => console.error("Error notif VENTAS:", e));
+        } else if (estadoResult === "ENTREGADO") {
+          enviarEmailPedidoEvento({ pedido: p, evento: "PEDIDO_ENTREGADO" }).catch((e) => console.error("Error email ENTREGADO:", e));
+        } else if (estadoResult === "CANCELADO") {
+          enviarEmailPedidoEvento({ pedido: p, evento: "CANCELACION_APROBADA" }).catch((e) => console.error("Error email CANCELADO:", e));
         }
-        crearNotificacionStaffInternal({
-          tipo: "PEDIDO_CONFIRMADO_ARMAR",
-          rolDestino: "STOCK",
-          titulo: `Pedido #ORD-${p.numero} confirmado`,
-          mensaje: p.metodoPago === "EFECTIVO_LOCAL"
-            ? `Reserva en mostrador. Listo para iniciar armado en depósito.`
-            : `Pago verificado por Ventas. Listo para iniciar armado en depósito.`,
-          pedidoId: p.id,
-          pedidoNumero: p.numero,
-          moduloDestino: "preparacion",
-        }).catch((e) => console.error("Error notif STOCK:", e));
-      } else if (estadoResult === "PREPARANDO") {
-        enviarEmailPedidoEvento({ pedido: p, evento: "PEDIDO_EN_PREPARACION" }).catch((e) => console.error("Error email PREPARANDO:", e));
-      } else if (estadoResult === "LISTO_ENTREGA") {
-        enviarEmailPedidoEvento({ pedido: p, evento: "PEDIDO_LISTO" }).catch((e) => console.error("Error email LISTO_ENTREGA:", e));
-        crearNotificacionStaffInternal({
-          tipo: "PEDIDO_LISTO_ENTREGA",
-          rolDestino: "VENTAS",
-          titulo: `Pedido #ORD-${p.numero} listo para entrega`,
-          mensaje: `Checklist de depósito completado. Paquete listo para ${p.modalidadEntrega === "MOTOMANDADO" ? "cadetería/Moto Uber" : "retiro en mostrador"}.`,
-          pedidoId: p.id,
-          pedidoNumero: p.numero,
-          moduloDestino: "entrega",
-        }).catch((e) => console.error("Error notif VENTAS:", e));
-      } else if (estadoResult === "ENTREGADO") {
-        enviarEmailPedidoEvento({ pedido: p, evento: "PEDIDO_ENTREGADO" }).catch((e) => console.error("Error email ENTREGADO:", e));
-      } else if (estadoResult === "CANCELADO") {
-        enviarEmailPedidoEvento({ pedido: p, evento: "CANCELACION_APROBADA" }).catch((e) => console.error("Error email CANCELADO:", e));
       }
     }
 
