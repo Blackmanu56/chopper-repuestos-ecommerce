@@ -10,6 +10,11 @@ const globalForPrisma = global as unknown as {
   prisma: PrismaClient | undefined;
 };
 
+// Auto-sanación de instancia en memoria: si el singleton en proceso carece del modelo credencialCliente, renovarlo
+if (globalForPrisma.prisma && !("credencialCliente" in globalForPrisma.prisma)) {
+  globalForPrisma.prisma = undefined;
+}
+
 export const prisma =
   globalForPrisma.prisma ??
   new PrismaClient({

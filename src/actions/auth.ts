@@ -6,7 +6,11 @@ import crypto from "crypto";
 import fs from "fs/promises";
 import path from "path";
 import { cookies, headers } from "next/headers";
-import { enviarEmailVerificacionCambioCorreo } from "@/lib/email";
+import {
+  enviarEmailVerificacionCambioCorreo,
+  enviarEmailRecuperacionPassword,
+  enviarEmailBienvenidaCliente,
+} from "@/lib/email";
 import {
   setServerSessionCookie,
   clearServerSessionCookie,
@@ -20,7 +24,6 @@ import { validateUploadedFile } from "@/lib/uploadValidation";
 const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads", "avatars");
 const SGI_UPLOAD_DIR = path.resolve(process.cwd(), "..", "sgi-repuestos", "public", "uploads", "avatars");
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
-const CLIENT_CREDS_KEY = "clientes_credenciales_ecommerce";
 
 export interface AuthUserResponse {
   id: number;
@@ -46,75 +49,30 @@ interface StoredClientCredential {
 }
 
 /**
- * Obtiene y sincroniza el mapa de credenciales hash de clientes en configuracion_ecommerce
- * sin alterar la tabla compartida `clientes` ni requerir migraciones.
+ * Obtiene las credenciales de clientes exclusivamente desde la tabla PostgreSQL `credenciales_clientes`.
  */
 async function getClientCredentialsMap(): Promise<Record<string, StoredClientCredential>> {
-  let map: Record<string, StoredClientCredential> = {};
-  try {
-    const row = await prisma.configuracionEcommerce.findUnique({
-      where: { clave: CLIENT_CREDS_KEY },
-    });
-    if (row?.valor) {
-      const parsed = JSON.parse(row.valor);
-      if (parsed && typeof parsed === "object") {
-        map = parsed;
-      }
-    }
-  } catch {}
+  const map: Record<string, StoredClientCredential> = {};
+  const rows = await prisma.credencialCliente.findMany({
+    include: {
+      cliente: {
+        select: { id: true, email: true, dni: true, activo: true },
+      },
+    },
+  });
 
-  // Garantizar que las cuentas oficiales de Carlos Motero (ID 7 y ID 6) tengan su hash bcrypt inicializado
-  let dirty = false;
-  if (!map["7"] || !map["6"]) {
-    const defaultHash = await bcrypt.hash("cliente123", 10);
-    if (!map["7"]) {
-      map["7"] = {
-        clienteId: 7,
-        username: "cliente",
-        email: "cliente@gmail.com",
-        dni: "34567890",
-        passwordHash: defaultHash,
-      };
-      dirty = true;
-    }
-    if (!map["6"]) {
-      map["6"] = {
-        clienteId: 6,
-        username: "carlos.motero",
-        email: "carlos.motero@gmail.com",
-        dni: "38999888",
-        passwordHash: defaultHash,
-      };
-      dirty = true;
-    }
-    if (dirty) {
-      try {
-        await prisma.configuracionEcommerce.upsert({
-          where: { clave: CLIENT_CREDS_KEY },
-          update: { valor: JSON.stringify(map) },
-          create: {
-            clave: CLIENT_CREDS_KEY,
-            valor: JSON.stringify(map),
-            descripcion: "Credenciales bcrypt de clientes del e-commerce",
-          },
-        });
-      } catch {}
-    }
+  for (const row of rows) {
+    map[String(row.clienteId)] = {
+      clienteId: row.clienteId,
+      username: row.username || (row.cliente?.email ? row.cliente.email.split("@")[0] : `cliente${row.clienteId}`),
+      email: row.cliente?.email || "",
+      dni: row.cliente?.dni || "",
+      passwordHash: row.passwordHash,
+      avatar: row.avatar || null,
+    };
   }
 
   return map;
-}
-
-async function saveClientCredentialsMap(map: Record<string, StoredClientCredential>): Promise<void> {
-  await prisma.configuracionEcommerce.upsert({
-    where: { clave: CLIENT_CREDS_KEY },
-    update: { valor: JSON.stringify(map) },
-    create: {
-      clave: CLIENT_CREDS_KEY,
-      valor: JSON.stringify(map),
-      descripcion: "Credenciales bcrypt de clientes del e-commerce",
-    },
-  });
 }
 
 export interface SolicitudCambioEmail {
@@ -261,12 +219,7 @@ export async function confirmarCambioEmailAction(token: string): Promise<Confirm
       data: { email: emailNuevo },
     });
 
-    // 4.B. Actualizar en mapa de credenciales del e-commerce
-    const credsMap = await getClientCredentialsMap();
-    if (credsMap[String(solicitud.clienteId)]) {
-      credsMap[String(solicitud.clienteId)].email = emailNuevo;
-      await saveClientCredentialsMap(credsMap);
-    }
+    // 4.B. El correo queda actualizado en la tabla `clientes`, vinculada por foreign key a `credenciales_clientes`
 
     // 4.C. Marcar la solicitud como CONFIRMADA (se conserva en histórico para que clics o recargas posteriores sigan dando éxito)
     solicitud.estado = "CONFIRMADO";
@@ -319,36 +272,22 @@ export async function loginClientAction(
 
     const credsMap = await getClientCredentialsMap();
 
-    // Resolver el registro de Cliente en PostgreSQL
-    let targetClienteId: number | null = null;
-
-    // 1. Buscar prioritariamente en el mapa de credenciales registradas (soporta cambios de username o email)
+    // 1. Buscar en las credenciales por correo, nombre de usuario o DNI
     const entry = Object.values(credsMap).find(
       (c) =>
-        c.email.toLowerCase() === cleanInput ||
-        c.username.toLowerCase() === cleanInput ||
-        c.dni === cleanDni
+        (c.email && c.email.toLowerCase() === cleanInput) ||
+        (c.username && c.username.toLowerCase() === cleanInput) ||
+        (cleanDni.length >= 7 && c.dni && c.dni.replace(/\D/g, "") === cleanDni)
     );
-    if (entry) {
-      targetClienteId = entry.clienteId;
-    } else if (
-      cleanInput === "cliente" ||
-      cleanInput === "carlos.mortero@gmail.com" ||
-      cleanDni === "34567890"
-    ) {
-      targetClienteId = 7;
-    } else if (cleanInput === "carlos.motero@gmail.com" || cleanInput === "carlos.motero" || cleanDni === "38999888") {
-      targetClienteId = 6;
-    }
 
-    let cliente = targetClienteId
-      ? await prisma.cliente.findUnique({ where: { id: targetClienteId } })
+    const cliente = entry
+      ? await prisma.cliente.findUnique({ where: { id: entry.clienteId } })
       : await prisma.cliente.findFirst({
           where: {
             activo: true,
             OR: [
               { email: { equals: cleanInput, mode: "insensitive" } },
-              { dni: cleanDni },
+              ...(cleanDni.length >= 7 ? [{ dni: cleanDni }] : []),
             ],
           },
         });
@@ -357,18 +296,12 @@ export async function loginClientAction(
       return { success: false, error: "Usuario o contraseña incorrectos." };
     }
 
-    const cred = credsMap[String(cliente.id)];
+    const cred = credsMap[String(cliente.id)] || (await prisma.credencialCliente.findUnique({
+      where: { clienteId: cliente.id },
+    }));
+
     if (!cred || !cred.passwordHash) {
       return { success: false, error: "Usuario o contraseña incorrectos." };
-    }
-
-    // Si el usuario intentó ingresar mediante un correo que ya no coincide con el cliente ni sus credenciales, denegar acceso
-    if (cleanInput.includes("@")) {
-      const emailCliente = (cliente.email || "").toLowerCase().trim();
-      const emailCred = (cred.email || "").toLowerCase().trim();
-      if (emailCliente !== cleanInput && emailCred !== cleanInput) {
-        return { success: false, error: "Usuario o contraseña incorrectos." };
-      }
     }
 
     const isMatch = await bcrypt.compare(cleanPass, cred.passwordHash);
@@ -449,6 +382,23 @@ export async function registerClientAction(input: {
       return { success: false, error: "Ya existe una cuenta registrada con ese correo electrónico." };
     }
 
+    // Separación estricta de dominios: las cuentas del personal administrativo no pueden registrarse como clientes
+    const staffConflict = await prisma.usuario.findFirst({
+      where: {
+        OR: [
+          { correo: { equals: cleanEmail, mode: "insensitive" } },
+          ...(cleanDni ? [{ dni: cleanDni }] : []),
+        ],
+        activo: true,
+      },
+    });
+    if (staffConflict) {
+      return {
+        success: false,
+        error: "Esta identificación pertenece al personal administrativo del comercio. Las cuentas de personal no pueden registrarse como clientes con sus credenciales de trabajo.",
+      };
+    }
+
     const existingByEmail = await prisma.cliente.findFirst({
       where: { email: { equals: cleanEmail, mode: "insensitive" } },
     });
@@ -462,17 +412,14 @@ export async function registerClientAction(input: {
         return { success: false, error: "El DNI debe contener 7 u 8 dígitos numéricos." };
       }
 
-      // Validar si el DNI ya pertenece a cualquier otro cliente en PostgreSQL (normalizado y raw)
-      const existingByDni = await prisma.cliente.findFirst({
-        where: {
-          OR: [
-            { dni: cleanDni },
-            { dni: rawDni },
-          ],
-        },
-      });
+      // Validar si el DNI ya pertenece a cualquier otro cliente en PostgreSQL normalizando dígitos
+      const existingByDni = await prisma.$queryRaw<Array<{ id: number; dni: string }>>`
+        SELECT id, dni FROM clientes
+        WHERE regexp_replace(COALESCE(dni, ''), '[^0-9]', '', 'g') = ${cleanDni}
+        LIMIT 1
+      `;
 
-      if (existingByDni) {
+      if (existingByDni.length > 0) {
         return { success: false, error: "Este DNI ya se encuentra registrado en otra cuenta." };
       }
 
@@ -490,6 +437,9 @@ export async function registerClientAction(input: {
       finalDni = `EC${Date.now().toString().slice(-8)}`;
     }
 
+    const passwordHash = await bcrypt.hash(cleanPass, 10);
+    const username = cleanEmail.split("@")[0].toLowerCase();
+
     let cliente: any;
     try {
       cliente = await prisma.cliente.create({
@@ -500,6 +450,12 @@ export async function registerClientAction(input: {
           email: cleanEmail,
           direccion: cleanDir,
           activo: true,
+          credencial: {
+            create: {
+              passwordHash,
+              username,
+            },
+          },
         },
       });
     } catch (createErr: any) {
@@ -525,19 +481,6 @@ export async function registerClientAction(input: {
       throw createErr;
     }
 
-    const passwordHash = await bcrypt.hash(cleanPass, 10);
-    const username = cleanEmail.split("@")[0].toLowerCase();
-
-    credsMap[String(cliente.id)] = {
-      clienteId: cliente.id,
-      username,
-      email: cleanEmail,
-      dni: cliente.dni,
-      passwordHash,
-    };
-
-    await saveClientCredentialsMap(credsMap);
-
     const responseUser: AuthUserResponse = {
       id: cliente.id,
       username,
@@ -562,6 +505,16 @@ export async function registerClientAction(input: {
       dni: responseUser.dni,
       cuit: responseUser.cuit,
     });
+
+    // Enviar correo de bienvenida al cliente de forma no bloqueante (si falla el envío, la cuenta permanece creada)
+    try {
+      await enviarEmailBienvenidaCliente({
+        nombreCliente: responseUser.nombreCompleto,
+        email: cleanEmail,
+      });
+    } catch (emailErr: any) {
+      console.error("[EMAIL_SERVICE: ERROR BIENVENIDA] Error al despachar correo de bienvenida:", emailErr?.message || emailErr);
+    }
 
     return { success: true, user: responseUser };
   } catch (error) {
@@ -777,16 +730,13 @@ export async function updateStaffProfileAction(
           if (cleanDni.length < 7 || (cleanDni.length > 8 && cleanDni.length !== 11)) {
             return { success: false, error: "El DNI debe contener 7 u 8 dígitos numéricos." };
           }
-          const conflictDni = await prisma.cliente.findFirst({
-            where: {
-              OR: [
-                { dni: cleanDni },
-                { dni: rawDni },
-              ],
-              id: { not: session.id },
-            },
-          });
-          if (conflictDni) {
+          const conflictDni = await prisma.$queryRaw<Array<{ id: number; dni: string }>>`
+            SELECT id, dni FROM clientes
+            WHERE regexp_replace(COALESCE(dni, ''), '[^0-9]', '', 'g') = ${cleanDni}
+              AND id != ${session.id}
+            LIMIT 1
+          `;
+          if (conflictDni.length > 0) {
             return { success: false, error: "Este DNI ya se encuentra registrado en otra cuenta." };
           }
           const conflictCred = Object.values(credsMap).find(
@@ -794,6 +744,12 @@ export async function updateStaffProfileAction(
           );
           if (conflictCred) {
             return { success: false, error: "Este DNI ya se encuentra registrado en otra cuenta." };
+          }
+          const conflictStaffDni = await prisma.usuario.findFirst({
+            where: { dni: cleanDni, activo: true },
+          });
+          if (conflictStaffDni) {
+            return { success: false, error: "Este DNI pertenece al personal administrativo del comercio." };
           }
           newDni = cleanDni;
           cred.dni = cleanDni;
@@ -870,6 +826,12 @@ export async function updateStaffProfileAction(
           );
           if (conflictCred) {
             return { success: false, error: "El correo electrónico ya está registrado por otra cuenta." };
+          }
+          const conflictStaffEmail = await prisma.usuario.findFirst({
+            where: { correo: { equals: cleanCorreo, mode: "insensitive" }, activo: true },
+          });
+          if (conflictStaffEmail) {
+            return { success: false, error: "Este correo electrónico pertenece al personal administrativo del comercio." };
           }
 
           // Generar token criptográfico seguro y registrar solicitud pendiente (validez 24 hs)
@@ -951,8 +913,20 @@ export async function updateStaffProfileAction(
         throw updateErr;
       }
 
-      cred.dni = updatedCliente.dni;
-      await saveClientCredentialsMap(credsMap);
+      // Actualizar credenciales (password hash y avatar) en la tabla PostgreSQL credenciales_clientes
+      await prisma.credencialCliente.upsert({
+        where: { clienteId: session.id },
+        update: {
+          passwordHash: cred.passwordHash,
+          avatar: cred.avatar || null,
+        },
+        create: {
+          clienteId: session.id,
+          passwordHash: cred.passwordHash,
+          username: cred.username,
+          avatar: cred.avatar || null,
+        },
+      });
 
       const responseUser: AuthUserResponse = {
         id: updatedCliente.id,
@@ -1126,7 +1100,10 @@ export async function uploadStaffPhotoAction(
 
       const publicUrl = `/uploads/avatars/${filename}`;
       cred.avatar = publicUrl;
-      await saveClientCredentialsMap(credsMap);
+      await prisma.credencialCliente.update({
+        where: { clienteId: session.id },
+        data: { avatar: publicUrl },
+      });
 
       await setServerSessionCookie({
         ...session,
@@ -1204,7 +1181,10 @@ export async function deleteStaffPhotoAction(
           await fs.unlink(path.join(UPLOAD_DIR, filename));
         } catch {}
         cred.avatar = null;
-        await saveClientCredentialsMap(credsMap);
+        await prisma.credencialCliente.update({
+          where: { clienteId: session.id },
+          data: { avatar: null },
+        });
       }
       await setServerSessionCookie({
         ...session,
@@ -1340,5 +1320,334 @@ export async function checkSessionStatusAction(): Promise<{
     };
   } catch {
     return { active: false, expired: false };
+  }
+}
+
+export interface SolicitudRecuperacionPassword {
+  requestId: string;
+  clienteId: number;
+  email: string;
+  codigoHash: string;
+  creadoEn: string;
+  expiraEn: string;
+  intentosFallidos: number;
+  verificado: boolean;
+  verificadoEn?: string;
+  resetToken?: string;
+  resetTokenExpiraEn?: string;
+  utilizado: boolean;
+  utilizadoEn?: string;
+}
+
+const PASSWORD_RECOVERY_KEY = "recuperacion_password_pendientes";
+
+async function getPasswordRecoveryMap(): Promise<Record<string, SolicitudRecuperacionPassword>> {
+  try {
+    const row = await prisma.configuracionEcommerce.findUnique({
+      where: { clave: PASSWORD_RECOVERY_KEY },
+    });
+    if (row?.valor) {
+      const parsed = JSON.parse(row.valor);
+      if (parsed && typeof parsed === "object") {
+        return parsed;
+      }
+    }
+  } catch {}
+  return {};
+}
+
+async function savePasswordRecoveryMap(map: Record<string, SolicitudRecuperacionPassword>): Promise<void> {
+  await prisma.configuracionEcommerce.upsert({
+    where: { clave: PASSWORD_RECOVERY_KEY },
+    update: { valor: JSON.stringify(map) },
+    create: {
+      clave: PASSWORD_RECOVERY_KEY,
+      valor: JSON.stringify(map),
+      descripcion: "Solicitudes y tokens de recuperación de contraseñas de clientes e-commerce",
+    },
+  });
+}
+
+/**
+ * Solicita el envío de un código de 6 dígitos para recuperar contraseña.
+ * Aplica rate limiting (60s entre envíos) y respuesta segura anti-enumeración.
+ */
+export async function solicitarRecuperacionPasswordAction(
+  emailInput: string
+): Promise<{ success: boolean; message: string; emailMasked?: string; error?: string }> {
+  try {
+    const cleanEmail = (emailInput || "").trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes("@")) {
+      return { success: false, message: "", error: "Ingresá un correo electrónico válido." };
+    }
+
+    const map = await getPasswordRecoveryMap();
+    const now = new Date();
+
+    // Limpieza de solicitudes vencidas hace más de 24 horas para mantener liviano el JSON
+    for (const [k, req] of Object.entries(map)) {
+      if (new Date(req.expiraEn).getTime() < now.getTime() - 24 * 60 * 60 * 1000) {
+        delete map[k];
+      }
+    }
+
+    // Rate limiting: evitar solicitudes repetidas en menos de 60 segundos para el mismo correo
+    const prevReq = Object.values(map)
+      .filter((r) => r.email === cleanEmail && !r.utilizado)
+      .sort((a, b) => new Date(b.creadoEn).getTime() - new Date(a.creadoEn).getTime())[0];
+
+    if (prevReq) {
+      const elapsedMs = now.getTime() - new Date(prevReq.creadoEn).getTime();
+      if (elapsedMs < 60 * 1000) {
+        const remainingSec = Math.ceil((60 * 1000 - elapsedMs) / 1000);
+        return {
+          success: false,
+          message: "",
+          error: `Ya enviamos un código recientemente. Por favor esperá ${remainingSec} segundos antes de solicitar otro.`,
+        };
+      }
+    }
+
+    // Buscar si el cliente existe en el sistema
+    const credsMap = await getClientCredentialsMap();
+    let cliente = await prisma.cliente.findFirst({
+      where: {
+        activo: true,
+        email: { equals: cleanEmail, mode: "insensitive" },
+      },
+    });
+
+    let targetClienteId = cliente?.id;
+    if (!targetClienteId) {
+      const foundInCreds = Object.values(credsMap).find(
+        (c) => c.email.toLowerCase() === cleanEmail
+      );
+      if (foundInCreds) {
+        targetClienteId = foundInCreds.clienteId;
+        cliente = await prisma.cliente.findUnique({ where: { id: targetClienteId } });
+      }
+    }
+
+    const [userPart, domainPart] = cleanEmail.split("@");
+    const emailMasked = userPart.length > 2
+      ? `${userPart.slice(0, 2)}***@${domainPart}`
+      : `${userPart}***@${domainPart}`;
+
+    // Si el correo no pertenece a ninguna cuenta, responder de forma neutra y segura (sin revelar existencia)
+    if (!cliente || !cliente.activo || !targetClienteId) {
+      return {
+        success: true,
+        message: "Si tu correo se encuentra registrado, te enviamos un código de seguridad de 6 dígitos. Revisá tu bandeja de entrada o spam.",
+        emailMasked,
+      };
+    }
+
+    // Generar código numérico de 6 dígitos criptográficamente seguro
+    const codigoNum = crypto.randomInt(100000, 1000000).toString();
+    const codigoHash = crypto.createHash("sha256").update(codigoNum).digest("hex");
+    const requestId = crypto.randomUUID();
+
+    map[requestId] = {
+      requestId,
+      clienteId: targetClienteId,
+      email: cleanEmail,
+      codigoHash,
+      creadoEn: now.toISOString(),
+      expiraEn: new Date(now.getTime() + 15 * 60 * 1000).toISOString(), // 15 minutos de validez
+      intentosFallidos: 0,
+      verificado: false,
+      utilizado: false,
+    };
+
+    await savePasswordRecoveryMap(map);
+
+    // Enviar correo mediante Nodemailer / Gmail SMTP
+    const sendResult = await enviarEmailRecuperacionPassword({
+      nombreCliente: cliente.nombre,
+      email: cleanEmail,
+      codigo: codigoNum,
+    });
+
+    if (!sendResult.success) {
+      delete map[requestId];
+      await savePasswordRecoveryMap(map);
+      return {
+        success: false,
+        message: "",
+        error: "No se pudo enviar el correo de recuperación en este momento debido a un error del servidor de correo. Por favor intentá más tarde.",
+      };
+    }
+
+    return {
+      success: true,
+      message: `Enviamos un código de seguridad de 6 dígitos a ${emailMasked}. Revisá tu bandeja de entrada o spam.`,
+      emailMasked,
+    };
+  } catch (error: any) {
+    console.error("Error en solicitarRecuperacionPasswordAction:", error);
+    return { success: false, message: "", error: "Ocurrió un error inesperado al procesar la solicitud." };
+  }
+}
+
+/**
+ * Valida el código de 6 dígitos ingresado por el usuario.
+ * Controla límite de 5 intentos y vencimiento de 15 minutos.
+ * Emite un resetToken temporal de un solo uso para habilitar el cambio de contraseña.
+ */
+export async function verificarCodigoRecuperacionAction(
+  emailInput: string,
+  codigoInput: string
+): Promise<{ success: boolean; resetToken?: string; message?: string; error?: string }> {
+  try {
+    const cleanEmail = (emailInput || "").trim().toLowerCase();
+    const cleanCode = (codigoInput || "").trim();
+
+    if (!cleanEmail || !cleanEmail.includes("@")) {
+      return { success: false, error: "Correo electrónico no válido." };
+    }
+    if (!cleanCode || !/^\d{6}$/.test(cleanCode)) {
+      return { success: false, error: "Ingresá el código numérico de 6 dígitos." };
+    }
+
+    const map = await getPasswordRecoveryMap();
+    const now = new Date();
+
+    // Obtener la solicitud activa no utilizada más reciente para este correo
+    const activeReqs = Object.values(map)
+      .filter((r) => r.email === cleanEmail && !r.utilizado)
+      .sort((a, b) => new Date(b.creadoEn).getTime() - new Date(a.creadoEn).getTime());
+
+    if (activeReqs.length === 0) {
+      return {
+        success: false,
+        error: "No hay ninguna solicitud de recuperación pendiente para este correo o el código ya expiró. Por favor solicitá un nuevo código.",
+      };
+    }
+
+    const req = activeReqs[0];
+
+    // Verificar si expiró
+    if (now.getTime() > new Date(req.expiraEn).getTime()) {
+      return {
+        success: false,
+        error: "El código de seguridad ha vencido (validez de 15 minutos). Por favor solicitá uno nuevo.",
+      };
+    }
+
+    // Verificar límite de intentos fallidos
+    if (req.intentosFallidos >= 5) {
+      return {
+        success: false,
+        error: "Superaste el límite máximo de 5 intentos fallidos. Por seguridad, debés solicitar un nuevo código.",
+      };
+    }
+
+    const inputHash = crypto.createHash("sha256").update(cleanCode).digest("hex");
+    if (inputHash !== req.codigoHash) {
+      req.intentosFallidos += 1;
+      map[req.requestId] = req;
+      await savePasswordRecoveryMap(map);
+
+      const remaining = Math.max(0, 5 - req.intentosFallidos);
+      return {
+        success: false,
+        error: remaining > 0
+          ? `Código incorrecto. Te quedan ${remaining} intento(s).`
+          : "Código incorrecto. Se agotaron los intentos permitidos; solicitá un nuevo código.",
+      };
+    }
+
+    // Código válido -> emitir resetToken temporal de un solo uso (validez 10 minutos)
+    const resetToken = crypto.randomBytes(32).toString("hex");
+    req.verificado = true;
+    req.verificadoEn = now.toISOString();
+    req.resetToken = resetToken;
+    req.resetTokenExpiraEn = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
+
+    map[req.requestId] = req;
+    await savePasswordRecoveryMap(map);
+
+    return {
+      success: true,
+      resetToken,
+      message: "Código verificado correctamente. Ya podés establecer tu nueva contraseña.",
+    };
+  } catch (error: any) {
+    console.error("Error en verificarCodigoRecuperacionAction:", error);
+    return { success: false, error: "Ocurrió un error al verificar el código." };
+  }
+}
+
+/**
+ * Restablece la contraseña del cliente utilizando el resetToken validado.
+ * Aplica hash bcrypt a la nueva contraseña y marca la solicitud como utilizada.
+ */
+export async function restablecerPasswordAction(
+  emailInput: string,
+  resetTokenInput: string,
+  newPasswordInput: string
+): Promise<{ success: boolean; message?: string; error?: string }> {
+  try {
+    const cleanEmail = (emailInput || "").trim().toLowerCase();
+    const cleanToken = (resetTokenInput || "").trim();
+    const cleanPass = (newPasswordInput || "").trim();
+
+    if (!cleanEmail || !cleanToken) {
+      return { success: false, error: "Sesión de restablecimiento inválida. Por favor iniciá el proceso nuevamente." };
+    }
+    if (!cleanPass || cleanPass.length < 6) {
+      return { success: false, error: "La nueva contraseña debe tener al menos 6 caracteres." };
+    }
+
+    const map = await getPasswordRecoveryMap();
+    const now = new Date();
+
+    const req = Object.values(map).find(
+      (r) => r.email === cleanEmail && r.resetToken === cleanToken && !r.utilizado
+    );
+
+    if (!req) {
+      return {
+        success: false,
+        error: "El token de restablecimiento es inválido o ya fue utilizado. Por favor solicitá un nuevo código.",
+      };
+    }
+
+    if (!req.verificado || !req.resetTokenExpiraEn || now.getTime() > new Date(req.resetTokenExpiraEn).getTime()) {
+      return {
+        success: false,
+        error: "El tiempo para restablecer tu contraseña expiró (10 minutos). Por favor solicitá un nuevo código.",
+      };
+    }
+
+    // Hashear la nueva contraseña con bcrypt
+    const passwordHash = await bcrypt.hash(cleanPass, 10);
+
+    // Actualizar en la tabla dedicada PostgreSQL credenciales_clientes
+    await prisma.credencialCliente.upsert({
+      where: { clienteId: req.clienteId },
+      update: { passwordHash },
+      create: {
+        clienteId: req.clienteId,
+        passwordHash,
+        username: cleanEmail.split("@")[0].toLowerCase(),
+      },
+    });
+
+    // Invalidad y marcar la solicitud como utilizada para evitar cualquier reuso
+    req.utilizado = true;
+    req.utilizadoEn = now.toISOString();
+    delete req.resetToken;
+    delete req.resetTokenExpiraEn;
+    map[req.requestId] = req;
+    await savePasswordRecoveryMap(map);
+
+    return {
+      success: true,
+      message: "¡Tu contraseña fue actualizada con éxito! Ya podés iniciar sesión con tu nueva contraseña.",
+    };
+  } catch (error: any) {
+    console.error("Error en restablecerPasswordAction:", error);
+    return { success: false, error: "Ocurrió un error al restablecer la contraseña." };
   }
 }

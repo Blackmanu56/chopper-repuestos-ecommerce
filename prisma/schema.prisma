@@ -160,9 +160,25 @@ model Cliente {
   cuit      String?  @unique
   ventas    Venta[]
   pedidosEcommerce PedidoEcommerce[]
+  credencial CredencialCliente?
 
   @@map("clientes")
 }
+
+model CredencialCliente {
+  id            Int      @id @default(autoincrement())
+  clienteId     Int      @unique @map("cliente_id")
+  passwordHash  String   @map("password_hash")
+  username      String?  @map("username")
+  avatar        String?  @map("avatar")
+  creadoEn      DateTime @default(now()) @map("creado_en")
+  actualizadoEn DateTime @updatedAt @map("actualizado_en")
+
+  cliente       Cliente  @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+
+  @@map("credenciales_clientes")
+}
+
 
 model Proveedor {
   id                    Int                   @id @default(autoincrement())

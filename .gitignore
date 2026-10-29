@@ -49,10 +49,14 @@ next-env.d.ts
 !/public/uploads/comprobantes/.gitkeep
 /public/uploads/combos/*
 !/public/uploads/combos/.gitkeep
-/public/uploads/branding/logo-17928*.png
+/public/uploads/avatars/*
+!/public/uploads/avatars/.gitkeep
+/public/uploads/branding/*
+!/public/uploads/branding/.gitkeep
 
-# scratch
+# scratch and temporary scripts
 /scratch
 /backups
+/scripts/inspect-*.ts
 /scripts/aplicar-compatibilidades.ts
 /scripts/verificar-compatibilidades.ts
