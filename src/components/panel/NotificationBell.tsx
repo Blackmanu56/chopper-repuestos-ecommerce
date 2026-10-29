@@ -40,6 +40,8 @@ interface NotificationBellProps {
     correo?: string;
   };
   role?: "admin" | "venta" | "stock"; // Selector operativo actual del panel
+  refreshTrigger?: number; // Señal reactiva cuando se actualizan pedidos en el panel
+  onSyncPedidos?: () => void; // Sincroniza pedidos del panel al detectar novedades
   onSelectPedido?: (pedidoId: number, moduloDestino?: string) => void;
   onNavigateSection?: (modulo: "pedidos" | "preparacion" | "entrega", filtroEstado?: string) => void;
   className?: string;
@@ -48,6 +50,8 @@ interface NotificationBellProps {
 export function NotificationBell({
   user,
   role = "admin",
+  refreshTrigger,
+  onSyncPedidos,
   onSelectPedido,
   onNavigateSection,
   className = "",
@@ -90,6 +94,9 @@ export function NotificationBell({
         if (res.contadores) {
           setContadores(res.contadores);
         }
+        if (onSyncPedidos) {
+          onSyncPedidos();
+        }
       }
     } catch (err) {
       console.error("Error al cargar notificaciones:", err);
@@ -98,12 +105,12 @@ export function NotificationBell({
     }
   };
 
-  // Polling suave cada 45s y actualización al cambiar usuario o rol
+  // Polling suave cada 45s y actualización inmediata al cambiar usuario, rol o dispararse refreshTrigger
   useEffect(() => {
     loadNotifications();
     const interval = setInterval(loadNotifications, 45000);
     return () => clearInterval(interval);
-  }, [user?.id, role]);
+  }, [user?.id, role, refreshTrigger]);
 
   // Cerrar desplegable al hacer clic afuera
   useEffect(() => {
@@ -135,7 +142,9 @@ export function NotificationBell({
     setIsOpen(false);
     if (onNavigateSection) {
       onNavigateSection(grupo.moduloDestino, grupo.filtroDestino);
-    } else if (grupo.pedidosIds.length > 0 && onSelectPedido) {
+    }
+    // Si contiene exactamente un pedido y se dispone de onSelectPedido, seleccionarlo directamente
+    if (grupo.pedidosIds && grupo.pedidosIds.length === 1 && onSelectPedido) {
       onSelectPedido(grupo.pedidosIds[0], grupo.moduloDestino);
     }
   };

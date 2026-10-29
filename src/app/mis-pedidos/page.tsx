@@ -231,14 +231,18 @@ export default function MisPedidosPage() {
     }
 
     setIsLoading(true);
-    getMisPedidosClienteAction(undefined, urlNum).then((res) => {
+    getMisPedidosClienteAction().then((res) => {
       setIsLoading(false);
       if (res.success && res.pedidos) {
         setDbPedidos(res.pedidos);
-        // Si vino por query param ?num=, abrir directamente el detalle del pedido
+        // Si vino por query param ?num=, abrir directamente el detalle del pedido y seleccionar la pestaña adecuada
         if (urlNum) {
           const match = res.pedidos.find((p) => p.numero === urlNum);
-          if (match) setSelectedOrder(match);
+          if (match) {
+            setSelectedOrder(match);
+            const isHistorical = ["ENTREGADO", "RETIRADO", "CANCELADO"].includes(match.estado);
+            setActiveTab(isHistorical ? "HISTORIAL" : "EN_CURSO");
+          }
         }
       } else {
         setDbPedidos([]);
@@ -596,11 +600,16 @@ export default function MisPedidosPage() {
 
             const prepLabel = getEstadoPreparacionLabel(pedido.estado, pedido.modalidadEntrega);
             const isCancelled = pedido.estado === "CANCELADO";
+            const isReciente = urlNum === pedido.numero;
 
             return (
               <div
                 key={pedido.id}
-                className="rounded-2xl border border-slate-200 dark:border-line bg-white dark:bg-card p-4 sm:p-5 shadow-sm hover:border-slate-300 dark:hover:border-slate-700 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4"
+                className={`rounded-2xl border bg-white dark:bg-card p-4 sm:p-5 shadow-sm transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${
+                  isReciente
+                    ? "border-emerald-500/60 ring-2 ring-emerald-500/20"
+                    : "border-slate-200 dark:border-line hover:border-slate-300 dark:hover:border-slate-700"
+                }`}
               >
                 {/* Bloque Izquierdo: Identificación y Fechas */}
                 <div className="space-y-1.5 min-w-[200px]">
@@ -611,6 +620,11 @@ export default function MisPedidosPage() {
                     <span className="rounded-md bg-slate-100 dark:bg-surface px-2 py-0.5 text-[11px] font-mono font-bold text-slate-700 dark:text-slate-300 border border-line/60">
                       TK-{pedido.numero}
                     </span>
+                    {isReciente && (
+                      <span className="rounded-md bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                        Pedido recién realizado
+                      </span>
+                    )}
                     <span className="text-xs text-slate-400">·</span>
                     <span className="text-xs text-slate-500 font-medium">
                       {fechaStr}

@@ -137,45 +137,40 @@ export async function getNotificacionesStaffAction(
       }
     }
 
-    // ─── 1. GRUPOS OPERATIVOS ACTIVOS (CALCULADOS CON PEDIDOS REALES) ───
-    const pedidosActivos = await prisma.pedidoEcommerce.findMany({
-      where: {
-        estado: {
-          in: [
-            "PENDIENTE",
-            "CONFIRMADO",
-            "PREPARANDO",
-            "LISTO_ENTREGA",
-            "LISTO_PARA_RETIRAR",
-            "CANCELACION_SOLICITADA",
-          ],
+    // ─── 1. CARGA EN PARALELO DE PEDIDOS ACTIVOS Y NOTIFICACIONES PERSISTIDAS ───
+    const [pedidosActivos, allStoredNotifs] = await Promise.all([
+      prisma.pedidoEcommerce.findMany({
+        where: {
+          estado: {
+            in: [
+              "PENDIENTE",
+              "CONFIRMADO",
+              "PREPARANDO",
+              "LISTO_ENTREGA",
+              "LISTO_PARA_RETIRAR",
+              "CANCELACION_SOLICITADA",
+            ],
+          },
         },
-      },
-      select: {
-        id: true,
-        numero: true,
-        estado: true,
-        estadoPago: true,
-        metodoPago: true,
-        comprobanteUrl: true,
-        modalidadEntrega: true,
-        notas: true,
-        creadoEn: true,
-      },
-      orderBy: { id: "desc" },
-    });
+        select: {
+          id: true,
+          numero: true,
+          estado: true,
+          estadoPago: true,
+          metodoPago: true,
+          comprobanteUrl: true,
+          modalidadEntrega: true,
+          notas: true,
+          creadoEn: true,
+        },
+        orderBy: { id: "desc" },
+      }),
+      getStoredNotificacionesStaff(),
+    ]);
 
-    // Subconjuntos operativos reales
+    // Subconjuntos operativos reales con exclusión mutua estricta
     // Un pedido pendiente de verificar pago es estrictamente aquel con estado === "PENDIENTE"
     const pagosPendientes = pedidosActivos.filter((p) => p.estado === "PENDIENTE");
-
-    const pendientesArmar = pedidosActivos.filter((p) => p.estado === "CONFIRMADO");
-
-    const enPreparacion = pedidosActivos.filter((p) => p.estado === "PREPARANDO");
-
-    const listosEntrega = pedidosActivos.filter(
-      (p) => p.estado === "LISTO_ENTREGA" || (p.estado as string) === "LISTO_PARA_RETIRAR"
-    );
 
     const cancelacionesPendientes = pedidosActivos.filter((p) => {
       const notas = p.notas || "";
@@ -185,6 +180,23 @@ export async function getNotificacionesStaffAction(
         (notas.includes("Cancelación solicitada por el cliente") && !tieneMetadataResuelta && p.estado !== "CANCELADO")
       );
     });
+
+    const cancelacionesIds = new Set(cancelacionesPendientes.map((p) => p.id));
+
+    // Pendientes de armar: CONFIRMADO, que no tenga solicitud de cancelación pendiente
+    const pendientesArmar = pedidosActivos.filter(
+      (p) => p.estado === "CONFIRMADO" && !cancelacionesIds.has(p.id)
+    );
+
+    // En preparación: PREPARANDO, que no tenga solicitud de cancelación pendiente
+    const enPreparacion = pedidosActivos.filter(
+      (p) => p.estado === "PREPARANDO" && !cancelacionesIds.has(p.id)
+    );
+
+    // Listos para entregar: LISTO_ENTREGA o LISTO_PARA_RETIRAR
+    const listosEntrega = pedidosActivos.filter(
+      (p) => p.estado === "LISTO_ENTREGA" || (p.estado as string) === "LISTO_PARA_RETIRAR"
+    );
 
     const todosLosGrupos: GrupoNotificacionOperativa[] = [];
 
@@ -286,23 +298,34 @@ export async function getNotificacionesStaffAction(
     const totalGruposPendientes = gruposFiltrados.reduce((acc, g) => acc + g.cantidad, 0);
 
     // ─── 2. HISTORIAL DE NOTIFICACIONES (EVENTOS PERSISTIDOS Y ENRIQUECIDOS) ───
-    const allStoredNotifs = await getStoredNotificacionesStaff();
+    // Reutilizar en memoria los pedidos activos ya cargados en el paso 1
+    const pedidoHistorialMap = new Map<number, any>(pedidosActivos.map((p) => [p.id, p]));
+    const missingIds = Array.from(
+      new Set(
+        allStoredNotifs
+          .map((n) => n.pedidoId)
+          .filter((id): id is number => Boolean(id) && !pedidoHistorialMap.has(id!))
+      )
+    );
 
-    // Consultar estado actual en BD de todos los pedidos presentes en el historial
-    const pedidoIdsHistorial = Array.from(new Set(allStoredNotifs.map((n) => n.pedidoId).filter(Boolean)));
-    const pedidosHistorial = await prisma.pedidoEcommerce.findMany({
-      where: { id: { in: pedidoIdsHistorial } },
-      select: {
-        id: true,
-        numero: true,
-        estado: true,
-        estadoPago: true,
-        metodoPago: true,
-        modalidadEntrega: true,
-        notas: true,
-      },
-    });
-    const pedidoHistorialMap = new Map(pedidosHistorial.map((p) => [p.id, p]));
+    // Solo consultar en BD los pedidos del historial que no estaban en pedidosActivos
+    if (missingIds.length > 0) {
+      const pedidosRestantes = await prisma.pedidoEcommerce.findMany({
+        where: { id: { in: missingIds } },
+        select: {
+          id: true,
+          numero: true,
+          estado: true,
+          estadoPago: true,
+          metodoPago: true,
+          modalidadEntrega: true,
+          notas: true,
+        },
+      });
+      for (const p of pedidosRestantes) {
+        pedidoHistorialMap.set(p.id, p);
+      }
+    }
 
     // Filtrar historial según permisos estrictos del rol
     const filteredByRole = allStoredNotifs.filter((n) => {

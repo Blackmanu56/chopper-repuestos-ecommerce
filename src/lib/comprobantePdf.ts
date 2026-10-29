@@ -4,6 +4,7 @@ import path from "path";
 import { prisma } from "@/lib/prisma";
 
 export interface DetalleItemComprobante {
+  codigo?: string | null;
   nombre: string;
   marca?: string | null;
   cantidad: number;
@@ -18,6 +19,7 @@ export interface PedidoComprobanteData {
   fechaPago?: Date | string | null;
   nombreCliente: string;
   dniCliente?: string | null;
+  cuitCliente?: string | null;
   telefonoCliente?: string | null;
   emailCliente?: string | null;
   direccionEnvio?: string | null;
@@ -25,6 +27,7 @@ export interface PedidoComprobanteData {
   metodoPago: string; // TRANSFERENCIA | EFECTIVO_LOCAL | TARJETA
   costoEnvio?: number | null;
   total: number;
+  notas?: string | null;
   items: DetalleItemComprobante[];
 }
 
@@ -34,32 +37,46 @@ function formatCurrency(n: number): string {
 
 function formatDate(d: Date | string): string {
   try {
-    return new Date(d).toLocaleString("es-AR", {
+    return new Date(d).toLocaleDateString("es-AR", {
       timeZone: "America/Argentina/Buenos_Aires",
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
     });
   } catch {
     return new Date().toLocaleDateString("es-AR");
   }
 }
 
+function formatTime24(d: Date | string): string {
+  try {
+    return new Date(d).toLocaleTimeString("es-AR", {
+      timeZone: "America/Argentina/Buenos_Aires",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }) + " hs";
+  } catch {
+    return "";
+  }
+}
+
 /**
- * Genera el Buffer binario del comprobante PDF reutilizando estrictamente
- * la estructura y diseño del Ticket del SGI (TicketModal.tsx) con mejoras visuales para A4.
+ * Genera el Buffer binario del comprobante PDF de compra online,
+ * replicando con estricta fidelidad el diseño de la Factura A4 del SGI
+ * (implementada en VentasTerminal.tsx líneas 1110-1246 y 1295-1426).
  */
 export function buildComprobantePdf(data: PedidoComprobanteData): Promise<Buffer> {
   return new Promise((resolve, reject) => {
+    // Formato A4 vertical estándar: 595.28 x 841.89 pt
     const doc = new PDFDocument({
       size: "A4",
-      margin: 40,
+      margins: { top: 36, bottom: 36, left: 36, right: 36 },
+      autoFirstPage: true,
       info: {
         Title: `Comprobante de Compra #ORD-${data.numero} - Chopper Repuestos`,
         Author: "Chopper Repuestos",
-        Subject: "Comprobante de compra no fiscal",
+        Subject: "Comprobante de compra no fiscal - E-commerce",
       },
     });
 
@@ -68,292 +85,437 @@ export function buildComprobantePdf(data: PedidoComprobanteData): Promise<Buffer
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    const pageWidth = doc.page.width; // 595.28 pt
-    const leftMargin = 40;
-    const rightMargin = pageWidth - 40; // 555.28 pt
-    const contentWidth = rightMargin - leftMargin; // 515.28 pt
+    const left = 36;
+    const right = 595.28 - 36; // 559.28 pt
+    const contentWidth = right - left; // 523.28 pt
 
-    let y = 35;
+    let y = 36;
 
-    // 1. Logo original de Chopper Repuestos centrado
+    // ─── 1. ENCABEZADO (Idéntico a VentasTerminal.tsx del SGI) ───
     const logoPath = path.join(process.cwd(), "public", "logo.png");
+    const logoY = y;
+    const logoHeight = 44;
+    const logoWidth = 66; // Aspect ratio 1.5
+
     if (fs.existsSync(logoPath)) {
       try {
-        const logoWidth = 110;
-        const logoX = (pageWidth - logoWidth) / 2;
-        doc.image(logoPath, logoX, y, { width: logoWidth });
-        y += 55;
-      } catch {
-        y += 10;
-      }
+        doc.image(logoPath, left, logoY, { width: logoWidth, height: logoHeight });
+      } catch {}
     }
 
-    // 2. Encabezado institucional con datos del comercio (idéntico al SGI TicketModal)
+    // Nombre "CHOPPER REPUESTOS" en rojo a la derecha del logo
+    const titleX = left + logoWidth + 10;
     doc
       .font("Helvetica-Bold")
-      .fontSize(14)
-      .fillColor("#0f172a")
-      .text("CHOPPER REPUESTOS", leftMargin, y, { align: "center", width: contentWidth });
-    y += 18;
+      .fontSize(18)
+      .fillColor("#D62828")
+      .text("CHOPPER REPUESTOS", titleX, logoY + 4);
+
+    // Información comercial debajo del nombre
+    const infoY = logoY + 26;
+    doc
+      .font("Helvetica")
+      .fontSize(8.5)
+      .fillColor("#555555")
+      .lineGap(1.5)
+      .text(
+        "Av. Roque Saenz Peña 1500 · Posadas, Misiones\nTel: (0376) 444-5555 · WhatsApp: +54 9 376 524-3554\nEmail: info@chopperrepuestos.com.ar\nCUIT: 37-32340054-6 · Condición IVA: Responsable Inscripto",
+        titleX,
+        infoY,
+        { width: 280 }
+      );
+
+    // Bloque derecho: Identificación del comprobante en recuadro rojo
+    const boxWidth = 195;
+    const boxX = right - boxWidth;
+    const boxY = y + 2;
+
+    doc
+      .lineWidth(1.8)
+      .strokeColor("#D62828")
+      .rect(boxX, boxY, boxWidth, 32)
+      .stroke();
+
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(9.5)
+      .fillColor("#D62828")
+      .text("COMPROBANTE DE COMPRA", boxX, boxY + 6, { width: boxWidth, align: "center" });
+
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(7.5)
+      .fillColor("#D62828")
+      .text("NO FISCAL", boxX, boxY + 18, { width: boxWidth, align: "center" });
+
+    // Metadatos: Nº, Fecha y Hora alineados a la derecha
+    const metaRightY = boxY + 38;
+    const fechaOp = data.fechaPago || data.creadoEn;
 
     doc
       .font("Helvetica")
-      .fontSize(9)
-      .fillColor("#475569")
-      .text("Av. Roque Sáenz Peña 1500 · Posadas, Misiones", leftMargin, y, { align: "center", width: contentWidth });
-    y += 13;
+      .fontSize(8.5)
+      .fillColor("#555555")
+      .text("Nº: ", boxX, metaRightY, { width: boxWidth - 110, align: "right" });
+    doc
+      .font("Helvetica-Bold")
+      .fillColor("#1a1a1a")
+      .text(`#ORD-${data.numero}`, boxX + boxWidth - 105, metaRightY, { width: 105, align: "right" });
 
     doc
-      .text("CUIT: 37-32340054-6 · WhatsApp de atención: +54 9 376 524-3554", leftMargin, y, { align: "center", width: contentWidth });
-    y += 18;
-
-    // Línea divisoria punteada estilo Ticket SGI
+      .font("Helvetica")
+      .fillColor("#555555")
+      .text("Fecha: ", boxX, metaRightY + 12, { width: boxWidth - 110, align: "right" });
     doc
-      .dash(3, { space: 3 })
-      .moveTo(leftMargin, y)
-      .lineTo(rightMargin, y)
-      .strokeColor("#cbd5e1")
-      .stroke()
-      .undash();
+      .font("Helvetica-Bold")
+      .fillColor("#1a1a1a")
+      .text(formatDate(fechaOp), boxX + boxWidth - 105, metaRightY + 12, { width: 105, align: "right" });
+
+    doc
+      .font("Helvetica")
+      .fillColor("#555555")
+      .text("Hora: ", boxX, metaRightY + 24, { width: boxWidth - 110, align: "right" });
+    doc
+      .font("Helvetica-Bold")
+      .fillColor("#1a1a1a")
+      .text(formatTime24(fechaOp), boxX + boxWidth - 105, metaRightY + 24, { width: 105, align: "right" });
+
+    // Línea divisoria roja continua inferior del encabezado
+    y = Math.max(infoY + 48, metaRightY + 40);
+    doc
+      .lineWidth(2)
+      .strokeColor("#D62828")
+      .moveTo(left, y)
+      .lineTo(right, y)
+      .stroke();
     y += 12;
 
-    // 3. Título del documento: COMPROBANTE DE COMPRA — NO FISCAL (Requisito 3)
-    doc
-      .rect(leftMargin, y, contentWidth, 32)
-      .fillAndStroke("#f8fafc", "#e2e8f0");
+    // ─── 2. DATOS DEL CLIENTE + OPERACIÓN ONLINE (Columnas SGI) ───
+    const colGap = 24;
+    const colWidth = (contentWidth - colGap) / 2;
+    const col1X = left;
+    const col2X = left + colWidth + colGap;
 
+    // Encabezado Columna 1
     doc
       .font("Helvetica-Bold")
-      .fontSize(11)
-      .fillColor("#dc2626")
-      .text("COMPROBANTE DE COMPRA — NO FISCAL", leftMargin, y + 6, { align: "center", width: contentWidth });
-
+      .fontSize(9)
+      .fillColor("#D62828")
+      .text("DATOS DEL CLIENTE", col1X, y);
     doc
-      .font("Helvetica")
-      .fontSize(7.5)
-      .fillColor("#64748b")
-      .text("Documento no válido como factura fiscal · Constancia de operación online", leftMargin, y + 19, { align: "center", width: contentWidth });
-    y += 42;
+      .lineWidth(0.8)
+      .strokeColor("#e0e0e0")
+      .moveTo(col1X, y + 12)
+      .lineTo(col1X + colWidth, y + 12)
+      .stroke();
 
-    // 4. Bloque de Metadata en dos columnas (Datos de Operación y Datos de Cliente)
-    const colWidth = (contentWidth - 16) / 2;
-    const col1X = leftMargin;
-    const col2X = leftMargin + colWidth + 16;
-    const metaBoxY = y;
-
-    // Fondo blanco con borde para metadata
+    // Encabezado Columna 2
     doc
-      .rect(leftMargin, metaBoxY, contentWidth, 76)
-      .fillAndStroke("#ffffff", "#e2e8f0");
+      .font("Helvetica-Bold")
+      .fontSize(9)
+      .fillColor("#D62828")
+      .text("INFORMACIÓN DE ENTREGA", col2X, y);
+    doc
+      .lineWidth(0.8)
+      .strokeColor("#e0e0e0")
+      .moveTo(col2X, y + 12)
+      .lineTo(col2X + colWidth, y + 12)
+      .stroke();
 
-    // Columna 1: Operación
-    let metaY = metaBoxY + 8;
-    const drawMetaRow = (x: number, label: string, val: string, isValBold = false, valColor = "#0f172a") => {
-      doc.font("Helvetica-Bold").fontSize(8).fillColor("#64748b").text(label, x + 8, metaY);
-      doc.font(isValBold ? "Helvetica-Bold" : "Helvetica").fontSize(8.5).fillColor(valColor).text(val, x + 85, metaY, { width: colWidth - 95, align: "left" });
-      metaY += 16;
+    y += 18;
+
+    const rowH = 13.5;
+    let rY1 = y;
+
+    const drawRow = (x: number, w: number, label: string, val: string, curY: number) => {
+      doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#1a1a1a").text(label, x, curY, { width: 80 });
+      doc.font("Helvetica").fontSize(8.5).fillColor("#1a1a1a").text(val || "-", x + 80, curY, { width: w - 80, align: "right" });
     };
 
-    drawMetaRow(col1X, "COMPROBANTE:", `#ORD-${data.numero}`, true, "#dc2626");
-    drawMetaRow(col1X, "FECHA:", formatDate(data.fechaPago || data.creadoEn));
+    drawRow(col1X, colWidth, "Nombre:", data.nombreCliente || "Cliente Chopper", rY1);
+    rY1 += rowH;
+    const dniText = data.dniCliente ? (data.cuitCliente ? `${data.dniCliente} / ${data.cuitCliente}` : data.dniCliente) : "-";
+    drawRow(col1X, colWidth, "DNI/CUIT:", dniText, rY1);
+    rY1 += rowH;
+    if (data.telefonoCliente) {
+      drawRow(col1X, colWidth, "Teléfono:", data.telefonoCliente, rY1);
+      rY1 += rowH;
+    }
+    if (data.emailCliente) {
+      drawRow(col1X, colWidth, "Email:", data.emailCliente, rY1);
+      rY1 += rowH;
+    }
+
+    let rY2 = y;
+    const modalidadLabel = data.modalidadEntrega === "MOTOMANDADO"
+      ? "Motomandado en el día"
+      : "Retiro en mostrador";
+    drawRow(col2X, colWidth, "Modalidad:", modalidadLabel, rY2);
+    rY2 += rowH;
+
+    if (data.modalidadEntrega === "MOTOMANDADO") {
+      drawRow(col2X, colWidth, "Destino:", data.direccionEnvio || "Posadas, Misiones", rY2);
+      rY2 += rowH;
+    } else {
+      drawRow(col2X, colWidth, "Punto retiro:", "Av. Roque Sáenz Peña 1500", rY2);
+      rY2 += rowH;
+    }
+
     const metodoPagoLabel = data.metodoPago === "TRANSFERENCIA"
       ? "Transferencia bancaria"
       : data.metodoPago === "EFECTIVO_LOCAL"
-      ? "Efectivo en mostrador"
-      : "Tarjeta de crédito/débito";
-    drawMetaRow(col1X, "MEDIO DE PAGO:", metodoPagoLabel);
-    const modalidadLabel = data.modalidadEntrega === "MOTOMANDADO"
-      ? "Motomandado en el día"
-      : "Retiro en local (Av. Roque Sáenz Peña 1500)";
-    drawMetaRow(col1X, "MODALIDAD:", modalidadLabel);
+      ? "Efectivo contra entrega"
+      : "Tarjeta de Débito";
+    drawRow(col2X, colWidth, "Medio de pago:", metodoPagoLabel, rY2);
+    rY2 += rowH;
 
-    // Columna 2: Cliente
-    metaY = metaBoxY + 8;
-    drawMetaRow(col2X, "CLIENTE:", data.nombreCliente, true);
-    drawMetaRow(col2X, "DNI / CUIT:", data.dniCliente || "No informado");
-    drawMetaRow(col2X, "TELÉFONO:", data.telefonoCliente || "No informado");
-    const entregaDir = data.modalidadEntrega === "MOTOMANDADO"
-      ? (data.direccionEnvio || "Posadas, Misiones")
-      : "Mostrador Chopper (Posadas)";
-    drawMetaRow(col2X, "DESTINO:", entregaDir);
+    drawRow(col2X, colWidth, "Canal:", "Tienda Online (E-commerce)", rY2);
+    rY2 += rowH;
 
-    y = metaBoxY + 86;
+    y = Math.max(rY1, rY2) + 12;
 
-    // 5. Tabla de Productos (Estructura de TicketModal SGI)
-    const tableHeaderY = y;
+    // ─── 3. TABLA DE PRODUCTOS (Encabezado rojo idéntico al SGI) ───
+    const colW_codigo = 70;
+    const colW_cant = 42;
+    const colW_punit = 68;
+    const colW_desc = 58;
+    const colW_subt = 78;
+    const colW_prod = contentWidth - (colW_codigo + colW_cant + colW_punit + colW_desc + colW_subt); // ~207.28 pt
+
+    const x_codigo = left;
+    const x_prod = x_codigo + colW_codigo;
+    const x_cant = x_prod + colW_prod;
+    const x_punit = x_cant + colW_cant;
+    const x_desc = x_punit + colW_punit;
+    const x_subt = x_desc + colW_desc;
+
+    const tableHeaderH = 20;
     doc
-      .rect(leftMargin, tableHeaderY, contentWidth, 20)
-      .fillAndStroke("#f1f5f9", "#cbd5e1");
+      .rect(left, y, contentWidth, tableHeaderH)
+      .fill("#D62828");
 
     doc
       .font("Helvetica-Bold")
       .fontSize(8)
-      .fillColor("#475569");
+      .fillColor("#ffffff");
 
-    doc.text("DETALLE / PRODUCTO", leftMargin + 10, tableHeaderY + 6, { width: 260 });
-    doc.text("CANT", leftMargin + 280, tableHeaderY + 6, { width: 40, align: "center" });
-    doc.text("PRECIO UNIT", leftMargin + 330, tableHeaderY + 6, { width: 85, align: "right" });
-    doc.text("SUBTOTAL", leftMargin + 425, tableHeaderY + 6, { width: 80, align: "right" });
+    doc.text("CÓDIGO", x_codigo + 6, y + 6, { width: colW_codigo - 12, align: "left" });
+    doc.text("PRODUCTO", x_prod + 6, y + 6, { width: colW_prod - 12, align: "left" });
+    doc.text("CANT.", x_cant, y + 6, { width: colW_cant, align: "center" });
+    doc.text("P. UNIT.", x_punit, y + 6, { width: colW_punit - 6, align: "right" });
+    doc.text("DESCUENTO", x_desc, y + 6, { width: colW_desc - 6, align: "right" });
+    doc.text("SUBTOTAL", x_subt, y + 6, { width: colW_subt - 6, align: "right" });
 
-    y = tableHeaderY + 20;
+    y += tableHeaderH;
 
     let subtotalProductos = 0;
     data.items.forEach((item, idx) => {
-      // Paginación automática si la lista de productos sobrepasa el límite seguro de la página
-      if (y > doc.page.height - 160) {
+      // Paginación segura para pedidos con extensa lista de productos
+      if (y > doc.page.height - 180) {
         doc.addPage();
-        y = 40;
+        y = 36;
 
-        // Redibujar encabezado de tabla en la página siguiente
-        doc
-          .rect(leftMargin, y, contentWidth, 20)
-          .fillAndStroke("#f1f5f9", "#cbd5e1");
-
-        doc
-          .font("Helvetica-Bold")
-          .fontSize(8)
-          .fillColor("#475569");
-
-        doc.text("DETALLE / PRODUCTO (cont.)", leftMargin + 10, y + 6, { width: 260 });
-        doc.text("CANT", leftMargin + 280, y + 6, { width: 40, align: "center" });
-        doc.text("PRECIO UNIT", leftMargin + 330, y + 6, { width: 85, align: "right" });
-        doc.text("SUBTOTAL", leftMargin + 425, y + 6, { width: 80, align: "right" });
-
-        y += 20;
+        doc.rect(left, y, contentWidth, tableHeaderH).fill("#D62828");
+        doc.font("Helvetica-Bold").fontSize(8).fillColor("#ffffff");
+        doc.text("CÓDIGO", x_codigo + 6, y + 6, { width: colW_codigo - 12, align: "left" });
+        doc.text("PRODUCTO (cont.)", x_prod + 6, y + 6, { width: colW_prod - 12, align: "left" });
+        doc.text("CANT.", x_cant, y + 6, { width: colW_cant, align: "center" });
+        doc.text("P. UNIT.", x_punit, y + 6, { width: colW_punit - 6, align: "right" });
+        doc.text("DESCUENTO", x_desc, y + 6, { width: colW_desc - 6, align: "right" });
+        doc.text("SUBTOTAL", x_subt, y + 6, { width: colW_subt - 6, align: "right" });
+        y += tableHeaderH;
       }
 
-      const rowY = y;
       const isEven = idx % 2 === 0;
-      if (!isEven) {
-        doc.rect(leftMargin, rowY, contentWidth, 22).fill("#fafafa");
-      }
-
-      // Nombre y marca (con soporte para combos comerciales)
       const isCombo = Boolean(item.comboId);
       const nombreTexto = isCombo ? `[COMBO] ${item.nombre}` : item.nombre;
-      
+
+      doc.font(isCombo ? "Helvetica-Bold" : "Helvetica").fontSize(8.5);
+      const textH = doc.heightOfString(nombreTexto, { width: colW_prod - 12 });
+      const rowHeight = Math.max(18, textH + 8);
+
+      if (!isEven) {
+        doc.rect(left, y, contentWidth, rowHeight).fill("#fafafa");
+      }
+
+      const itemY = y + 5;
+
+      // Código
+      doc
+        .font("Helvetica")
+        .fontSize(8)
+        .fillColor("#1a1a1a")
+        .text(item.codigo || "-", x_codigo + 6, itemY, { width: colW_codigo - 12, align: "left" });
+
+      // Producto
       doc
         .font(isCombo ? "Helvetica-Bold" : "Helvetica")
         .fontSize(8.5)
-        .fillColor("#0f172a")
-        .text(nombreTexto, leftMargin + 10, rowY + 5, { width: 260, lineBreak: false, ellipsis: true });
+        .fillColor("#1a1a1a")
+        .text(nombreTexto, x_prod + 6, itemY, { width: colW_prod - 12, align: "left" });
 
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(8.5)
-        .fillColor("#334155")
-        .text(String(item.cantidad), leftMargin + 280, rowY + 5, { width: 40, align: "center" });
-
+      // Cantidad
       doc
         .font("Helvetica")
         .fontSize(8.5)
-        .fillColor("#475569")
-        .text(formatCurrency(item.precioUnitario), leftMargin + 330, rowY + 5, { width: 85, align: "right" });
+        .fillColor("#1a1a1a")
+        .text(String(item.cantidad), x_cant, itemY, { width: colW_cant, align: "center" });
 
+      // Precio Unitario (monospace Courier)
       doc
-        .font("Helvetica-Bold")
+        .font("Courier")
         .fontSize(8.5)
-        .fillColor("#0f172a")
-        .text(formatCurrency(item.subtotal), leftMargin + 425, rowY + 5, { width: 80, align: "right" });
+        .fillColor("#1a1a1a")
+        .text(formatCurrency(item.precioUnitario), x_punit, itemY, { width: colW_punit - 6, align: "right" });
 
-      // Línea divisoria muy suave entre filas
+      // Descuento
       doc
-        .moveTo(leftMargin, rowY + 22)
-        .lineTo(rightMargin, rowY + 22)
-        .strokeColor("#e2e8f0")
+        .font("Courier")
+        .fontSize(8.5)
+        .fillColor("#1a1a1a")
+        .text("-", x_desc, itemY, { width: colW_desc - 6, align: "right" });
+
+      // Subtotal (monospace Courier)
+      doc
+        .font("Courier")
+        .fontSize(8.5)
+        .fillColor("#1a1a1a")
+        .text(formatCurrency(item.subtotal), x_subt, itemY, { width: colW_subt - 6, align: "right" });
+
+      // Borde suave inferior
+      doc
+        .lineWidth(0.6)
+        .strokeColor("#eeeeee")
+        .moveTo(left, y + rowHeight)
+        .lineTo(right, y + rowHeight)
         .stroke();
 
       subtotalProductos += item.subtotal;
-      y += 22;
+      y += rowHeight;
     });
-
-    // Paginación si el bloque de totales y pie excede la página
-    if (y > doc.page.height - 180) {
-      doc.addPage();
-      y = 40;
-    }
 
     y += 10;
 
-    // 6. Bloque de Totales (Alineado a la derecha)
-    const totalsBoxWidth = 220;
-    const totalsBoxX = rightMargin - totalsBoxWidth;
+    // ─── 4. TOTALES (Alineados a la derecha) ───
+    const summaryWidth = 270;
+    const summaryX = right - summaryWidth;
+
+    const drawSummaryRow = (label: string, val: string, isTotal = false) => {
+      doc
+        .font(isTotal ? "Helvetica-Bold" : "Helvetica")
+        .fontSize(isTotal ? 11 : 8.5)
+        .fillColor("#1a1a1a")
+        .text(label, summaryX, y, { width: 150, align: "left" });
+
+      doc
+        .font(isTotal ? "Courier-Bold" : "Courier")
+        .fontSize(isTotal ? 13 : 8.5)
+        .fillColor(isTotal ? "#D62828" : "#1a1a1a")
+        .text(val, summaryX + 150, y - (isTotal ? 1 : 0), { width: summaryWidth - 150, align: "right" });
+
+      y += isTotal ? 20 : 13;
+    };
+
+    drawSummaryRow("Subtotal:", formatCurrency(subtotalProductos));
 
     if (data.costoEnvio && data.costoEnvio > 0) {
-      doc
-        .font("Helvetica")
-        .fontSize(8.5)
-        .fillColor("#64748b")
-        .text("Subtotal productos:", totalsBoxX, y, { width: 110 });
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(8.5)
-        .fillColor("#334155")
-        .text(formatCurrency(subtotalProductos), totalsBoxX + 110, y, { width: 110, align: "right" });
-      y += 16;
-
-      doc
-        .font("Helvetica")
-        .fontSize(8.5)
-        .fillColor("#64748b")
-        .text("Costo de envío:", totalsBoxX, y, { width: 110 });
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(8.5)
-        .fillColor("#334155")
-        .text(formatCurrency(data.costoEnvio), totalsBoxX + 110, y, { width: 110, align: "right" });
-      y += 16;
+      drawSummaryRow("Costo de envío (Motomandado):", formatCurrency(data.costoEnvio));
     }
 
-    // Fila destacada de TOTAL PAGADO (Requisito 1)
+    // Línea roja superior del Total: borderTop: 2px solid #D62828
     doc
-      .rect(totalsBoxX, y, totalsBoxWidth, 26)
-      .fillAndStroke("#f8fafc", "#cbd5e1");
+      .lineWidth(2)
+      .strokeColor("#D62828")
+      .moveTo(summaryX, y + 2)
+      .lineTo(right, y + 2)
+      .stroke();
+    y += 7;
+
+    drawSummaryRow("TOTAL PAGADO:", formatCurrency(data.total), true);
+
+    y += 6;
+
+    // ─── 5. FORMA DE PAGO (Caja con borde SGI) ───
+    const paymentBoxH = 24;
+    doc
+      .lineWidth(0.8)
+      .strokeColor("#dddddd")
+      .rect(left, y, contentWidth, paymentBoxH)
+      .stroke();
 
     doc
       .font("Helvetica-Bold")
-      .fontSize(10)
-      .fillColor("#0f172a")
-      .text("TOTAL PAGADO:", totalsBoxX + 10, y + 8, { width: 95 });
+      .fontSize(8.5)
+      .fillColor("#1a1a1a")
+      .text("Forma de Pago:", left + 12, y + 7, { width: 120 });
 
     doc
       .font("Helvetica-Bold")
-      .fontSize(12)
-      .fillColor("#dc2626")
-      .text(formatCurrency(data.total), totalsBoxX + 105, y + 7, { width: 105, align: "right" });
+      .fontSize(8.5)
+      .fillColor("#1a1a1a")
+      .text(metodoPagoLabel, left + 130, y + 7, { width: contentWidth - 142, align: "right" });
 
-    y += 45;
+    y += paymentBoxH + 8;
 
-    // Línea punteada final
+    // ─── 6. OBSERVACIONES (Caja dashed SGI) ───
+    let cleanNota = "";
+    if (data.notas) {
+      const parts = data.notas.split("|").map((s) => s.trim()).filter(Boolean);
+      const firstPart = parts[0] || "";
+      if (!firstPart.includes("por Administrador") && !firstPart.includes("Checklist 100%")) {
+        cleanNota = firstPart;
+      }
+    }
+
+    if (!cleanNota) {
+      cleanNota = data.modalidadEntrega === "MOTOMANDADO"
+        ? `Despacho por motomandado/Moto Uber a domicilio (${data.direccionEnvio || "Posadas"}).`
+        : `Retiro por mostrador en el local (Av. Roque Sáenz Peña 1500, Posadas).`;
+    }
+
+    const obsBoxH = 32;
     doc
-      .dash(3, { space: 3 })
-      .moveTo(leftMargin, y)
-      .lineTo(rightMargin, y)
-      .strokeColor("#cbd5e1")
+      .dash(3, { space: 2.5 })
+      .lineWidth(0.8)
+      .strokeColor("#cccccc")
+      .rect(left, y, contentWidth, obsBoxH)
       .stroke()
       .undash();
-    y += 15;
 
-    // 7. Pie institucional (idéntico al SGI TicketModal sin la palabra 'oficial')
     doc
-      .font("Helvetica-Bold")
-      .fontSize(10)
-      .fillColor("#0f172a")
-      .text("¡GRACIAS POR SU COMPRA!", leftMargin, y, { align: "center", width: contentWidth });
-    y += 14;
+      .font("Helvetica")
+      .fontSize(8)
+      .fillColor("#555555")
+      .text(`Observaciones: ${cleanNota}`, left + 10, y + 6, { width: contentWidth - 20, lineBreak: false, ellipsis: true });
 
     doc
       .font("Helvetica-Oblique")
-      .fontSize(8)
-      .fillColor("#64748b")
-      .text("Este comprobante sirve como constancia de compra online en Chopper Repuestos.", leftMargin, y, { align: "center", width: contentWidth });
-    y += 12;
+      .fontSize(7)
+      .fillColor("#888888")
+      .text("Documento no válido como factura fiscal · Operación registrada a través del e-commerce Chopper Repuestos", left + 10, y + 18, { width: contentWidth - 20 });
+
+    y += obsBoxH + 12;
+
+    // ─── 7. FOOTER (Línea roja SGI) ───
+    doc
+      .lineWidth(2)
+      .strokeColor("#D62828")
+      .moveTo(left, y)
+      .lineTo(right, y)
+      .stroke();
+    y += 8;
+
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(8.5)
+      .fillColor("#1a1a1a")
+      .text("¡GRACIAS POR SU COMPRA! · CHOPPER REPUESTOS", left, y, { width: contentWidth, align: "center" });
 
     doc
       .font("Helvetica")
       .fontSize(7.5)
-      .fillColor("#94a3b8")
-      .text("Para retiros en mostrador presente este documento y su DNI · Horarios: Lunes a Sábados 8:00-12:30 / 16:30-20:30 hs", leftMargin, y, { align: "center", width: contentWidth });
+      .fillColor("#666666")
+      .text("Horarios de atención: Lunes a Sábados 8:00 - 12:30 / 16:30 - 20:30 hs · Av. Roque Sáenz Peña 1500, Posadas", left, y + 11, { width: contentWidth, align: "center" });
 
     doc.end();
   });
@@ -361,13 +523,23 @@ export function buildComprobantePdf(data: PedidoComprobanteData): Promise<Buffer
 
 /**
  * Consulta un pedido en PostgreSQL y genera su comprobante PDF no fiscal
+ * con el formato oficial de la Factura A4 del SGI.
  */
 export async function generarComprobantePdfPorPedidoId(pedidoId: number): Promise<Buffer | null> {
   try {
-    const pedido = await prisma.pedidoEcommerce.findUnique({
-      where: { id: pedidoId },
+    const pedido = await prisma.pedidoEcommerce.findFirst({
+      where: {
+        OR: [
+          { id: pedidoId },
+          { numero: pedidoId },
+        ],
+      },
       include: {
-        items: true,
+        items: {
+          include: {
+            producto: true,
+          },
+        },
         cliente: true,
       },
     });
@@ -380,6 +552,7 @@ export async function generarComprobantePdfPorPedidoId(pedidoId: number): Promis
       fechaPago: pedido.fechaPago,
       nombreCliente: pedido.nombreCliente || pedido.cliente?.nombre || "Cliente Chopper",
       dniCliente: pedido.dniCliente || pedido.cliente?.dni,
+      cuitCliente: pedido.cliente?.cuit,
       telefonoCliente: pedido.telefonoCliente || pedido.cliente?.telefono,
       emailCliente: pedido.emailCliente || pedido.cliente?.email,
       direccionEnvio: pedido.direccionEnvio || pedido.cliente?.direccion,
@@ -387,7 +560,9 @@ export async function generarComprobantePdfPorPedidoId(pedidoId: number): Promis
       metodoPago: pedido.metodoPago,
       costoEnvio: pedido.costoEnvio,
       total: pedido.total,
+      notas: pedido.notas,
       items: pedido.items.map((it) => ({
+        codigo: it.producto?.codigo || "-",
         nombre: it.nombre,
         marca: it.marca,
         cantidad: it.cantidad,
