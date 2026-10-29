@@ -4,6 +4,7 @@ import React, { useState, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ProductItem } from "@/actions/ecommerce";
+import { parseMotoDetalle } from "@/lib/motoCompatibility";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
 import { useConfig } from "@/context/ConfigContext";
@@ -467,7 +468,7 @@ export default function ProductDetailClient({
                 : "border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
             }`}
           >
-            Motos Compatibles
+            Motos Compatibles {product.motosCompatibles && product.motosCompatibles.length > 0 ? `(${product.motosCompatibles.length})` : product.universal ? "(Universal)" : ""}
           </button>
           <button
             onClick={() => setActiveTab("compra_pagos")}
@@ -607,7 +608,7 @@ export default function ProductDetailClient({
           <div className="rounded-2xl border border-slate-200 dark:border-line bg-white dark:bg-card p-6 space-y-4 shadow-sm text-xs">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                Motos y Modelos Compatibles
+                Motos Compatibles {product.motosCompatibles && product.motosCompatibles.length > 0 ? `(${product.motosCompatibles.length})` : ""}
               </h3>
               {product.universal && (
                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-sky-500/10 text-sky-700 dark:text-sky-300 border border-sky-500/30">
@@ -629,7 +630,7 @@ export default function ProductDetailClient({
                     Este producto cuenta con <strong>diseño y medidas universales</strong>, siendo compatible y adaptable a una amplia gama de motocicletas, marcas y cilindradas del mercado (salvo especificaciones excepcionales de fábrica).
                   </p>
                   <p className="text-[11px] text-slate-600 dark:text-slate-400">
-                    Apto para instalación estándar. Si tenés dudas sobre el anclaje, rosca o dimensiones específicas para tu modelo, consultanos por WhatsApp antes de comprar.
+                    Apto para instalación estándar según especificaciones y tolerancias de fábrica.
                   </p>
                 </div>
 
@@ -638,67 +639,51 @@ export default function ProductDetailClient({
                     <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
                       Modelos de referencia frecuente testeados:
                     </span>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-                      {product.motosCompatibles.map((moto, idx) => (
-                        <div
-                          key={`moto-compat-${idx}`}
-                          className="flex items-center gap-2 rounded-xl border border-sky-500/20 dark:border-sky-500/20 bg-sky-50/40 dark:bg-surface p-3 font-semibold text-slate-800 dark:text-slate-200"
-                        >
-                          <Bike size={16} className="text-sky-600 dark:text-sky-400 shrink-0" />
-                          <span className="truncate">{moto}</span>
-                        </div>
-                      ))}
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {product.motosCompatibles.map((moto, idx) => {
+                        const det = parseMotoDetalle(moto);
+                        return (
+                          <span
+                            key={`moto-compat-${idx}`}
+                            className="inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200 dark:bg-[#1a1b20] dark:hover:bg-[#22242a] text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-[#2e3038] transition-colors leading-snug"
+                          >
+                            {det.canonico || det.original}
+                          </span>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
               </div>
             ) : product.motosCompatibles && product.motosCompatibles.length > 0 ? (
               /* CASO 2: Compatibilidades específicas verificadas en el panel */
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-50/70 dark:bg-emerald-950/20 p-3.5 text-xs text-emerald-800 dark:text-emerald-300 font-semibold">
-                  <Check size={18} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
-                  <span>Compatibilidad específica verificada: este repuesto ha sido confirmado para los siguientes modelos:</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-                  {product.motosCompatibles.map((moto, idx) => (
-                    <div
-                      key={`moto-compat-${idx}`}
-                      className="flex items-center gap-2 rounded-xl border border-emerald-500/20 dark:border-emerald-500/20 bg-emerald-50/40 dark:bg-surface p-3 font-semibold text-slate-800 dark:text-slate-200"
-                    >
-                      <Bike size={16} className="text-brand shrink-0" />
-                      <span className="truncate">{moto}</span>
-                    </div>
-                  ))}
+              <div className="space-y-3">
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {product.motosCompatibles.map((moto, idx) => {
+                    const det = parseMotoDetalle(moto);
+                    return (
+                      <span
+                        key={`moto-compat-${idx}`}
+                        className="inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200 dark:bg-[#1a1b20] dark:hover:bg-[#22242a] text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-[#2e3038] transition-colors leading-snug"
+                      >
+                        {det.canonico || det.original}
+                      </span>
+                    );
+                  })}
                 </div>
               </div>
             ) : (
-              /* CASO 3: Compatibilidad no especificada (reemplaza la guía genérica de plaza) */
-              <div className="rounded-xl border border-slate-200 dark:border-line bg-slate-50 dark:bg-surface/60 p-5 space-y-3 text-xs">
+              /* CASO 3: Repuesto por medidas o especificación técnica */
+              <div className="rounded-xl border border-slate-200 dark:border-line bg-slate-50 dark:bg-surface/60 p-5 space-y-2 text-xs">
                 <div className="flex items-center gap-2 font-bold text-slate-800 dark:text-slate-200 text-sm">
-                  <Info size={18} className="text-slate-500 dark:text-slate-400 shrink-0" />
-                  <span>Compatibilidad no especificada</span>
+                  <Bike size={18} className="text-slate-500 dark:text-slate-400 shrink-0" />
+                  <span>Modelos de Motocicletas</span>
                 </div>
                 <p className="text-slate-600 dark:text-slate-300 leading-relaxed text-xs">
-                  Este repuesto no tiene modelos de motocicleta asociados explícitamente en su ficha técnica comercial.
+                  Este repuesto se comercializa bajo medidas estándar y especificaciones mecánicas de fábrica. Podés consultar las dimensiones y características en la pestaña de Especificaciones.
                 </p>
-                <div className="flex items-center gap-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-500/20 p-3 text-[11px] text-amber-800 dark:text-amber-300 font-medium">
-                  <AlertTriangle size={15} className="shrink-0 text-amber-600 dark:text-amber-400" />
-                  <span>Para verificar si esta pieza es compatible con el año, serie de motor o versión de tu moto, consultanos por WhatsApp con tu modelo exacto antes de realizar la compra.</span>
-                </div>
               </div>
             )}
-
-            <div className="pt-2 border-t border-slate-200 dark:border-line flex items-center justify-between flex-wrap gap-2 text-[11px] text-slate-600 dark:text-slate-400">
-              <span>¿Querés confirmar compatibilidad con tu moto antes de comprar? Escribinos y te asesoramos al instante.</span>
-              <a
-                href={`https://wa.me/${(config.telefono || "3765243554").replace(/\D/g, "")}?text=${encodeURIComponent(`Hola Chopper Repuestos, quisiera consultar compatibilidad para el producto ${product.nombre} (ID #${product.id})`)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-bold text-emerald-600 dark:text-emerald-400 hover:underline inline-flex items-center gap-1"
-              >
-                <span>Consultar por WhatsApp</span> &gt;
-              </a>
-            </div>
           </div>
         )}
 

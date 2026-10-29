@@ -69,12 +69,17 @@ async function verifyStaff(
   return { authorized: false, error: res.error || "Acceso denegado: debés iniciar sesión con una cuenta de personal autorizado." };
 }
 
+const DEFAULT_CONFIG_KEYS = Object.keys(DEFAULT_CONFIG);
+
 /**
  * Obtiene la configuración completa de la tienda
  */
 const getCachedConfig = cache(async (): Promise<TiendaConfig> => {
   try {
-    const configs = await prisma.configuracionEcommerce.findMany();
+    const configs = await prisma.configuracionEcommerce.findMany({
+      where: { clave: { in: DEFAULT_CONFIG_KEYS } },
+      select: { clave: true, valor: true },
+    });
     const result: TiendaConfig = { ...DEFAULT_CONFIG };
 
     for (const item of configs) {

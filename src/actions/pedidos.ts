@@ -28,6 +28,19 @@ import {
 import { enviarEmailPedidoEvento } from "@/lib/email";
 import { crearNotificacionStaffInternal } from "@/lib/notifications";
 
+import {
+  validarNumeroTarjeta,
+  validarTitular,
+  validarVencimiento,
+  enmascararNumeroTarjeta,
+} from "@/lib/cardValidation";
+
+export interface DatosTarjetaSimuladaInput {
+  numero?: string;
+  titular?: string;
+  vencimiento?: string;
+}
+
 export interface ItemPedidoInput {
   id: number;
   nombre?: string;
@@ -46,6 +59,7 @@ export interface CrearPedidoOnlineInput {
   costoEnvio?: number;
   metodoPago: "TRANSFERENCIA" | "EFECTIVO_LOCAL" | "TARJETA";
   cuotas?: number;
+  datosTarjeta?: DatosTarjetaSimuladaInput;
   comprobanteUrl?: string | null;
   items: ItemPedidoInput[];
   notas?: string | null;
@@ -211,12 +225,39 @@ export async function crearPedidoOnlineAction(
       return { success: false, error: "El pedido no contiene ningún producto." };
     }
 
+    // Validación de compatibilidad entre modalidad de entrega y método de pago
+    if (input.modalidadEntrega === "MOTOMANDADO" && input.metodoPago === "EFECTIVO_LOCAL") {
+      await limpiarComprobanteHuerfanoAction(input.comprobanteUrl);
+      return {
+        success: false,
+        error: "La modalidad de envío Motomandado / Moto Uber no admite pago en efectivo en el local. Por favor seleccioná Transferencia bancaria o Tarjeta de débito.",
+      };
+    }
+
     // Validación obligatoria para transferencias bancarias
     if (input.metodoPago === "TRANSFERENCIA" && (!input.comprobanteUrl || !input.comprobanteUrl.trim())) {
       return {
         success: false,
         error: "Para compras por transferencia bancaria, es obligatorio adjuntar el comprobante de pago.",
       };
+    }
+
+    // Validación obligatoria para pagos con tarjeta en modo simulación
+    if (input.metodoPago === "TARJETA") {
+      if (input.datosTarjeta) {
+        const valNum = validarNumeroTarjeta(input.datosTarjeta.numero || "");
+        if (!valNum.valido) {
+          return { success: false, error: valNum.error || "Ingresá un número de tarjeta completo." };
+        }
+        const valTit = validarTitular(input.datosTarjeta.titular || "");
+        if (!valTit.valido) {
+          return { success: false, error: valTit.error || "El nombre del titular de la tarjeta es obligatorio." };
+        }
+        const valVenc = validarVencimiento(input.datosTarjeta.vencimiento || "");
+        if (!valVenc.valido) {
+          return { success: false, error: valVenc.error || "La fecha de vencimiento no es válida o se encuentra vencida." };
+        }
+      }
     }
 
     // VERIFICACIÓN ESTRICTA DE SESIÓN EN SERVIDOR
@@ -420,18 +461,26 @@ export async function crearPedidoOnlineAction(
     }
 
     // 4. Determinar estado inicial y notas automáticas de pago
-    // Flujo operativo: Los pedidos con pago en efectivo al retirar en local inician en CONFIRMADO,
-    // con stock reservado, listos en "Pendientes de armar" para que Stock inicie la preparación,
-    // manteniendo estadoPago = "PENDIENTE" y fechaPago = null hasta el cobro en mostrador.
-    // Los pedidos con transferencia bancaria u otros medios inician en PENDIENTE ("Por verificar pago").
-    const initialEstado = input.metodoPago === "EFECTIVO_LOCAL" ? "CONFIRMADO" : "PENDIENTE";
+    // Flujo operativo:
+    // - TARJETA (modo simulación): el pago se aprueba y acredita automáticamente en checkout -> estado: CONFIRMADO, estadoPago: PAGADO, fechaPago: new Date()
+    // - EFECTIVO_LOCAL: reserva confirmada con stock reservado para armado en depósito -> estado: CONFIRMADO, estadoPago: PENDIENTE, fechaPago: null (se cobra en mostrador al entregar)
+    // - TRANSFERENCIA: por verificar comprobante -> estado: PENDIENTE, estadoPago: PENDIENTE, fechaPago: null
+    const isTarjeta = input.metodoPago === "TARJETA";
+    const isEfectivo = input.metodoPago === "EFECTIVO_LOCAL";
+    const initialEstado = (isTarjeta || isEfectivo) ? "CONFIRMADO" : "PENDIENTE";
+    const initialEstadoPago = isTarjeta ? "PAGADO" : "PENDIENTE";
+    const initialFechaPago = isTarjeta ? new Date() : null;
+
     const extraNotas: string[] = [];
     if (input.notas?.trim()) {
       extraNotas.push(input.notas.trim());
     }
 
     if (input.metodoPago === "TARJETA") {
-      extraNotas.push(`Pago con tarjeta a validar (${input.cuotas || 1} cuota(s)). Pendiente de validación comercial por Ventas.`);
+      const masked = input.datosTarjeta?.numero
+        ? enmascararNumeroTarjeta(input.datosTarjeta.numero)
+        : "Tarjeta de Débito";
+      extraNotas.push(`Pago con ${masked} aprobado en línea en 1 pago.`);
     } else if (input.metodoPago === "TRANSFERENCIA") {
       if (input.comprobanteUrl) {
         extraNotas.push("Transferencia bancaria con comprobante adjunto. Pendiente de verificación comercial por Ventas.");
@@ -510,8 +559,8 @@ export async function crearPedidoOnlineAction(
             pedidoCreado = await tx.pedidoEcommerce.create({
               data: {
                 ...baseData,
-                estadoPago: "PENDIENTE",
-                fechaPago: null,
+                estadoPago: initialEstadoPago,
+                fechaPago: initialFechaPago,
               },
               include: { items: true },
             });
@@ -530,12 +579,14 @@ export async function crearPedidoOnlineAction(
             }
           }
 
-          // Control atómico estricto de concurrencia: verificar demanda agregada dentro de la transacción
+          // Control atómico estricto de concurrencia: adquirir bloqueo pesimista (FOR UPDATE) y verificar demanda agregada dentro de la transacción
           for (const [prodId, dem] of demandaTotalPorProducto.entries()) {
-            const prodTx = await tx.producto.findUnique({
-              where: { id: prodId },
-              select: { id: true, nombre: true, cantidad: true, activo: true },
-            });
+            const lockedProds = await tx.$queryRaw<Array<{ id: number; nombre: string; cantidad: number; activo: boolean }>>`
+              SELECT id, nombre, cantidad, activo FROM productos
+              WHERE id = ${prodId}
+              FOR UPDATE
+            `;
+            const prodTx = lockedProds[0];
             if (!prodTx || !prodTx.activo || prodTx.cantidad < dem.requerido) {
               throw new Error(
                 `Stock insuficiente para "${dem.nombre}" al confirmar la orden. Disponibles: ${prodTx?.cantidad ?? 0}, requeridos: ${dem.requerido}.`
@@ -551,7 +602,10 @@ export async function crearPedidoOnlineAction(
                 select: { id: true, cantidad: true },
               });
               if (prodActual) {
-                const nuevaCantidad = Math.max(0, prodActual.cantidad - vit.cantidad);
+                if (prodActual.cantidad < vit.cantidad) {
+                  throw new Error(`Stock insuficiente para "${vit.nombre}". Disponibles: ${prodActual.cantidad}, requeridos: ${vit.cantidad}.`);
+                }
+                const nuevaCantidad = prodActual.cantidad - vit.cantidad;
                 await tx.producto.update({
                   where: { id: vit.productoId },
                   data: { cantidad: nuevaCantidad },
@@ -580,7 +634,10 @@ export async function crearPedidoOnlineAction(
                   });
                   if (prodActual) {
                     const totalDescontar = cItem.cantidad * vit.cantidad;
-                    const nuevaCantidad = Math.max(0, prodActual.cantidad - totalDescontar);
+                    if (prodActual.cantidad < totalDescontar) {
+                      throw new Error(`Stock insuficiente para "${comboDb.nombre}" al descontar componentes. Disponibles: ${prodActual.cantidad}, requeridos: ${totalDescontar}.`);
+                    }
+                    const nuevaCantidad = prodActual.cantidad - totalDescontar;
                     await tx.producto.update({
                       where: { id: cItem.productoId },
                       data: { cantidad: nuevaCantidad },
@@ -635,15 +692,28 @@ export async function crearPedidoOnlineAction(
       evento: "PEDIDO_CREADO",
     }).catch((err) => console.error("Error al disparar correo de pedido creado:", err));
 
+    // Si el pago con tarjeta ya está acreditado en el checkout (modo simulación),
+    // disparar el comprobante y confirmación de pago inmediatamente
+    if (nuevoPedido.metodoPago === "TARJETA" && nuevoPedido.estadoPago === "PAGADO") {
+      enviarEmailPedidoEvento({
+        pedido: nuevoPedido,
+        evento: "TRANSFERENCIA_APROBADA",
+      }).catch((err) => console.error("Error al disparar correo de pago con tarjeta confirmado:", err));
+    }
+
     // Notificación interna según circuito operativo:
-    // Si es Efectivo al retirar (CONFIRMADO): notifica a STOCK para iniciar el armado en depósito.
+    // Si es Efectivo al retirar o Tarjeta acreditada (CONFIRMADO): notifica a STOCK para iniciar el armado en depósito.
     // Si es Transferencia (PENDIENTE): notifica a VENTAS para verificar el comprobante de pago.
     if (nuevoPedido.estado === "CONFIRMADO") {
+      const msgConfirmado = nuevoPedido.metodoPago === "TARJETA"
+        ? `Pago con tarjeta acreditado automáticamente (${nuevoPedido.modalidadEntrega === "MOTOMANDADO" ? "Motomandado" : "Retiro"}). Listo para iniciar armado en depósito.`
+        : `${nuevoPedido.nombreCliente} (Retiro en local) por $${nuevoPedido.total.toLocaleString("es-AR")}. Pago en efectivo al retirar. Listo para iniciar armado en depósito.`;
+
       crearNotificacionStaffInternal({
         tipo: "PEDIDO_CONFIRMADO_ARMAR",
         rolDestino: "STOCK",
-        titulo: `Pedido #ORD-${nuevoPedido.numero} confirmado`,
-        mensaje: `${nuevoPedido.nombreCliente} (Retiro en local) por $${nuevoPedido.total.toLocaleString("es-AR")}. Pago en efectivo al retirar. Listo para iniciar armado en depósito.`,
+        titulo: `Pedido #ORD-${nuevoPedido.numero} confirmado${nuevoPedido.metodoPago === "TARJETA" ? " (Tarjeta)" : ""}`,
+        mensaje: msgConfirmado,
         pedidoId: nuevoPedido.id,
         pedidoNumero: nuevoPedido.numero,
         moduloDestino: "preparacion",
@@ -935,22 +1005,50 @@ export async function actualizarEstadoPedidoAction(
   param4?: number | string | null,
   param5?: number | string | null,
   checklistCompletado?: boolean,
-  tokenVerificacionParam?: string
+  tokenVerificacionParam?: string,
+  dniPresentadoParam?: string
 ): Promise<{ success: boolean; pedido?: PedidoDTO; error?: string }> {
   let asignarPreparadorId: number | null = null;
   let notas: string | undefined = undefined;
-  let tokenVerificacion: string | undefined = tokenVerificacionParam;
+  let tokenVerificacion: string | undefined =
+    tokenVerificacionParam && tokenVerificacionParam.startsWith("verif_")
+      ? tokenVerificacionParam
+      : undefined;
+  let dniPresentado: string | undefined =
+    dniPresentadoParam && typeof dniPresentadoParam === "string" && dniPresentadoParam.trim()
+      ? dniPresentadoParam.trim()
+      : undefined;
 
-  if (typeof param4 === "number") asignarPreparadorId = param4;
-  else if (typeof param4 === "string") {
-    if (param4.startsWith("verif_")) tokenVerificacion = param4;
-    else notas = param4;
+  // Inspeccionar param4
+  if (typeof param4 === "number") {
+    asignarPreparadorId = param4;
+  } else if (typeof param4 === "string" && param4.trim()) {
+    if (param4.startsWith("verif_")) {
+      tokenVerificacion = param4.trim();
+    } else {
+      notas = param4.trim();
+    }
   }
 
-  if (typeof param5 === "number") asignarPreparadorId = param5;
-  else if (typeof param5 === "string") {
-    if (param5.startsWith("verif_")) tokenVerificacion = param5;
-    else notas = param5;
+  // Inspeccionar param5
+  if (typeof param5 === "number") {
+    asignarPreparadorId = param5;
+  } else if (typeof param5 === "string" && param5.trim()) {
+    if (param5.startsWith("verif_")) {
+      tokenVerificacion = param5.trim();
+    } else if (!notas) {
+      notas = param5.trim();
+    } else {
+      // Si notas ya fue asignado en param4, param5 contiene el DNI o token
+      if (!dniPresentado) {
+        dniPresentado = param5.trim();
+      }
+    }
+  }
+
+  // Si tokenVerificacionParam no empieza con verif_, podría ser un DNI
+  if (tokenVerificacionParam && !tokenVerificacionParam.startsWith("verif_") && !dniPresentado) {
+    dniPresentado = tokenVerificacionParam.trim();
   }
 
   const auth = await verifyStaff(_ignoredUserId);
@@ -1272,18 +1370,76 @@ export async function actualizarEstadoPedidoAction(
           };
         }
 
-        // Validación de identidad en servidor
-        let tokenCheck = validateVerificationToken(tokenVerificacion, pedidoActual.id, realUserId);
-        if (!tokenCheck.valid && tokenVerificacionParam) {
-          tokenCheck = validateVerificationToken(tokenVerificacionParam, pedidoActual.id, realUserId);
-        }
+        // Validación según modalidad de entrega
+        if (pedidoActual.modalidadEntrega === "MOTOMANDADO") {
+          // Despacho a domicilio por motomandado o Moto Uber
+          // No exige verificación presencial física en mostrador.
+          // El pago ya fue verificado como PAGADO arriba.
+        } else {
+          // Modalidad RETIRO_LOCAL: validación obligatoria de identidad de quien retira
+          let candidateDni = dniPresentado || null;
 
-        // Respaldo de verificación si se presentó el DNI del titular
-        if (!tokenCheck.valid) {
-          const notasOrToken = (notas || tokenVerificacion || tokenVerificacionParam || "");
-          const matchDni = notasOrToken.match(/(?:DNI|dni|titular)[:\s]*([0-9a-zA-Z]+)/i);
-          const candidateDni = matchDni ? matchDni[1] : null;
-          if (candidateDni && normalizeDni(candidateDni) === normalizeDni(pedidoActual.dniCliente)) {
+          if (!candidateDni) {
+            const stringsToInspect = [
+              tokenVerificacionParam,
+              typeof param5 === "string" ? param5 : null,
+              typeof param4 === "string" ? param4 : null,
+              notas,
+            ].filter(Boolean) as string[];
+
+            for (const str of stringsToInspect) {
+              if (str.startsWith("verif_")) continue;
+              // Buscar patrón DNI: 12.345.678 o DNI 12345678 o titular: 12345678
+              const matchWithLabel = str.match(/(?:DNI|dni|titular|documento)[:\s]*([0-9a-zA-Z.\s-]+)/i);
+              if (matchWithLabel && matchWithLabel[1]) {
+                const found = matchWithLabel[1].trim();
+                if (/\d/.test(found)) {
+                  candidateDni = found;
+                  break;
+                }
+              }
+              // O si la cadena completa es un DNI numérico con/sin puntos/guiones
+              const cleanOnlyDni = str.replace(/[^0-9]/g, "");
+              if (cleanOnlyDni.length >= 6 && cleanOnlyDni.length <= 11 && !str.includes(" ")) {
+                candidateDni = str.trim();
+                break;
+              }
+            }
+          }
+
+          // Verificar si ya existe un token efímero válido en memoria emitido para este pedido y empleado
+          let tokenCheck = validateVerificationToken(tokenVerificacion, pedidoActual.id, realUserId);
+          if (!tokenCheck.valid && tokenVerificacionParam && tokenVerificacionParam.startsWith("verif_")) {
+            tokenCheck = validateVerificationToken(tokenVerificacionParam, pedidoActual.id, realUserId);
+          }
+
+          // Si no hay token previo en memoria, verificar el DNI presentado contra el DNI registrado
+          if (!tokenCheck.valid) {
+            if (!candidateDni || !candidateDni.trim()) {
+              return {
+                success: false,
+                error: "Operación rechazada: se requiere verificación obligatoria de identidad del cliente en mostrador antes de confirmar la entrega. Ingresá el DNI del titular o autorizado.",
+              };
+            }
+
+            const cleanCandidate = normalizeDni(candidateDni);
+            const cleanRegistrado = normalizeDni(pedidoActual.dniCliente);
+
+            if (!cleanCandidate) {
+              return {
+                success: false,
+                error: "Operación rechazada: el DNI presentado no tiene un formato válido.",
+              };
+            }
+
+            if (cleanCandidate !== cleanRegistrado) {
+              return {
+                success: false,
+                error: `El DNI presentado (${candidateDni.trim()}) no coincide con el DNI registrado en el pedido (${pedidoActual.dniCliente || "sin DNI"}). No se puede autorizar la entrega.`,
+              };
+            }
+
+            // DNI coincide con el titular: crear registro de verificación en memoria
             const autoRec = createVerificationRecord({
               pedidoId: pedidoActual.id,
               empleadoId: realUserId,
@@ -1293,16 +1449,17 @@ export async function actualizarEstadoPedidoAction(
               dniPresentado: candidateDni.trim(),
             });
             tokenCheck = { valid: true, record: autoRec.record };
+            tokenVerificacion = autoRec.token;
           }
-        }
 
-        if (!tokenCheck.valid || !tokenCheck.record) {
-          return {
-            success: false,
-            error: tokenCheck.error || "Operación rechazada: se requiere verificación obligatoria de identidad del cliente en mostrador antes de confirmar la entrega.",
-          };
+          if (!tokenCheck.valid || !tokenCheck.record) {
+            return {
+              success: false,
+              error: tokenCheck.error || "Operación rechazada: no se pudo verificar la identidad del cliente.",
+            };
+          }
+          verifRecord = tokenCheck.record;
         }
-        verifRecord = tokenCheck.record;
       }
 
       // Preparar datos de actualización atómica
@@ -1385,7 +1542,9 @@ export async function actualizarEstadoPedidoAction(
           ? verifRecord.tipo === "TITULAR"
             ? `Identidad verificada: Titular con DNI ${verifRecord.dniPresentado}`
             : `Identidad verificada: Tercero Autorizado ${verifRecord.nombrePresentado || ""} (DNI ${verifRecord.dniPresentado})${verifRecord.motivoAutorizacion ? ` [Motivo: ${verifRecord.motivoAutorizacion}]` : ""}`
-          : "Identidad verificada";
+          : pedidoActual.modalidadEntrega === "MOTOMANDADO"
+            ? `Despachado a domicilio (${pedidoActual.direccionEnvio || "Posadas"})`
+            : "Entrega confirmada";
         logNota = `${modalidadStr} confirmado por ${userNombre} (${userRol}). ${verifDetalle}.`;
       }
 
@@ -1429,6 +1588,33 @@ export async function actualizarEstadoPedidoAction(
           where: { id: pedidoActual.id },
           include: { items: true },
         });
+      } else if (targetEstado === "ENTREGADO") {
+        // Bloqueo condicional atómico: impide que dos solicitudes concurrentes o doble clic
+        // entreguen simultáneamente el mismo pedido.
+        const updateCount = await tx.pedidoEcommerce.updateMany({
+          where: {
+            id: pedidoActual.id,
+            estado: "LISTO_ENTREGA",
+          },
+          data: updateData,
+        });
+
+        if (updateCount.count === 0) {
+          const yaEntregado = await tx.pedidoEcommerce.findUnique({
+            where: { id: pedidoActual.id },
+            include: { items: true },
+          });
+          return {
+            success: true,
+            pedido: mapPedidoToDTO(yaEntregado!),
+            estadoAnterior: pedidoActual.estado,
+          };
+        }
+
+        updated = await tx.pedidoEcommerce.findUnique({
+          where: { id: pedidoActual.id },
+          include: { items: true },
+        });
       } else {
         updated = await tx.pedidoEcommerce.update({
           where: { id: pedidoActual.id },
@@ -1460,7 +1646,11 @@ export async function actualizarEstadoPedidoAction(
         if (estadoResult === "CONFIRMADO") {
           // En efectivo en mostrador, el cobro real se registra al retirar; no anunciar pago confirmado antes de tiempo
           if (p.metodoPago !== "EFECTIVO_LOCAL") {
-            enviarEmailPedidoEvento({ pedido: p, evento: "TRANSFERENCIA_APROBADA" }).catch((e) => console.error("Error email CONFIRMADO:", e));
+            try {
+              await enviarEmailPedidoEvento({ pedido: p, evento: "TRANSFERENCIA_APROBADA" });
+            } catch (e) {
+              console.error("Error email CONFIRMADO:", e);
+            }
           }
           crearNotificacionStaffInternal({
             tipo: "PEDIDO_CONFIRMADO_ARMAR",
@@ -2188,7 +2378,15 @@ export async function registrarCobroEfectivoAction(
     let tokenCheck = validateVerificationToken(tokenVerificacion, pedidoActual.id, realUserId);
     if (!tokenCheck.valid) {
       // Intentar resolver DNI presentado
-      const candidateDni = dniPresentadoParam || (notasCobroOrToken && !notasCobroOrToken.startsWith("verif_") ? notasCobroOrToken : null) || tokenVerificacionParam;
+      let candidateDni = dniPresentadoParam?.trim() || null;
+      if (!candidateDni && notasCobroOrToken && !notasCobroOrToken.startsWith("verif_")) {
+        const matchWithLabel = notasCobroOrToken.match(/(?:DNI|dni|titular|documento)[:\s]*([0-9a-zA-Z.\s-]+)/i);
+        if (matchWithLabel && matchWithLabel[1] && /\d/.test(matchWithLabel[1])) {
+          candidateDni = matchWithLabel[1].trim();
+        } else {
+          candidateDni = notasCobroOrToken.trim();
+        }
+      }
       if (candidateDni) {
         const cleanCandidate = normalizeDni(candidateDni);
         const cleanRegistrado = normalizeDni(pedidoActual.dniCliente);
@@ -2252,21 +2450,26 @@ export async function registrarCobroEfectivoAction(
     });
 
     if (updated) {
-      enviarEmailPedidoEvento({
-        pedido: {
-          id: updated.id,
-          numero: updated.numero,
-          nombreCliente: updated.nombreCliente,
-          emailCliente: updated.emailCliente,
-          modalidadEntrega: updated.modalidadEntrega,
-          metodoPago: updated.metodoPago,
-          costoEnvio: updated.costoEnvio,
-          total: updated.total,
-          direccionEnvio: updated.direccionEnvio,
-          estadoPago: updated.estadoPago,
-        },
-        evento: "TRANSFERENCIA_APROBADA",
-      }).catch((err) => console.error("Error al disparar correo de cobro efectivo en mostrador:", err));
+      try {
+        await enviarEmailPedidoEvento({
+          pedido: {
+            id: updated.id,
+            numero: updated.numero,
+            nombreCliente: updated.nombreCliente,
+            emailCliente: updated.emailCliente,
+            modalidadEntrega: updated.modalidadEntrega,
+            metodoPago: updated.metodoPago,
+            costoEnvio: updated.costoEnvio,
+            total: updated.total,
+            direccionEnvio: updated.direccionEnvio,
+            estadoPago: updated.estadoPago,
+            items: updated.items,
+          },
+          evento: "TRANSFERENCIA_APROBADA",
+        });
+      } catch (err) {
+        console.error("Error al disparar correo de cobro efectivo en mostrador:", err);
+      }
     }
 
     try {
@@ -2282,6 +2485,104 @@ export async function registrarCobroEfectivoAction(
   } catch (error: any) {
     console.error("Error al registrar cobro efectivo:", error);
     return { success: false, error: "No se pudo registrar el cobro en mostrador." };
+  }
+}
+
+/**
+ * Permite a personal de Ventas o Administrador acreditar y aprobar el pago por transferencia bancaria de un pedido
+ */
+export async function aprobarPagoTransferenciaAction(
+  pedidoId: number,
+  userId: number,
+  notas?: string
+): Promise<{ success: boolean; pedido?: PedidoDTO; error?: string }> {
+  const auth = await verifyStaff(userId, ["ADMINISTRADOR", "ENCARGADO_VENTAS"]);
+  if (!auth.authorized || !auth.userId) {
+    return {
+      success: false,
+      error: auth.error || "Permiso denegado: solo personal de Ventas o Administrador puede aprobar pagos por transferencia.",
+    };
+  }
+
+  const rol = auth.rol || "ENCARGADO_VENTAS";
+  const userNombre = auth.nombre || "Ventas";
+
+  try {
+    const pedidoActual = await prisma.pedidoEcommerce.findFirst({
+      where: { OR: [{ id: pedidoId }, { numero: pedidoId }] },
+      include: { items: true },
+    });
+
+    if (!pedidoActual) {
+      return { success: false, error: "Pedido no encontrado." };
+    }
+
+    if (pedidoActual.estado === "CANCELADO" || pedidoActual.estado === "ENTREGADO") {
+      return {
+        success: false,
+        error: `No se puede aprobar el pago de un pedido en estado terminal '${pedidoActual.estado}'.`,
+      };
+    }
+
+    if (pedidoActual.estadoPago === "PAGADO") {
+      return { success: true, pedido: mapPedidoToDTO(pedidoActual) };
+    }
+
+    const logNota = `Pago por transferencia verificado y acreditado por ${userNombre} (${rol})${notas?.trim() ? `: "${notas.trim()}"` : ""}.`;
+    const notasActualizadas = pedidoActual.notas
+      ? `${pedidoActual.notas} | ${logNota}`
+      : logNota;
+
+    const updateData: Record<string, unknown> = {
+      estadoPago: "PAGADO",
+      fechaPago: pedidoActual.fechaPago || new Date(),
+      notas: notasActualizadas,
+    };
+
+    // Si todavía estaba PENDIENTE ("Por verificar pago"), se avanza a CONFIRMADO para que pase a Stock
+    if (pedidoActual.estado === "PENDIENTE") {
+      updateData.estado = "CONFIRMADO";
+    }
+
+    const updated = await prisma.pedidoEcommerce.update({
+      where: { id: pedidoActual.id },
+      data: updateData,
+      include: { items: true },
+    });
+
+    try {
+      await enviarEmailPedidoEvento({
+        pedido: {
+          id: updated.id,
+          numero: updated.numero,
+          nombreCliente: updated.nombreCliente,
+          emailCliente: updated.emailCliente,
+          modalidadEntrega: updated.modalidadEntrega,
+          metodoPago: updated.metodoPago,
+          costoEnvio: updated.costoEnvio,
+          total: updated.total,
+          direccionEnvio: updated.direccionEnvio,
+          estadoPago: updated.estadoPago,
+          items: updated.items,
+        },
+        evento: "TRANSFERENCIA_APROBADA",
+      });
+    } catch (emailErr) {
+      console.error("Error al enviar email de transferencia aprobada:", emailErr);
+    }
+
+    try {
+      revalidatePath("/panel");
+      revalidatePath("/mis-pedidos");
+    } catch {}
+
+    return {
+      success: true,
+      pedido: mapPedidoToDTO(updated),
+    };
+  } catch (error: any) {
+    console.error("Error al aprobar pago transferencia:", error);
+    return { success: false, error: error?.message || "No se pudo registrar la aprobación del pago." };
   }
 }
 

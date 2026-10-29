@@ -30,6 +30,7 @@ import {
   Info,
 } from "lucide-react";
 import { ProductSpec } from "@/lib/productMetadata";
+import { parseMotoDetalle } from "@/lib/motoCompatibility";
 
 interface ComboDetailClientProps {
   combo: ComboDTO;
@@ -158,18 +159,15 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
   const totalMotosCount = ownMotos.length + compMotos.reduce((acc, c) => acc + c.motos.length, 0);
   const hasMotos = totalMotosCount > 0;
 
-  // Si la pestaña activa actual no tiene contenido, volver a la descripción
+  // Si la pestaña técnica o componentes no tiene contenido, volver a la descripción
   useEffect(() => {
     if (activeTab === "specs" && !hasSpecs) {
-      setActiveTab("descripcion");
-    }
-    if (activeTab === "motos" && !hasMotos) {
       setActiveTab("descripcion");
     }
     if (activeTab === "componentes" && (!combo.items || combo.items.length === 0)) {
       setActiveTab("descripcion");
     }
-  }, [activeTab, hasSpecs, hasMotos, combo.items]);
+  }, [activeTab, hasSpecs, combo.items]);
 
   return (
     <div className="space-y-8 pb-12">
@@ -597,19 +595,17 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
               Especificaciones técnicas ({totalSpecsCount})
             </button>
           )}
-          {hasMotos && (
-            <button
-              type="button"
-              onClick={() => setActiveTab("motos")}
-              className={`pb-3 px-4 border-b-2 transition-colors shrink-0 cursor-pointer ${
-                activeTab === "motos"
-                  ? "border-emerald-600 text-emerald-700 dark:text-emerald-400 font-black"
-                  : "border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              }`}
-            >
-              Motos compatibles ({totalMotosCount})
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setActiveTab("motos")}
+            className={`pb-3 px-4 border-b-2 transition-colors shrink-0 cursor-pointer ${
+              activeTab === "motos"
+                ? "border-emerald-600 text-emerald-700 dark:text-emerald-400 font-black"
+                : "border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+            }`}
+          >
+            Motos Compatibles {totalMotosCount > 0 ? `(${totalMotosCount})` : ""}
+          </button>
           <button
             type="button"
             onClick={() => setActiveTab("compra")}
@@ -825,24 +821,12 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
                 <div>
                   <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
                     <Bike size={20} className="text-brand" />
-                    <span>Motos Compatibles</span>
+                    <span>Motos Compatibles {totalMotosCount > 0 ? `(${totalMotosCount})` : ""}</span>
                   </h2>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                     Modelos verificados compatibles con este combo o sus piezas individuales.
                   </p>
                 </div>
-
-                <a
-                  href={`https://wa.me/5493765243554?text=${encodeURIComponent(
-                    `Hola Chopper Repuestos! Quería consultar si el combo ${combo.nombre} es compatible con mi moto (modelo y año):`
-                  )}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-xs font-bold hover:bg-emerald-500/20 transition-colors w-fit"
-                >
-                  <MessageCircle size={14} />
-                  <span>¿Dudas con tu modelo? Consultar por WhatsApp</span>
-                </a>
               </div>
 
               {/* 1. Compatibilidad General Verificada (Kit Completo) */}
@@ -861,15 +845,17 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
                   </div>
 
                   <div className="flex flex-wrap gap-2 pt-1">
-                    {ownMotos.map((moto: string, mIdx: number) => (
-                      <span
-                        key={`own-moto-${mIdx}`}
-                        className="inline-flex items-center gap-1.5 bg-white dark:bg-surface border border-emerald-500/30 text-emerald-900 dark:text-emerald-200 px-3 py-1.5 rounded-xl text-xs font-bold shadow-2xs"
-                      >
-                        <Bike size={13} className="text-emerald-600 dark:text-emerald-400" />
-                        <span>{moto}</span>
-                      </span>
-                    ))}
+                    {ownMotos.map((moto: string, mIdx: number) => {
+                      const det = parseMotoDetalle(moto);
+                      return (
+                        <span
+                          key={`own-moto-${mIdx}`}
+                          className="inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-slate-100 dark:bg-[#1a1b20] dark:hover:bg-[#22242a] text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-[#2e3038] transition-colors leading-snug"
+                        >
+                          {det.canonico || det.original}
+                        </span>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -880,7 +866,15 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
                   <div className="rounded-xl border border-slate-200 dark:border-line bg-slate-50 dark:bg-surface/60 p-3 flex items-start gap-2.5">
                     <Info size={16} className="text-brand shrink-0 mt-0.5" />
                     <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
-                      <strong>Compatibilidad por componente:</strong> Las siguientes motos fueron informadas como compatibles para piezas individuales del kit. Si querés certificar que todos los repuestos correspondan exactamente a tu cilindrada y año, consultanos sin compromiso por WhatsApp.
+                      {ownMotos.length > 0 ? (
+                        <>
+                          <strong>Desglose por componente:</strong> Además de la compatibilidad del kit, las siguientes motos fueron informadas para piezas individuales.
+                        </>
+                      ) : (
+                        <>
+                          <strong>Kit multi-repuesto con compatibilidades individuales:</strong> Este combo incluye repuestos diseñados para modelos o aplicaciones distintas (por ejemplo, piezas para diferentes cilindradas o marcas). A continuación se detalla con precisión para qué modelo aplica cada repuesto.
+                        </>
+                      )}
                     </p>
                   </div>
 
@@ -888,7 +882,7 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
                     {compMotos.map((cm) => (
                       <div
                         key={`comp-moto-${cm.productoId}`}
-                        className="rounded-2xl border border-slate-200 dark:border-line bg-slate-50/50 dark:bg-surface/50 p-4 space-y-2.5"
+                        className="rounded-2xl border border-slate-200 dark:border-line bg-slate-50/50 dark:bg-surface/50 p-4 space-y-3"
                       >
                         <div className="flex items-center justify-between border-b border-slate-200/70 dark:border-line/60 pb-2">
                           <span className="text-xs font-bold text-slate-900 dark:text-white">
@@ -899,20 +893,35 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
                           </span>
                         </div>
 
-                        <div className="flex flex-wrap gap-1.5">
-                          {cm.motos.map((moto, idx) => (
-                            <span
-                              key={idx}
-                              className="inline-flex items-center gap-1.5 bg-white dark:bg-card border border-slate-200 dark:border-line text-slate-700 dark:text-slate-300 px-2.5 py-1 rounded-lg text-xs"
-                            >
-                              <Bike size={12} className="text-slate-400" />
-                              <span>{moto}</span>
-                            </span>
-                          ))}
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          {cm.motos.map((moto, idx) => {
+                            const det = parseMotoDetalle(moto);
+                            return (
+                              <span
+                                key={idx}
+                                className="inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-slate-100 dark:bg-[#1a1b20] dark:hover:bg-[#22242a] text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-[#2e3038] transition-colors leading-snug"
+                              >
+                                {det.canonico || det.original}
+                              </span>
+                            );
+                          })}
                         </div>
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* 3. Información general de compatibilidad cuando aún no hay modelos asignados */}
+              {ownMotos.length === 0 && compMotos.length === 0 && (
+                <div className="rounded-2xl border border-slate-200 dark:border-line bg-slate-50 dark:bg-surface/60 p-5 space-y-2 text-xs">
+                  <div className="flex items-center gap-2 font-bold text-slate-800 dark:text-slate-200 text-sm">
+                    <Bike size={18} className="text-slate-500 dark:text-slate-400 shrink-0" />
+                    <span>Modelos de Motocicletas</span>
+                  </div>
+                  <p className="text-slate-600 dark:text-slate-300 leading-relaxed text-xs">
+                    Este combo agrupa repuestos e insumos según medidas estándar de rodado o aplicación por pieza individual. Podés revisar las especificaciones de cada repuesto en la solapa de Componentes.
+                  </p>
                 </div>
               )}
             </div>

@@ -1,6 +1,6 @@
-import nodemailer from "nodemailer";
+import nodemailer, { SendMailOptions } from "nodemailer";
 import { prisma } from "@/lib/prisma";
-import { generarComprobantePdfPorPedidoId } from "@/lib/comprobantePdf";
+import { generarComprobantePdfPorPedidoId, buildComprobantePdf } from "@/lib/comprobantePdf";
 
 export type EmailEventoPedido =
   | "PEDIDO_CREADO"
@@ -179,7 +179,7 @@ export function renderEmailTemplate(
     : datos.metodoPago === "EFECTIVO_LOCAL"
     ? "Efectivo al retirar en local"
     : datos.metodoPago === "TARJETA"
-    ? "Tarjeta de débito/crédito"
+    ? "Tarjeta de Débito"
     : datos.metodoPago || "A convenir";
 
   switch (evento) {
@@ -534,7 +534,7 @@ ${calloutMessage.replace(/<[^>]+>/g, "")}
 Resumen:
 - Pedido: #ORD-${datos.numero}
 - Estado: ${statusBadge}
-- Modalidad: ${modalidadTexto}${evento === "TRANSFERENCIA_APROBADA" ? `\n- Importe acreditado: ${formatCurrency(datos.total)}` : ""}
+- Modalidad: ${modalidadTexto}${evento === "TRANSFERENCIA_APROBADA" ? `\n- Importe acreditado: ${formatCurrency(datos.total)}` : ""}${evento === "TRANSFERENCIA_APROBADA" && datos.adjuntoComprobante ? `\n- Comprobante adjunto: Comprobante-Compra-ORD-${datos.numero}.pdf` : ""}
 
 Podés ver el detalle en: ${pedidosUrl}
 
@@ -754,22 +754,51 @@ export async function enviarEmailPedidoEvento(params: {
   let adjuntosFinales = params.adjuntos ? [...params.adjuntos] : [];
   if (evento === "TRANSFERENCIA_APROBADA" && adjuntosFinales.length === 0) {
     try {
-      const pdfBuffer = await generarComprobantePdfPorPedidoId(pedido.id);
-      if (pdfBuffer && pdfBuffer.length > 0) {
+      const pedidoIdentificador = pedido.id || pedido.numero;
+      let pdfBuffer = await generarComprobantePdfPorPedidoId(pedidoIdentificador);
+
+      // Respaldo robusto: si la consulta directa falla pero tenemos los datos de items en memoria, generarlo directamente
+      if ((!pdfBuffer || pdfBuffer.length === 0) && pedido.items && pedido.items.length > 0) {
+        pdfBuffer = await buildComprobantePdf({
+          numero: pedido.numero,
+          creadoEn: new Date(),
+          fechaPago: new Date(),
+          nombreCliente: pedido.nombreCliente,
+          direccionEnvio: pedido.direccionEnvio,
+          modalidadEntrega: pedido.modalidadEntrega,
+          metodoPago: pedido.metodoPago,
+          costoEnvio: pedido.costoEnvio,
+          total: pedido.total,
+          items: pedido.items.map((it) => ({
+            nombre: it.nombre,
+            marca: it.marca,
+            cantidad: it.cantidad,
+            precioUnitario: it.precioUnitario,
+            subtotal: it.subtotal,
+          })),
+        });
+      }
+
+      if (pdfBuffer && Buffer.isBuffer(pdfBuffer) && pdfBuffer.length > 0) {
         adjuntosFinales.push({
           filename: `Comprobante-Compra-ORD-${pedido.numero}.pdf`,
           content: pdfBuffer,
           contentType: "application/pdf",
         });
+      } else {
+        console.warn(`[COMPROBANTE_PDF] Comprobante no generado o vacío para pedido #${pedido.numero}. Se omitirá anuncio de adjunto.`);
       }
     } catch (pdfErr) {
       console.error(`[COMPROBANTE_PDF] Error al adjuntar comprobante para pedido #${pedido.numero}:`, pdfErr);
     }
   }
 
-  const tieneComprobanteAdjunto = adjuntosFinales.some(
-    (a) => a.contentType === "application/pdf" || a.filename?.toLowerCase().endsWith(".pdf")
-  );
+  // Comprobar estrictamente que exista un adjunto PDF válido y con bytes antes de anunciarlo en el cuerpo del correo
+  const tieneComprobanteAdjunto = adjuntosFinales.some((a) => {
+    const isPdf = a.contentType === "application/pdf" || a.filename?.toLowerCase().endsWith(".pdf");
+    const hasBytes = Buffer.isBuffer(a.content) ? a.content.length > 0 : typeof a.content === "string" ? a.content.length > 0 : false;
+    return isPdf && hasBytes;
+  });
 
   const template = renderEmailTemplate(evento, {
     numero: pedido.numero,
@@ -801,7 +830,7 @@ export async function enviarEmailPedidoEvento(params: {
       return { success: false, error: "Transporter SMTP no pudo ser inicializado con la configuración provista." };
     }
 
-    await transporter.sendMail({
+    const mailOptions: SendMailOptions = {
       from: config.from,
       to: emailDestino,
       subject: template.subject,
@@ -810,9 +839,15 @@ export async function enviarEmailPedidoEvento(params: {
       attachments: adjuntosFinales.map((a) => ({
         filename: a.filename,
         content: a.content,
-        contentType: a.contentType,
+        contentType: a.contentType || "application/pdf",
+        contentDisposition: "attachment" as const,
       })),
-    });
+    };
+
+    const sendInfo = await transporter.sendMail(mailOptions);
+    console.log(
+      `[EMAIL_SERVICE: ENVIADO] Pedido #ORD-${pedido.numero} | Evento: ${evento} | Destino: ${emailDestino} | Adjuntos: ${mailOptions.attachments?.length || 0} | MessageId: ${sendInfo.messageId}`
+    );
 
     await markEmailAsSent(idempotencyKey, evento);
     return { success: true };
@@ -949,6 +984,300 @@ Este enlace es válido por 24 horas. Si no solicitaste este cambio, ignorá este
     return { success: true };
   } catch (err: any) {
     console.error("[EMAIL_SERVICE: ERROR SMTP] Error al enviar verificación de correo:", err?.message || err);
+    return { success: false, error: err?.message || "Fallo de conexión SMTP." };
+  }
+}
+
+/**
+ * Envía un correo con código numérico de 6 dígitos para la recuperación de contraseña de un cliente.
+ * Reutiliza la configuración SMTP de Gmail y Nodemailer existente, respetando el modo pruebas.
+ */
+export async function enviarEmailRecuperacionPassword(params: {
+  nombreCliente: string;
+  email: string;
+  codigo: string;
+}): Promise<{ success: boolean; simulated?: boolean; error?: string }> {
+  const { nombreCliente, email, codigo } = params;
+  const cleanEmail = (email || "").trim().toLowerCase();
+
+  const subject = `Código de recuperación: ${codigo} · Chopper Repuestos`;
+
+  const html = `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>${subject}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #0f172a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1e293b;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #0f172a; padding: 32px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width: 540px; background-color: #ffffff; border-radius: 16px; border: 1px solid #334155; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);">
+          <tr>
+            <td style="background-color: #dc2626; padding: 24px 28px; text-align: left;">
+              <span style="display: inline-block; background-color: rgba(255,255,255,0.2); color: #ffffff; font-size: 11px; font-weight: 800; letter-spacing: 1px; padding: 3px 8px; border-radius: 6px; text-transform: uppercase;">
+                Seguridad de Cuenta
+              </span>
+              <h1 style="margin: 8px 0 0 0; color: #ffffff; font-size: 22px; font-weight: 900; letter-spacing: -0.5px;">
+                CHOPPER REPUESTOS
+              </h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px 28px;">
+              <h2 style="margin: 0 0 12px 0; color: #0f172a; font-size: 18px; font-weight: 800;">
+                Recuperación de contraseña
+              </h2>
+              <p style="margin: 0 0 16px 0; color: #475569; font-size: 14px; line-height: 1.6;">
+                Hola <strong>${nombreCliente}</strong>, recibimos una solicitud para restablecer la contraseña de tu cuenta en Chopper Repuestos.
+              </p>
+              <p style="margin: 0 0 18px 0; color: #475569; font-size: 13px; line-height: 1.5;">
+                Ingresá el siguiente código de seguridad de 6 dígitos en la pantalla de recuperación:
+              </p>
+              <div style="background-color: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 18px; text-align: center; margin: 20px 0;">
+                <span style="display: inline-block; font-family: 'Courier New', Courier, monospace; font-size: 32px; font-weight: 900; letter-spacing: 10px; color: #dc2626; padding-left: 10px;">
+                  ${codigo}
+                </span>
+              </div>
+              <div style="background-color: #fef2f2; border-left: 4px solid #ef4444; padding: 12px 14px; border-radius: 6px; margin-bottom: 22px;">
+                <p style="margin: 0; color: #991b1b; font-size: 12px; line-height: 1.5;">
+                  ⏱ <strong>Validez:</strong> Este código expira en <strong>15 minutos</strong> y solo puede utilizarse una vez.
+                </p>
+              </div>
+              <p style="margin: 0 0 8px 0; color: #64748b; font-size: 12px; line-height: 1.5;">
+                Si vos no solicitaste este cambio, desestimá este mensaje. Tu contraseña actual no fue modificada y tu cuenta sigue totalmente protegida.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 18px 24px; text-align: center; color: #94a3b8; font-size: 11px; line-height: 1.5;">
+              Chopper Repuestos · Posadas, Misiones<br/>
+              Av. Roque Sáenz Peña 1500 · WhatsApp: +54 9 376 524-3554
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `.trim();
+
+  const text = `
+CHOPPER REPUESTOS · Posadas, Misiones
+Recuperación de contraseña
+----------------------------------------
+Hola ${nombreCliente}, recibimos una solicitud para restablecer la contraseña de tu cuenta.
+
+Tu código de seguridad de 6 dígitos es:
+${codigo}
+
+Este código expira en 15 minutos y solo puede utilizarse una vez.
+
+Si no solicitaste restablecer tu contraseña, ignorá este mensaje. Tu cuenta permanece protegida.
+  `.trim();
+
+  if (!isSmtpConfigured()) {
+    console.log(
+      `[EMAIL_SERVICE: DRY-RUN] Código de recuperación de contraseña para ${cleanEmail}: ${codigo}`
+    );
+    return { success: true, simulated: true };
+  }
+
+  // Filtro de lista blanca en modo pruebas/demo
+  if (!isEmailAllowed(cleanEmail)) {
+    console.warn(
+      `[EMAIL_SERVICE: OMITIDO (MODO DEMO)] Código de recuperación para '${cleanEmail}' omitido (destinatario no en lista blanca de pruebas). Código: ${codigo}`
+    );
+    return {
+      success: true,
+      simulated: true,
+    };
+  }
+
+  try {
+    const transporter = createTransporter();
+    const config = getSmtpConfig();
+    if (!transporter || !config) {
+      return { success: false, error: "Transporter SMTP no configurado." };
+    }
+    await transporter.sendMail({
+      from: config.from,
+      to: cleanEmail,
+      subject,
+      text,
+      html,
+    });
+    console.log(`[EMAIL_SERVICE: ENVIADO] Código de recuperación enviado a ${cleanEmail}`);
+    return { success: true };
+  } catch (err: any) {
+    console.error("[EMAIL_SERVICE: ERROR SMTP] Error al enviar código de recuperación:", err?.message || err);
+    return { success: false, error: err?.message || "Fallo de conexión SMTP." };
+  }
+}
+
+/**
+ * Envía un correo automático de bienvenida cuando un cliente completa su registro.
+ * Reutiliza la configuración SMTP de Gmail y Nodemailer existente, respetando el modo pruebas.
+ */
+export async function enviarEmailBienvenidaCliente(params: {
+  nombreCliente: string;
+  email: string;
+  appUrl?: string;
+}): Promise<{ success: boolean; simulated?: boolean; error?: string }> {
+  const { nombreCliente, email, appUrl: customAppUrl } = params;
+  const cleanEmail = (email || "").trim().toLowerCase();
+  const baseUrl = (
+    customAppUrl ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.APP_URL ||
+    "http://localhost:3001"
+  ).replace(/\/$/, "");
+
+  const subject = "¡Bienvenido a Chopper Repuestos!";
+
+  const html = `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${subject}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #0f172a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #0f172a; padding: 32px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width: 560px; background-color: #ffffff; border-radius: 16px; border: 1px solid #334155; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);">
+          <!-- Cabecera Oficial Chopper -->
+          <tr>
+            <td style="background-color: #dc2626; padding: 26px 28px; text-align: left;">
+              <span style="display: inline-block; background-color: rgba(255,255,255,0.2); color: #ffffff; font-size: 11px; font-weight: 800; letter-spacing: 1px; padding: 3px 8px; border-radius: 6px; text-transform: uppercase;">
+                Cuenta Creada
+              </span>
+              <h1 style="margin: 8px 0 0 0; color: #ffffff; font-size: 22px; font-weight: 900; letter-spacing: -0.5px;">
+                CHOPPER REPUESTOS
+              </h1>
+            </td>
+          </tr>
+
+          <!-- Contenido Principal -->
+          <tr>
+            <td style="padding: 32px 28px;">
+              <h2 style="margin: 0 0 14px 0; color: #0f172a; font-size: 20px; font-weight: 800;">
+                ¡Hola, ${nombreCliente}!
+              </h2>
+
+              <div style="background-color: #ecfdf5; border-left: 4px solid #10b981; padding: 14px 16px; border-radius: 8px; margin-bottom: 20px;">
+                <p style="margin: 0; color: #065f46; font-size: 14px; font-weight: 700; line-height: 1.5;">
+                  Tu cuenta en Chopper Repuestos se creó correctamente.
+                </p>
+              </div>
+
+              <p style="margin: 0 0 16px 0; color: #475569; font-size: 14px; line-height: 1.6;">
+                Ahora podés explorar nuestro catálogo de repuestos y accesorios para motos, realizar compras y consultar el estado de tus pedidos desde <strong>Mi Cuenta</strong>.
+              </p>
+
+              <!-- Botón CTA a la Tienda -->
+              <div style="text-align: center; margin: 26px 0;">
+                <a href="${baseUrl}" style="background-color: #dc2626; color: #ffffff; text-decoration: none; padding: 13px 28px; font-size: 14px; font-weight: 800; border-radius: 10px; display: inline-block; box-shadow: 0 4px 12px rgba(220, 38, 38, 0.28);">
+                  Explorar catálogo de repuestos →
+                </a>
+              </div>
+
+              <!-- Beneficios de la Cuenta -->
+              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px 20px; margin: 22px 0;">
+                <h3 style="margin: 0 0 10px 0; color: #0f172a; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">
+                  Servicios disponibles con tu cuenta
+                </h3>
+                <ul style="margin: 0; padding-left: 18px; color: #475569; font-size: 13px; line-height: 1.7;">
+                  <li><strong>Catálogo actualizado:</strong> Repuestos compatibles con tu moto y stock en tiempo real.</li>
+                  <li><strong>Envíos a domicilio:</strong> Motomandado / Moto Uber en el día en Posadas.</li>
+                  <li><strong>Retiro en mostrador:</strong> Av. Roque Sáenz Peña 1500 (Posadas, Misiones).</li>
+                  <li><strong>Seguimiento de compras:</strong> Historial y comprobantes en la sección <em>Mis Pedidos</em>.</li>
+                </ul>
+              </div>
+
+              <!-- Cierre cordial -->
+              <div style="margin-top: 24px; padding-top: 18px; border-top: 1px solid #f1f5f9;">
+                <p style="margin: 0 0 4px 0; color: #0f172a; font-size: 14px; font-weight: 700;">
+                  ¡Gracias por elegirnos!
+                </p>
+                <p style="margin: 0; color: #64748b; font-size: 13px; font-weight: 600;">
+                  Equipo de Chopper Repuestos
+                </p>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Pie de página -->
+          <tr>
+            <td style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 18px 24px; text-align: center; color: #94a3b8; font-size: 11px; line-height: 1.5;">
+              Chopper Repuestos · Posadas, Misiones<br/>
+              Av. Roque Sáenz Peña 1500 · WhatsApp: +54 9 376 524-3554
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `.trim();
+
+  const text = `
+¡Bienvenido a Chopper Repuestos!
+----------------------------------------
+¡Hola, ${nombreCliente}!
+
+Tu cuenta en Chopper Repuestos se creó correctamente.
+
+Ahora podés explorar nuestro catálogo de repuestos y accesorios para motos, realizar compras y consultar el estado de tus pedidos desde Mi Cuenta:
+${baseUrl}
+
+¡Gracias por elegirnos!
+
+Equipo de Chopper Repuestos
+Av. Roque Sáenz Peña 1500 · Posadas, Misiones
+WhatsApp: +54 9 376 524-3554
+  `.trim();
+
+  if (!isSmtpConfigured()) {
+    console.log(
+      `[EMAIL_SERVICE: DRY-RUN] Correo de bienvenida para ${cleanEmail} (${nombreCliente})`
+    );
+    return { success: true, simulated: true };
+  }
+
+  // Filtro de lista blanca en modo pruebas/demo
+  if (!isEmailAllowed(cleanEmail)) {
+    console.warn(
+      `[EMAIL_SERVICE: OMITIDO (MODO DEMO)] Correo de bienvenida para '${cleanEmail}' omitido (destinatario no en lista blanca de pruebas).`
+    );
+    return {
+      success: true,
+      simulated: true,
+    };
+  }
+
+  try {
+    const transporter = createTransporter();
+    const config = getSmtpConfig();
+    if (!transporter || !config) {
+      return { success: false, error: "Transporter SMTP no configurado." };
+    }
+    await transporter.sendMail({
+      from: config.from,
+      to: cleanEmail,
+      subject,
+      text,
+      html,
+    });
+    console.log(`[EMAIL_SERVICE: ENVIADO] Correo de bienvenida enviado a ${cleanEmail}`);
+    return { success: true };
+  } catch (err: any) {
+    console.error("[EMAIL_SERVICE: ERROR SMTP] Error al enviar correo de bienvenida:", err?.message || err);
     return { success: false, error: err?.message || "Fallo de conexión SMTP." };
   }
 }

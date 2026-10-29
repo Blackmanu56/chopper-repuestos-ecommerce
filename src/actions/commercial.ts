@@ -1,5 +1,6 @@
 "use server";
 
+import { cache } from "react";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { COMBOS_DATA } from "@/data/combos";
@@ -507,22 +508,24 @@ export async function getMarcasAdminAction(): Promise<{
   }
 }
 
-export async function getMarcasPublicasAction(): Promise<{
-  success: boolean;
-  marcas: Array<{ id: number; nombre: string; imagen: string | null }>;
-}> {
-  try {
-    const marcas = await prisma.marca.findMany({
-      where: { activo: true },
-      orderBy: { nombre: "asc" },
-      select: { id: true, nombre: true, imagen: true },
-    });
-    return { success: true, marcas };
-  } catch (e) {
-    console.error("Error al obtener marcas públicas:", e);
-    return { success: false, marcas: [] };
+export const getMarcasPublicasAction = cache(
+  async (): Promise<{
+    success: boolean;
+    marcas: Array<{ id: number; nombre: string; imagen: string | null }>;
+  }> => {
+    try {
+      const marcas = await prisma.marca.findMany({
+        where: { activo: true },
+        orderBy: { nombre: "asc" },
+        select: { id: true, nombre: true, imagen: true },
+      });
+      return { success: true, marcas };
+    } catch (e) {
+      console.error("Error al obtener marcas públicas:", e);
+      return { success: false, marcas: [] };
+    }
   }
-}
+);
 
 export async function crearMarcaAction(
   userId: number,

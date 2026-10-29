@@ -94,6 +94,7 @@ import {
   rechazarComprobantePedidoAction,
   getStaffPreparadoresAction,
   registrarCobroEfectivoAction,
+  aprobarPagoTransferenciaAction,
   obtenerInfoComprobanteAction,
   actualizarChecklistItemsAction,
   InfoComprobanteDTO,
@@ -275,6 +276,8 @@ export default function PanelPage() {
   const prevUserIdRef = useRef<number | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; msg: string } | null>(null);
+  const [notifRefreshTrigger, setNotifRefreshTrigger] = useState(0);
+  const triggerNotifRefresh = () => setNotifRefreshTrigger((prev) => prev + 1);
 
   // Pedidos
   const [pedidos, setPedidos] = useState<PedidoDTO[]>([]);
@@ -496,12 +499,13 @@ export default function PanelPage() {
     if (!user?.id) return;
     if (!silent) setLoading(true);
     try {
-      const [resPedidos, resStaff] = await Promise.all([
-        getPedidosEcommerceAction(user.id),
-        getStaffPreparadoresAction(user.id),
-      ]);
+      const promises: [Promise<any>, Promise<any>?] = [getPedidosEcommerceAction(user.id)];
+      if (staffPreparadores.length === 0) {
+        promises.push(getStaffPreparadoresAction(user.id));
+      }
+      const [resPedidos, resStaff] = await Promise.all(promises);
       if (resPedidos.success && resPedidos.pedidos) setPedidos(resPedidos.pedidos);
-      if (resStaff.success && resStaff.staff) setStaffPreparadores(resStaff.staff);
+      if (resStaff && resStaff.success && resStaff.staff) setStaffPreparadores(resStaff.staff);
       loadedModules.current.add("pedidos");
     } catch (err) {
       console.error("Error al cargar pedidos:", err);
@@ -624,11 +628,9 @@ export default function PanelPage() {
         setLoading(false);
         loadPedidosData(true);
       } else {
-        // Vista por defecto (pedidos, entrega, preparación)
+        // Vista por defecto (pedidos, entrega, preparación): carga ultra rápida
         await loadPedidosData(false);
         setLoading(false);
-        // Precargar catálogo en segundo plano
-        loadProductsData();
       }
     } catch (err) {
       console.error("Error al iniciar panel:", err);
@@ -749,6 +751,7 @@ export default function PanelPage() {
           notas || `Estado actualizado con éxito`
         );
         loadPedidosData(true);
+        triggerNotifRefresh();
         if (selectedPedido && selectedPedido.id === pedidoId && res.pedido) {
           setSelectedPedido(res.pedido);
         }
@@ -777,6 +780,7 @@ export default function PanelPage() {
           `Comprobante verificado y cargado`
         );
         loadPedidosData(true);
+        triggerNotifRefresh();
         if (selectedPedido && selectedPedido.numero === pedidoNumero) {
           setSelectedPedido((prev) => (prev ? { ...prev, comprobanteUrl: res.comprobanteUrl! } : null));
         }
@@ -894,6 +898,33 @@ export default function PanelPage() {
       return true;
     });
   }, [pedidos, filtroEstadoPedido, filtroModalidadPedido, filtroEmpleadoPedido, filtroSoloComprobante, busquedaPedido]);
+
+  // Colección para el tablero Kanban: respeta búsqueda, modalidad, empleado y comprobante sin excluir columnas por filtroEstadoPedido
+  const pedidosTablero = useMemo(() => {
+    return pedidos.filter((p) => {
+      if (filtroSoloComprobante && !p.comprobanteUrl) {
+        return false;
+      }
+      if (filtroModalidadPedido !== "TODOS" && p.modalidadEntrega !== filtroModalidadPedido) {
+        return false;
+      }
+      if (filtroEmpleadoPedido === "SIN_ASIGNAR") {
+        if (p.preparadorUsuarioId || p.preparadorNombre) return false;
+      } else if (filtroEmpleadoPedido !== "TODOS") {
+        if (String(p.preparadorUsuarioId) !== filtroEmpleadoPedido) return false;
+      }
+      if (busquedaPedido.trim()) {
+        const q = busquedaPedido.toLowerCase().trim();
+        const matchesOrd = `#ORD-${p.numero}`.toLowerCase().includes(q) || String(p.numero).includes(q);
+        const matchesClient = (p.nombreCliente || "").toLowerCase().includes(q);
+        const matchesDni = (p.dniCliente || "").toLowerCase().includes(q);
+        const matchesTel = (p.telefonoCliente || "").toLowerCase().includes(q);
+        const matchesPrep = (p.preparadorNombre || "").toLowerCase().includes(q);
+        if (!matchesOrd && !matchesClient && !matchesDni && !matchesTel && !matchesPrep) return false;
+      }
+      return true;
+    });
+  }, [pedidos, filtroModalidadPedido, filtroEmpleadoPedido, filtroSoloComprobante, busquedaPedido]);
 
   // Contadores para chips y KPI cards
   const countPendientes = useMemo(() => pedidos.filter((p) => p.estado === "PENDIENTE").length, [pedidos]);
@@ -1058,6 +1089,10 @@ export default function PanelPage() {
     if (!clean) return;
     if (!productMotos.includes(clean)) {
       setProductMotos((prev) => [...prev, clean]);
+    }
+    if (!catalogoMotos.includes(clean) && user?.id) {
+      setCatalogoMotos((prev) => [...prev, clean].sort());
+      agregarMotoCatalogoAction(user.id, clean).catch(() => {});
     }
     setBusquedaMoto("");
     setMostrarDropdownMotos(false);
@@ -2117,6 +2152,7 @@ export default function PanelPage() {
           `DNI presentado: ${dniIngresado}`
         );
         loadPedidosData(true);
+        triggerNotifRefresh();
       } else {
         setCobroError(res.error || "No se pudo registrar el cobro en mostrador.");
       }
@@ -2124,6 +2160,45 @@ export default function PanelPage() {
       setCobroError("Error de comunicación al procesar el cobro.");
     } finally {
       setIsSubmittingCobro(false);
+    }
+  };
+
+  const handleAprobarPagoTransferencia = async (pedidoId: number, notasAprobacion?: string) => {
+    if (!user?.id) {
+      showFeedback("error", "Sesión no iniciada o expirada.");
+      return;
+    }
+    setSaving(true);
+    setCobroError(null);
+    try {
+      const res = await aprobarPagoTransferenciaAction(pedidoId, user.id, notasAprobacion);
+      if (res.success && res.pedido) {
+        showFeedback("success", `Pago por transferencia de la orden #ORD-${res.pedido.numero} acreditado exitosamente.`);
+        setPedidos((prev) => prev.map((p) => (p.id === res.pedido!.id ? res.pedido! : p)));
+        if (selectedPedido && selectedPedido.id === res.pedido.id) {
+          setSelectedPedido(res.pedido);
+        }
+        if (selectedEntregaPedido && selectedEntregaPedido.id === res.pedido.id) {
+          setSelectedEntregaPedido(res.pedido);
+          setCobroSuccess(`Pago por transferencia acreditado con éxito. Ya podés procesar la entrega o despacho.`);
+        }
+        await registrarAuditoriaAction(
+          user.nombreCompleto || "Personal de Ventas",
+          `Acreditó pago por transferencia de orden #${res.pedido.numero} por ${formatPrice(res.pedido.total)}`,
+          "Ventas",
+          notasAprobacion || "Aprobación de transferencia bancaria"
+        );
+        loadPedidosData(true);
+        triggerNotifRefresh();
+      } else {
+        showFeedback("error", res.error || "No se pudo acreditar el pago.");
+        setCobroError(res.error || "No se pudo acreditar el pago por transferencia.");
+      }
+    } catch (err: any) {
+      showFeedback("error", err?.message || "Error al procesar la aprobación del pago.");
+      setCobroError("Error de comunicación al procesar la aprobación del pago.");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -2141,9 +2216,13 @@ export default function PanelPage() {
       return;
     }
 
-    // Guard 2: si es cobro en mostrador y no está pagado, exigir cobro previo
-    if (selectedEntregaPedido.metodoPago === "EFECTIVO_LOCAL" && selectedEntregaPedido.estadoPago !== "PAGADO") {
-      setCobroError("No podés entregar el pedido sin registrar primero el cobro en mostrador.");
+    // Guard 2: validar acreditación estricta de pago
+    if (selectedEntregaPedido.estadoPago !== "PAGADO") {
+      setCobroError(
+        selectedEntregaPedido.metodoPago === "EFECTIVO_LOCAL"
+          ? "No podés entregar el pedido sin registrar primero el cobro en mostrador."
+          : "No se puede entregar el pedido: el pago no se encuentra acreditado."
+      );
       return;
     }
 
@@ -2182,19 +2261,31 @@ export default function PanelPage() {
         selectedEntregaPedido.id,
         "ENTREGADO",
         notasEntrega,
-        tokenVerificacionActivo || (dniIngresado ? `DNI: ${dniIngresado}` : undefined)
+        dniIngresado ? `DNI: ${dniIngresado}` : undefined,
+        undefined,
+        tokenVerificacionActivo || undefined,
+        dniIngresado || undefined
       );
 
       if (res.success) {
-        showFeedback("success", `Orden #ORD-${selectedEntregaPedido.numero} entregada con éxito.`);
+        const auditMsg = isRetiro
+          ? `Entregó orden #${selectedEntregaPedido.numero} en mostrador`
+          : `Despachó orden #${selectedEntregaPedido.numero} a Moto Uber / Motomandado`;
+        showFeedback(
+          "success",
+          isRetiro
+            ? `Orden #ORD-${selectedEntregaPedido.numero} entregada con éxito.`
+            : `Orden #ORD-${selectedEntregaPedido.numero} despachada con éxito a Moto Uber / Motomandado.`
+        );
         await registrarAuditoriaAction(
           user.nombreCompleto || "Personal de Ventas",
-          `Entregó orden #${selectedEntregaPedido.numero} en mostrador`,
+          auditMsg,
           "Entregas",
           notasEntrega
         );
         setSelectedEntregaPedido(null);
         loadPedidosData(true);
+        triggerNotifRefresh();
       } else {
         setCobroError(res.error || "No se pudo confirmar la entrega.");
       }
@@ -2261,7 +2352,7 @@ export default function PanelPage() {
   const kanbanListos = useMemo(
     () =>
       pedidos.filter(
-        (p) => p.estado === "LISTO_ENTREGA" || p.estado === "LISTO_PARA_RETIRAR" || p.estado === "ENTREGADO"
+        (p) => p.estado === "LISTO_ENTREGA" || p.estado === "LISTO_PARA_RETIRAR"
       ),
     [pedidos]
   );
@@ -2302,6 +2393,7 @@ export default function PanelPage() {
             };
           });
         }
+        triggerNotifRefresh();
       } else {
         showFeedback("error", res.error || "No se pudo guardar el control del repuesto.");
       }
@@ -2358,6 +2450,7 @@ export default function PanelPage() {
             };
           });
         }
+        triggerNotifRefresh();
       } else {
         showFeedback("error", res.error || "No se pudieron actualizar los controles en el servidor.");
       }
@@ -2504,16 +2597,38 @@ export default function PanelPage() {
   }, [user, router]);
 
   const handleSelectPedidoFromNotification = (pedidoId: number, moduloDestino?: string) => {
-    if (moduloDestino === "preparacion" || role === "stock") {
+    loadPedidosData(true);
+    triggerNotifRefresh();
+
+    let targetModulo = moduloDestino || "pedidos";
+    if (targetModulo === "preparacion" && role === "venta") {
+      targetModulo = "pedidos";
+    }
+
+    if (targetModulo === "preparacion") {
       setActiveView("preparacion");
-    } else if (moduloDestino === "entrega") {
+      setBusquedaPedido("");
+      setFiltroEmpleadoPedido("TODOS");
+    } else if (targetModulo === "entrega") {
       setActiveView("entrega");
+      setBusquedaEntrega("");
+      setFiltroEstadoEntrega("POR_ENTREGAR");
     } else {
       setActiveView("pedidos");
+      setBusquedaPedido("");
+      setFiltroModalidadPedido("TODOS");
+      setFiltroEmpleadoPedido("TODOS");
+      setFiltroSoloComprobante(false);
+      setFiltroEstadoPedido("TODOS");
     }
+
     const pedido = pedidos.find((p: PedidoDTO) => p.id === pedidoId || p.numero === pedidoId);
     if (pedido) {
-      setSelectedPedido(pedido);
+      if (targetModulo === "entrega") {
+        handleOpenEntregaModal(pedido);
+      } else {
+        setSelectedPedido(pedido);
+      }
     }
   };
 
@@ -2521,15 +2636,31 @@ export default function PanelPage() {
     modulo: "pedidos" | "preparacion" | "entrega",
     filtroEstado?: string
   ) => {
-    setActiveView(modulo);
-    if (modulo === "pedidos") {
+    loadPedidosData(true);
+    triggerNotifRefresh();
+
+    let targetModulo = modulo;
+    if (modulo === "preparacion" && role === "venta") {
+      targetModulo = "pedidos";
+    }
+
+    setActiveView(targetModulo);
+
+    if (targetModulo === "pedidos") {
       setBusquedaPedido("");
       setFiltroModalidadPedido("TODOS");
       setFiltroEmpleadoPedido("TODOS");
       setFiltroSoloComprobante(false);
       setModoVisualizacionPedidos("listado");
-      if (filtroEstado) setFiltroEstadoPedido(filtroEstado);
-    } else if (modulo === "entrega") {
+      if (filtroEstado) {
+        setFiltroEstadoPedido(filtroEstado);
+      } else {
+        setFiltroEstadoPedido("TODOS");
+      }
+    } else if (targetModulo === "preparacion") {
+      setBusquedaPedido("");
+      setFiltroEmpleadoPedido("TODOS");
+    } else if (targetModulo === "entrega") {
       setBusquedaEntrega("");
       setFiltroEstadoEntrega(filtroEstado === "ENTREGADOS" ? "ENTREGADOS" : "POR_ENTREGAR");
     }
@@ -2843,6 +2974,8 @@ export default function PanelPage() {
           <NotificationBell
             user={user}
             role={role}
+            refreshTrigger={notifRefreshTrigger}
+            onSyncPedidos={() => loadPedidosData(true)}
             onSelectPedido={handleSelectPedidoFromNotification}
             onNavigateSection={handleNavigateSectionFromNotification}
           />
@@ -2854,6 +2987,8 @@ export default function PanelPage() {
             <NotificationBell
               user={user}
               role={role}
+              refreshTrigger={notifRefreshTrigger}
+              onSyncPedidos={() => loadPedidosData(true)}
               onSelectPedido={handleSelectPedidoFromNotification}
               onNavigateSection={handleNavigateSectionFromNotification}
             />
@@ -2886,7 +3021,10 @@ export default function PanelPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setModoVisualizacionPedidos("tablero")}
+                      onClick={() => {
+                        setModoVisualizacionPedidos("tablero");
+                        setFiltroEstadoPedido("TODOS");
+                      }}
                       className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
                         modoVisualizacionPedidos === "tablero"
                           ? "bg-red-600 text-white shadow-sm"
@@ -3067,7 +3205,12 @@ export default function PanelPage() {
                   ].map((item) => (
                     <button
                       key={item.id}
-                      onClick={() => setFiltroEstadoPedido(item.id)}
+                      onClick={() => {
+                        setFiltroEstadoPedido(item.id);
+                        if (modoVisualizacionPedidos === "tablero" && item.id !== "TODOS") {
+                          setModoVisualizacionPedidos("listado");
+                        }
+                      }}
                       className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
                         filtroEstadoPedido === item.id
                           ? "bg-red-600 text-white shadow-sm"
@@ -3302,12 +3445,12 @@ export default function PanelPage() {
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleCambiarEstadoPedido(p.id, "ENTREGADO");
+                              setSelectedEntregaPedido(p);
                             }}
                             disabled={saving}
                             className="px-4 py-1.5 bg-[#16a34a] hover:bg-green-700 text-white rounded-lg text-xs font-bold transition-colors"
                           >
-                            Confirmar entrega / retiro
+                            {p.modalidadEntrega === "MOTOMANDADO" ? "Despachar a Moto Uber" : "Confirmar entrega en mostrador"}
                           </button>
                         )}
 
@@ -3334,7 +3477,7 @@ export default function PanelPage() {
             </div>
             ) : (
               <PedidosTableroView
-                pedidos={pedidosFiltrados}
+                pedidos={pedidosTablero}
                 role={role}
                 staffPreparadores={staffPreparadores}
                 saving={saving}
@@ -3927,7 +4070,7 @@ export default function PanelPage() {
                                   </div>
                                 ) : (
                                   <p className="text-[11px] text-slate-400 dark:text-[#6b6c75]">
-                                    Compatibilidad no especificada (se indicará al cliente consultar por WhatsApp).
+                                    Sin motos específicas asociadas (se comercializa bajo especificación técnica).
                                   </p>
                                 )}
                               </div>
@@ -4570,7 +4713,7 @@ export default function PanelPage() {
                                   <span>
                                     {productUniversal
                                       ? "Marcado como universal. No requiere asociar modelos para su venta, pero podés asociar referencias frecuentes si lo deseás."
-                                      : "Asociá los modelos exactos para mostrar confirmación técnica verificada. Si queda vacío, se mostrará «Compatibilidad no especificada»."}
+                                      : "Asociá los modelos exactos para mostrar confirmación técnica verificada en la tienda."}
                                   </span>
                                 </div>
 
@@ -4686,30 +4829,55 @@ export default function PanelPage() {
                                     </div>
                                   )}
 
-                                  {/* Buscador con Dropdown de autocompletado */}
+                                  {/* Buscador con Dropdown de autocompletado y agregado rápido */}
                                   <div className="relative">
-                                    <div className="relative flex items-center">
-                                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 pointer-events-none" />
-                                      <input
-                                        type="text"
-                                        placeholder="Buscar modelo en el catálogo (ej: Titan, Wave, YBR, Smash, Rouser)..."
-                                        value={busquedaMoto}
-                                        onChange={(e) => {
-                                          setBusquedaMoto(e.target.value);
-                                          setMostrarDropdownMotos(true);
+                                    <div className="flex gap-2">
+                                      <div className="relative flex-1 flex items-center">
+                                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 pointer-events-none" />
+                                        <input
+                                          type="text"
+                                          placeholder="Buscar o escribir modelo (ej: Honda CG 150 Titan, Yamaha YBR 125)..."
+                                          value={busquedaMoto}
+                                          onChange={(e) => {
+                                            setBusquedaMoto(e.target.value);
+                                            setMostrarDropdownMotos(true);
+                                          }}
+                                          onFocus={() => setMostrarDropdownMotos(true)}
+                                          onKeyDown={(e) => {
+                                            if (e.key === "Enter") {
+                                              e.preventDefault();
+                                              const clean = busquedaMoto.trim();
+                                              if (clean) {
+                                                handleSelectMoto(clean);
+                                              }
+                                            }
+                                          }}
+                                          className="w-full bg-white dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg pl-8 pr-8 py-2 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-[#6b6c75] focus:outline-none focus:border-red-600"
+                                        />
+                                        {busquedaMoto && (
+                                          <button
+                                            type="button"
+                                            onClick={() => setBusquedaMoto("")}
+                                            className="absolute right-2.5 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer"
+                                          >
+                                            <X className="w-3.5 h-3.5" />
+                                          </button>
+                                        )}
+                                      </div>
+                                      <button
+                                        type="button"
+                                        disabled={!busquedaMoto.trim()}
+                                        onClick={() => {
+                                          const clean = busquedaMoto.trim();
+                                          if (clean) {
+                                            handleSelectMoto(clean);
+                                          }
                                         }}
-                                        onFocus={() => setMostrarDropdownMotos(true)}
-                                        className="w-full bg-white dark:bg-[#0f1012] border border-slate-300 dark:border-[#35363d] rounded-lg pl-8 pr-8 py-2 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-[#6b6c75] focus:outline-none focus:border-red-600"
-                                      />
-                                      {busquedaMoto && (
-                                        <button
-                                          type="button"
-                                          onClick={() => setBusquedaMoto("")}
-                                          className="absolute right-2.5 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer"
-                                        >
-                                          <X className="w-3.5 h-3.5" />
-                                        </button>
-                                      )}
+                                        className="px-3.5 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white rounded-lg text-xs font-bold transition-colors shrink-0 cursor-pointer flex items-center gap-1"
+                                      >
+                                        <Plus className="w-3.5 h-3.5" />
+                                        <span>Agregar</span>
+                                      </button>
                                     </div>
 
                                     {/* Dropdown flotante con motos filtradas */}
@@ -4855,7 +5023,7 @@ export default function PanelPage() {
                                       <div className="text-[11px] text-slate-400 dark:text-[#6b6c75] py-3 text-center border border-dashed border-slate-200 dark:border-[#26272e] rounded-lg">
                                         {productUniversal
                                           ? "Este repuesto está configurado como universal. No requiere modelos específicos asignados."
-                                          : "Sin modelos específicos asociados. En la tienda pública se mostrará «Compatibilidad no especificada» recomendando consultar por WhatsApp."}
+                                          : "Sin modelos específicos asociados. Podés buscar y asociar modelos arriba o marcar aplicación universal."}
                                       </div>
                                     )}
                                   </div>
@@ -9709,6 +9877,22 @@ export default function PanelPage() {
                             </div>
                           )}
                         </div>
+                      ) : selectedPedido.estadoPago !== "PAGADO" && selectedPedido.metodoPago !== "EFECTIVO_LOCAL" ? (
+                        <div className="flex flex-col gap-2">
+                          {(user.rol === "ADMINISTRADOR" || user.rol === "ENCARGADO_VENTAS") && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleAprobarPagoTransferencia(selectedPedido.id, "Acreditado desde detalle de pedido");
+                              }}
+                              disabled={saving}
+                              className="w-full py-2 bg-[#16a34a] hover:bg-green-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow cursor-pointer"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              Aprobar comprobante y acreditar pago
+                            </button>
+                          )}
+                        </div>
                       ) : null}
                     </div>
                   ) : (
@@ -9732,6 +9916,21 @@ export default function PanelPage() {
                           <CheckCircle2 className="w-3.5 h-3.5" />
                           Confirmar pedido para Stock
                         </button>
+                      )}
+                      {selectedPedido.estadoPago !== "PAGADO" && selectedPedido.metodoPago !== "EFECTIVO_LOCAL" && selectedPedido.estado !== "PENDIENTE" && (
+                        (user.rol === "ADMINISTRADOR" || user.rol === "ENCARGADO_VENTAS") && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleAprobarPagoTransferencia(selectedPedido.id, "Acreditado desde detalle de pedido");
+                            }}
+                            disabled={saving}
+                            className="w-full py-2 bg-[#16a34a] hover:bg-green-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow cursor-pointer"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            Aprobar y acreditar pago por transferencia
+                          </button>
+                        )
                       )}
                     </div>
                   )}
@@ -10288,6 +10487,90 @@ export default function PanelPage() {
                   </div>
                 )}
 
+                {/* Paso 3: Verificación de Pago Online / Transferencia */}
+                {selectedEntregaPedido.metodoPago !== "EFECTIVO_LOCAL" && (
+                  <div className={`p-4 rounded-xl border space-y-3 ${
+                    selectedEntregaPedido.estadoPago === "PAGADO"
+                      ? "bg-green-950/20 border-green-800/40"
+                      : "bg-amber-950/20 border-amber-600/40"
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <CreditCard className={`w-4 h-4 ${
+                          selectedEntregaPedido.estadoPago === "PAGADO" ? "text-green-400" : "text-amber-400"
+                        }`} />
+                        <h4 className="text-xs font-bold text-gray-200 uppercase tracking-wider">
+                          {selectedEntregaPedido.metodoPago === "TRANSFERENCIA"
+                            ? "Paso 3: Verificación de Transferencia Bancaria"
+                            : "Paso 3: Pago Online con Tarjeta"}
+                        </h4>
+                      </div>
+                      <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                        selectedEntregaPedido.estadoPago === "PAGADO"
+                          ? "bg-green-500/20 text-green-300 border border-green-500/30"
+                          : "bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse"
+                      }`}>
+                        {selectedEntregaPedido.estadoPago === "PAGADO" ? "PAGO ACREDITADO" : "PAGO PENDIENTE"}
+                      </span>
+                    </div>
+
+                    {selectedEntregaPedido.estadoPago === "PAGADO" ? (
+                      <div className="flex items-center gap-2 text-xs text-green-300 bg-green-950/40 p-2.5 rounded-lg border border-green-800/30">
+                        <CheckCircle className="w-4 h-4 shrink-0 text-green-400" />
+                        <span>Pago acreditado por <strong>{formatPrice(selectedEntregaPedido.total)}</strong> ({selectedEntregaPedido.metodoPago === "TRANSFERENCIA" ? "Transferencia bancaria verificada" : "Tarjeta de débito"}). Podés despachar el pedido.</span>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-start gap-2">
+                          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                          <div className="space-y-1">
+                            <p className="font-semibold text-white">
+                              Pago pendiente de acreditación por {formatPrice(selectedEntregaPedido.total)}
+                            </p>
+                            <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                              Por seguridad, la entrega está bloqueada hasta que el pago por transferencia sea corroborado y aprobado por personal autorizado (Ventas / Administración).
+                            </p>
+                          </div>
+                        </div>
+
+                        {selectedEntregaPedido.comprobanteUrl && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setComprobanteModalUrl(selectedEntregaPedido.comprobanteUrl!);
+                              setComprobanteModalPedido(selectedEntregaPedido);
+                            }}
+                            className="w-full py-2 px-3 bg-[#1e2029] hover:bg-[#282a36] border border-blue-500/30 text-blue-300 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                          >
+                            <FileText className="w-4 h-4 text-blue-400" />
+                            <span>Ver comprobante adjunto del cliente</span>
+                          </button>
+                        )}
+
+                        {(user.rol === "ADMINISTRADOR" || user.rol === "ENCARGADO_VENTAS") ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (confirm(`¿Acreditar el pago por transferencia de ${formatPrice(selectedEntregaPedido.total)} para la orden #ORD-${selectedEntregaPedido.numero}?`)) {
+                                handleAprobarPagoTransferencia(selectedEntregaPedido.id, "Acreditado desde modal de entrega por personal autorizado");
+                              }
+                            }}
+                            disabled={saving}
+                            className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 active:scale-[0.99] transition-all cursor-pointer"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Acreditar pago por transferencia ({formatPrice(selectedEntregaPedido.total)})</span>
+                          </button>
+                        ) : (
+                          <p className="text-[11px] text-gray-400 text-center italic">
+                            Solicitá al Encargado de Ventas o Administrador que verifique y acredite la transferencia para habilitar la entrega.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Si es Motomandado, aviso de entrega */}
                 {selectedEntregaPedido.modalidadEntrega === "MOTOMANDADO" && (
                   <div className="p-3.5 rounded-xl bg-blue-950/20 border border-blue-800/40 text-xs text-blue-300 flex items-start gap-2.5">
@@ -10325,15 +10608,13 @@ export default function PanelPage() {
                     selectedEntregaPedido.estado === "CONFIRMADO" ||
                     selectedEntregaPedido.estado === "PENDIENTE";
 
-                  const isFaltaCobro =
-                    selectedEntregaPedido.metodoPago === "EFECTIVO_LOCAL" &&
-                    selectedEntregaPedido.estadoPago !== "PAGADO";
+                  const isPagoPendiente = selectedEntregaPedido.estadoPago !== "PAGADO";
 
                   const canSubmitEntrega =
                     !isSubmittingEntrega &&
                     selectedEntregaPedido.estado !== "ENTREGADO" &&
                     !isEnPreparacion &&
-                    !isFaltaCobro &&
+                    !isPagoPendiente &&
                     (!isRetiro || isDniValido);
 
                   return (
@@ -10358,10 +10639,14 @@ export default function PanelPage() {
                           <Package className="w-4 h-4" />
                           <span>Esperando preparación de Stock</span>
                         </>
-                      ) : isFaltaCobro ? (
+                      ) : isPagoPendiente ? (
                         <>
                           <CreditCard className="w-4 h-4" />
-                          <span>Cobro pendiente en Paso 3</span>
+                          <span>
+                            {selectedEntregaPedido.metodoPago === "EFECTIVO_LOCAL"
+                              ? "Cobro pendiente en Paso 3"
+                              : "Pago pendiente de acreditación"}
+                          </span>
                         </>
                       ) : isRetiro && !isDniValido ? (
                         <>
@@ -10552,8 +10837,8 @@ export default function PanelPage() {
                 )}
               </div>
 
-              {/* Footer con acciones rápidas de verificación si el pedido está PENDIENTE o CONFIRMADO */}
-              {comprobanteModalPedido && (comprobanteModalPedido.estado === "PENDIENTE" || comprobanteModalPedido.estado === "CONFIRMADO") && (
+              {/* Footer con acciones de verificación de comprobante */}
+              {comprobanteModalPedido && (
                 <div className="pt-3 border-t border-[#26272e] shrink-0 flex flex-wrap items-center justify-between gap-2">
                   <span className="text-[11px] text-gray-400">
                     Estado: <strong className={comprobanteModalPedido.estadoPago === "PAGADO" ? "text-emerald-400" : "text-amber-400"}>
@@ -10561,7 +10846,7 @@ export default function PanelPage() {
                     </strong>
                   </span>
                   <div className="flex items-center gap-2">
-                    {comprobanteModalPedido.estadoPago !== "PAGADO" && (
+                    {comprobanteModalPedido.estadoPago !== "PAGADO" && (user.rol === "ADMINISTRADOR" || user.rol === "ENCARGADO_VENTAS") && (
                       <button
                         type="button"
                         onClick={async () => {
@@ -10585,20 +10870,19 @@ export default function PanelPage() {
                       </button>
                     )}
 
-                    {comprobanteModalPedido.estado === "PENDIENTE" && (
+                    {comprobanteModalPedido.estadoPago !== "PAGADO" && (user.rol === "ADMINISTRADOR" || user.rol === "ENCARGADO_VENTAS") && (
                       <button
                         type="button"
-                        onClick={() => {
-                          handleCambiarEstadoPedido(comprobanteModalPedido.id, "CONFIRMADO", "Ventas verificó comprobante en visor y aprobó pago por transferencia");
+                        onClick={async () => {
+                          await handleAprobarPagoTransferencia(comprobanteModalPedido.id, "Ventas verificó comprobante en visor y aprobó pago por transferencia");
                           setComprobanteModalUrl(null);
                           setComprobanteModalPedido(null);
-                          setSelectedPedido(null);
                         }}
                         disabled={saving}
                         className="px-4 py-1.5 bg-[#16a34a] hover:bg-green-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow cursor-pointer"
                       >
                         <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>Aprobar comprobante y confirmar</span>
+                        <span>Aprobar comprobante y acreditar pago</span>
                       </button>
                     )}
                   </div>

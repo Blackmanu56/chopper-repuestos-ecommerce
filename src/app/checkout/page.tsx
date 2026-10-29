@@ -22,9 +22,20 @@ import {
   CheckCircle,
   Upload,
   Zap,
-  Sparkles,
   XCircle,
+  Eye,
+  EyeOff,
+  Check,
 } from "lucide-react";
+import {
+  detectarMarcaTarjeta,
+  formatearNumeroTarjeta,
+  validarNumeroTarjeta,
+  formatearVencimiento,
+  validarVencimiento,
+  validarCvv,
+  validarTitular,
+} from "@/lib/cardValidation";
 import { validarPreciosServerAction, ValidatedCartItem } from "@/actions/commercial";
 import {
   crearPedidoOnlineAction,
@@ -37,7 +48,7 @@ export default function CheckoutPage() {
   const router = useRouter();
   const { user, openLogin } = useAuth();
   const { items, subtotal, clearCart, crearPedido, isStaff, sincronizarCarrito } = useCart();
-  const { config, calcularCuotas } = useConfig();
+  const { config } = useConfig();
   const formatPrice = (n: number) => "$" + Number(n).toLocaleString("es-AR");
 
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
@@ -65,12 +76,120 @@ export default function CheckoutPage() {
     }
   }, [user]);
 
-  // Datos de Tarjeta y Cuotas
-  const [tarjetaCuotas, setTarjetaCuotas] = useState<number>(1);
+  // Si se selecciona Motomandado y el pago estaba en Efectivo en el local, cambiar a Transferencia
+  useEffect(() => {
+    if (modalidadEntrega === "MOTOMANDADO" && formData.pago === "EFECTIVO_LOCAL") {
+      setFormData((prev) => ({ ...prev, pago: "TRANSFERENCIA" }));
+    }
+  }, [modalidadEntrega, formData.pago]);
+
+  // Datos de Tarjeta de Débito
   const [tarjetaNumero, setTarjetaNumero] = useState("");
   const [tarjetaTitular, setTarjetaTitular] = useState("");
   const [tarjetaVence, setTarjetaVence] = useState("");
   const [tarjetaCvv, setTarjetaCvv] = useState("");
+  const [mostrarCvv, setMostrarCvv] = useState(false);
+  const [tarjetaErrores, setTarjetaErrores] = useState<{
+    numero?: string;
+    titular?: string;
+    vencimiento?: string;
+    cvv?: string;
+  }>({});
+  const [tarjetaTouched, setTarjetaTouched] = useState<{
+    numero?: boolean;
+    titular?: boolean;
+    vencimiento?: boolean;
+    cvv?: boolean;
+  }>({});
+
+  const marcaDetectada = detectarMarcaTarjeta(tarjetaNumero);
+
+  const handleNumeroTarjetaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target;
+    const rawValue = input.value;
+    const cursorPosition = input.selectionStart || 0;
+
+    // Conteo de dígitos antes del cursor en el valor previo
+    const digitsBeforeCursor = rawValue.slice(0, cursorPosition).replace(/\D/g, "").length;
+
+    // Formatear valor limpio según la marca detectada
+    const formatted = formatearNumeroTarjeta(rawValue);
+    setTarjetaNumero(formatted);
+
+    // Ajustar posición del cursor para evitar saltos indeseados
+    requestAnimationFrame(() => {
+      let currentDigits = 0;
+      let newCursor = 0;
+      for (let i = 0; i < formatted.length; i++) {
+        if (/\d/.test(formatted[i])) currentDigits++;
+        if (currentDigits === digitsBeforeCursor) {
+          newCursor = i + 1;
+          break;
+        }
+      }
+      if (digitsBeforeCursor === 0) newCursor = 0;
+      if (input && typeof input.setSelectionRange === "function") {
+        input.setSelectionRange(newCursor, newCursor);
+      }
+    });
+
+    if (tarjetaTouched.numero) {
+      const v = validarNumeroTarjeta(formatted);
+      setTarjetaErrores((prev) => ({ ...prev, numero: v.valido ? undefined : v.error }));
+    }
+  };
+
+  const handleTitularChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const filtered = e.target.value.toUpperCase().replace(/[^A-ZÁÉÍÓÚÑÜ\s.'-]/g, "");
+    setTarjetaTitular(filtered);
+
+    if (tarjetaTouched.titular) {
+      const v = validarTitular(filtered);
+      setTarjetaErrores((prev) => ({ ...prev, titular: v.valido ? undefined : v.error }));
+    }
+  };
+
+  const handleVencimientoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const formatted = formatearVencimiento(e.target.value, tarjetaVence);
+    setTarjetaVence(formatted);
+
+    if (tarjetaTouched.vencimiento) {
+      if (formatted.length === 5) {
+        const v = validarVencimiento(formatted);
+        setTarjetaErrores((prev) => ({ ...prev, vencimiento: v.valido ? undefined : v.error }));
+      } else {
+        setTarjetaErrores((prev) => ({ ...prev, vencimiento: "Formato incompleto (MM/AA)" }));
+      }
+    }
+  };
+
+  const handleCvvChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const maxLen = marcaDetectada.id === "amex" ? 4 : 3;
+    const digits = e.target.value.replace(/\D/g, "").slice(0, maxLen);
+    setTarjetaCvv(digits);
+
+    if (tarjetaTouched.cvv) {
+      const v = validarCvv(digits, marcaDetectada.id);
+      setTarjetaErrores((prev) => ({ ...prev, cvv: v.valido ? undefined : v.error }));
+    }
+  };
+
+  const handleBlurField = (field: "numero" | "titular" | "vencimiento" | "cvv") => {
+    setTarjetaTouched((prev) => ({ ...prev, [field]: true }));
+    if (field === "numero") {
+      const v = validarNumeroTarjeta(tarjetaNumero);
+      setTarjetaErrores((prev) => ({ ...prev, numero: v.valido ? undefined : v.error }));
+    } else if (field === "titular") {
+      const v = validarTitular(tarjetaTitular);
+      setTarjetaErrores((prev) => ({ ...prev, titular: v.valido ? undefined : v.error }));
+    } else if (field === "vencimiento") {
+      const v = validarVencimiento(tarjetaVence);
+      setTarjetaErrores((prev) => ({ ...prev, vencimiento: v.valido ? undefined : v.error }));
+    } else if (field === "cvv") {
+      const v = validarCvv(tarjetaCvv, marcaDetectada.id);
+      setTarjetaErrores((prev) => ({ ...prev, cvv: v.valido ? undefined : v.error }));
+    }
+  };
 
   // Transferencia (Comprobante directo en checkout)
   const [archivoComprobante, setArchivoComprobante] = useState<File | null>(null);
@@ -116,7 +235,6 @@ export default function CheckoutPage() {
   const costoEnvio = modalidadEntrega === "MOTOMANDADO" ? costoMotomandado : 0;
   const effectiveSubtotal = serverSubtotal !== null ? serverSubtotal : subtotal;
   const totalConEnvio = effectiveSubtotal + costoEnvio;
-  const financiacion = calcularCuotas(totalConEnvio);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -153,6 +271,41 @@ export default function CheckoutPage() {
       return;
     }
 
+    // Validación obligatoria para pagos con tarjeta de débito / crédito
+    if (formData.pago === "TARJETA") {
+      const marca = detectarMarcaTarjeta(tarjetaNumero);
+      const valNum = validarNumeroTarjeta(tarjetaNumero);
+      const valTit = validarTitular(tarjetaTitular);
+      const valVenc = validarVencimiento(tarjetaVence);
+      const valCvv = validarCvv(tarjetaCvv, marca.id);
+
+      const nuevosErrores = {
+        numero: valNum.valido ? undefined : valNum.error,
+        titular: valTit.valido ? undefined : valTit.error,
+        vencimiento: valVenc.valido ? undefined : valVenc.error,
+        cvv: valCvv.valido ? undefined : valCvv.error,
+      };
+
+      setTarjetaErrores(nuevosErrores);
+      setTarjetaTouched({
+        numero: true,
+        titular: true,
+        vencimiento: true,
+        cvv: true,
+      });
+
+      if (!valNum.valido || !valTit.valido || !valVenc.valido || !valCvv.valido) {
+        const primerError =
+          valNum.error ||
+          valTit.error ||
+          valVenc.error ||
+          valCvv.error ||
+          "Por favor completá correctamente todos los datos de la tarjeta.";
+        setCheckoutError(`Datos de tarjeta inválidos: ${primerError}`);
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     setVerificandoPrecios(true);
     setServerWarnings([]);
@@ -178,7 +331,9 @@ export default function CheckoutPage() {
       if (res.warnings && res.warnings.length > 0) {
         setServerWarnings(res.warnings);
         sincronizarCarrito(res.items);
-        const hayIncompatibilidad = res.items.some((it) => it.stockDisponible <= 0 || it.cantidad <= 0);
+        const hayIncompatibilidad =
+          res.items.some((it) => it.stockDisponible <= 0 || it.cantidad <= 0) ||
+          res.items.length < items.length;
         if (hayIncompatibilidad) {
           setCheckoutError(
             "La disponibilidad de algunos repuestos cambió en el local. Por favor revisá los avisos arriba y ajustá tu carrito antes de continuar."
@@ -187,8 +342,14 @@ export default function CheckoutPage() {
         }
       }
 
-      // 2. Si elige efectivo pero seleccionó motomandado, forzamos retiro en local
-      const modFinal = formData.pago === "EFECTIVO_LOCAL" ? "RETIRO_LOCAL" : modalidadEntrega;
+      // 2. Validar coherencia entre modalidad de entrega y método de pago
+      if (modalidadEntrega === "MOTOMANDADO" && formData.pago === "EFECTIVO_LOCAL") {
+        setCheckoutError(
+          "La modalidad Motomandado / Moto Uber no permite pago en efectivo en el local. Por favor seleccioná Transferencia bancaria o Tarjeta de débito."
+        );
+        return;
+      }
+      const modFinal = modalidadEntrega;
 
       // 3. Si pagó por transferencia y adjuntó comprobante, subir el archivo de inmediato
       if (formData.pago === "TRANSFERENCIA" && archivoComprobante) {
@@ -246,7 +407,15 @@ export default function CheckoutPage() {
         modalidadEntrega: modFinal,
         costoEnvio: modFinal === "MOTOMANDADO" ? costoMotomandado : 0,
         metodoPago: formData.pago,
-        cuotas: formData.pago === "TARJETA" ? tarjetaCuotas : undefined,
+        cuotas: formData.pago === "TARJETA" ? 1 : undefined,
+        datosTarjeta:
+          formData.pago === "TARJETA"
+            ? {
+                numero: tarjetaNumero,
+                titular: tarjetaTitular,
+                vencimiento: tarjetaVence,
+              }
+            : undefined,
         comprobanteUrl: comprobanteSubidoUrl,
         items: items.map((i) => ({
           id: i.id,
@@ -673,7 +842,7 @@ export default function CheckoutPage() {
                 </div>
               )}
 
-              {/* Opción 2: Tarjeta Débito / Crédito */}
+              {/* Opción 2: Tarjeta de Débito */}
               <label
                 onClick={() => setFormData((prev) => ({ ...prev, pago: "TARJETA" }))}
                 className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all ${
@@ -691,10 +860,10 @@ export default function CheckoutPage() {
                 />
                 <div className="space-y-0.5">
                   <span className="font-bold text-slate-900 dark:text-white block">
-                    Tarjeta de Débito o Crédito (Banco / Mercado Pago)
+                    Tarjeta de Débito
                   </span>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Pago 100% online y seguro.
+                    Pago 100% online y seguro en una sola operación por el total.
                   </p>
                 </div>
               </label>
@@ -703,152 +872,199 @@ export default function CheckoutPage() {
                 <div className="bg-slate-50 dark:bg-[#141519] border border-slate-200 dark:border-[#26272e] rounded-xl p-4 space-y-4 ml-2 mr-2">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 dark:border-[#26272e] pb-2">
                     <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5 text-xs">
-                      <CreditCard className="w-4 h-4 text-brand" /> Pago con Tarjeta de Débito o Crédito
+                      <CreditCard className="w-4 h-4 text-brand" /> Pago con Tarjeta de Débito
                     </span>
-                    <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Operación online protegida
+                    <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                      1 pago de {formatPrice(totalConEnvio)}
                     </span>
                   </div>
 
-                  {/* Selector de Cuotas */}
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1.5">
-                      Seleccioná el plan de cuotas:
-                    </label>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setTarjetaCuotas(1)}
-                        className={`p-2.5 rounded-lg border text-left transition-all ${
-                          tarjetaCuotas === 1
-                            ? "border-brand bg-brand/10 text-brand font-bold"
-                            : "border-slate-200 dark:border-[#26272e] bg-white dark:bg-[#0f1012] text-slate-700 dark:text-[#b8b9c0]"
-                        }`}
-                      >
-                        <div className="text-xs font-bold">1 pago</div>
-                        <div className="text-[11px] font-extrabold">{formatPrice(totalConEnvio)}</div>
-                        <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">Sin recargo</div>
-                      </button>
-
-                      {financiacion.habilitadas ? (
-                        <button
-                          type="button"
-                          onClick={() => setTarjetaCuotas(financiacion.cuotas)}
-                          className={`p-2.5 rounded-lg border text-left transition-all ${
-                            tarjetaCuotas === financiacion.cuotas
-                              ? "border-brand bg-brand/10 text-brand font-bold"
-                              : "border-slate-200 dark:border-[#26272e] bg-white dark:bg-[#0f1012] text-slate-700 dark:text-[#b8b9c0]"
+                  {/* Formulario de tarjeta con validaciones en tiempo real */}
+                  <div className="space-y-3 text-xs pt-1">
+                    {/* Número de Tarjeta */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[11px] font-semibold text-slate-600 dark:text-[#9a9ba3]">
+                          Número de Tarjeta <span className="text-red-500">*</span>
+                        </span>
+                        {marcaDetectada.id !== "generica" && (
+                          <span
+                            className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded border tracking-wider transition-all ${marcaDetectada.colorBadge}`}
+                          >
+                            {marcaDetectada.nombre}
+                          </span>
+                        )}
+                      </div>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          name="numero-tarjeta"
+                          autoComplete="cc-number"
+                          placeholder={marcaDetectada.placeholder}
+                          value={tarjetaNumero}
+                          onChange={handleNumeroTarjetaChange}
+                          onBlur={() => handleBlurField("numero")}
+                          maxLength={marcaDetectada.maxDigitos + 4}
+                          className={`w-full rounded-xl border bg-white dark:bg-[#0f1012] px-3 py-2 text-xs text-slate-900 dark:text-white outline-none font-mono transition-colors ${
+                            tarjetaErrores.numero && tarjetaTouched.numero
+                              ? "border-red-500 focus:border-red-500"
+                              : tarjetaTouched.numero && !tarjetaErrores.numero && tarjetaNumero.replace(/\D/g, "").length >= 13
+                              ? "border-emerald-500 focus:border-emerald-500"
+                              : "border-slate-300 dark:border-[#35363d] focus:border-brand"
                           }`}
-                        >
-                          <div className="text-xs font-bold">{financiacion.cuotas} cuotas</div>
-                          <div className="text-[11px] font-extrabold">{formatPrice(financiacion.valorCuota)} / mes</div>
-                          <div className={`text-[10px] font-semibold ${financiacion.sinInteres ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
-                            {financiacion.sinInteres ? "Sin interés" : `Cuotas fijas (+${financiacion.recargoPorcentaje}%)`}
-                          </div>
-                        </button>
-                      ) : (
-                        <div className="p-2.5 rounded-lg border border-slate-200 dark:border-[#26272e] bg-slate-100/60 dark:bg-[#0f1012] text-slate-500 text-[11px] flex items-center justify-center text-center">
-                          Cuotas financiadas pausadas
-                        </div>
+                        />
+                        {tarjetaTouched.numero && !tarjetaErrores.numero && tarjetaNumero.replace(/\D/g, "").length >= 13 && (
+                          <Check className="w-4 h-4 text-emerald-500 absolute right-3 top-2.5" />
+                        )}
+                      </div>
+                      {tarjetaErrores.numero && tarjetaTouched.numero && (
+                        <p className="text-[11px] text-red-500 mt-1 flex items-center gap-1 animate-in fade-in">
+                          <AlertCircle className="w-3 h-3 shrink-0" />
+                          <span>{tarjetaErrores.numero}</span>
+                        </p>
                       )}
                     </div>
-                  </div>
 
-                  {/* Formulario de tarjeta simulada */}
-                  <div className="space-y-2.5 text-xs">
+                    {/* Nombre y Apellido del Titular */}
                     <div>
                       <span className="text-[11px] font-semibold text-slate-600 dark:text-[#9a9ba3] block mb-1">
-                        Número de Tarjeta
+                        Nombre y Apellido (Como figura en el plástico) <span className="text-red-500">*</span>
                       </span>
                       <input
                         type="text"
-                        placeholder="•••• •••• •••• ••••"
-                        value={tarjetaNumero}
-                        onChange={(e) => setTarjetaNumero(e.target.value)}
-                        className="w-full rounded-xl border border-slate-300 dark:border-[#35363d] bg-white dark:bg-[#0f1012] px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-brand font-mono"
-                      />
-                    </div>
-                    <div>
-                      <span className="text-[11px] font-semibold text-slate-600 dark:text-[#9a9ba3] block mb-1">
-                        Nombre y Apellido (Como figura en el plástico)
-                      </span>
-                      <input
-                        type="text"
+                        name="titular-tarjeta"
+                        autoComplete="cc-name"
                         placeholder="Ej: CARLOS LOPEZ"
                         value={tarjetaTitular}
-                        onChange={(e) => setTarjetaTitular(e.target.value.toUpperCase())}
-                        className="w-full rounded-xl border border-slate-300 dark:border-[#35363d] bg-white dark:bg-[#0f1012] px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-brand uppercase"
+                        onChange={handleTitularChange}
+                        onBlur={() => handleBlurField("titular")}
+                        className={`w-full rounded-xl border bg-white dark:bg-[#0f1012] px-3 py-2 text-xs text-slate-900 dark:text-white outline-none uppercase transition-colors ${
+                          tarjetaErrores.titular && tarjetaTouched.titular
+                            ? "border-red-500 focus:border-red-500"
+                            : tarjetaTouched.titular && !tarjetaErrores.titular && tarjetaTitular.length >= 3
+                            ? "border-emerald-500 focus:border-emerald-500"
+                            : "border-slate-300 dark:border-[#35363d] focus:border-brand"
+                        }`}
                       />
+                      {tarjetaErrores.titular && tarjetaTouched.titular && (
+                        <p className="text-[11px] text-red-500 mt-1 flex items-center gap-1 animate-in fade-in">
+                          <AlertCircle className="w-3 h-3 shrink-0" />
+                          <span>{tarjetaErrores.titular}</span>
+                        </p>
+                      )}
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
+
+                    {/* Vencimiento y CVV */}
+                    <div className="grid grid-cols-2 gap-3">
                       <div>
                         <span className="text-[11px] font-semibold text-slate-600 dark:text-[#9a9ba3] block mb-1">
-                          Vencimiento
+                          Vencimiento (MM/AA) <span className="text-red-500">*</span>
                         </span>
                         <input
                           type="text"
+                          name="vencimiento-tarjeta"
+                          autoComplete="cc-exp"
                           placeholder="MM/AA"
+                          maxLength={5}
                           value={tarjetaVence}
-                          onChange={(e) => setTarjetaVence(e.target.value)}
-                          className="w-full rounded-xl border border-slate-300 dark:border-[#35363d] bg-white dark:bg-[#0f1012] px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-brand font-mono text-center"
+                          onChange={handleVencimientoChange}
+                          onBlur={() => handleBlurField("vencimiento")}
+                          className={`w-full rounded-xl border bg-white dark:bg-[#0f1012] px-3 py-2 text-xs text-slate-900 dark:text-white outline-none font-mono text-center transition-colors ${
+                            tarjetaErrores.vencimiento && tarjetaTouched.vencimiento
+                              ? "border-red-500 focus:border-red-500"
+                              : tarjetaTouched.vencimiento && !tarjetaErrores.vencimiento && tarjetaVence.length === 5
+                              ? "border-emerald-500 focus:border-emerald-500"
+                              : "border-slate-300 dark:border-[#35363d] focus:border-brand"
+                          }`}
                         />
+                        {tarjetaErrores.vencimiento && tarjetaTouched.vencimiento && (
+                          <p className="text-[11px] text-red-500 mt-1 flex items-center gap-1 animate-in fade-in">
+                            <AlertCircle className="w-3 h-3 shrink-0" />
+                            <span>{tarjetaErrores.vencimiento}</span>
+                          </p>
+                        )}
                       </div>
+
                       <div>
-                        <span className="text-[11px] font-semibold text-slate-600 dark:text-[#9a9ba3] block mb-1">
-                          Código de Seguridad
-                        </span>
-                        <input
-                          type="password"
-                          maxLength={4}
-                          placeholder="•••"
-                          value={tarjetaCvv}
-                          onChange={(e) => setTarjetaCvv(e.target.value)}
-                          className="w-full rounded-xl border border-slate-300 dark:border-[#35363d] bg-white dark:bg-[#0f1012] px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-brand font-mono text-center"
-                        />
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[11px] font-semibold text-slate-600 dark:text-[#9a9ba3]">
+                            CVV / CVC <span className="text-red-500">*</span>
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {marcaDetectada.id === "amex" ? "4 dígitos" : "3 dígitos"}
+                          </span>
+                        </div>
+                        <div className="relative">
+                          <input
+                            type={mostrarCvv ? "text" : "password"}
+                            name="cvv-tarjeta"
+                            autoComplete="cc-csc"
+                            maxLength={marcaDetectada.id === "amex" ? 4 : 3}
+                            placeholder={marcaDetectada.id === "amex" ? "••••" : "•••"}
+                            value={tarjetaCvv}
+                            onChange={handleCvvChange}
+                            onBlur={() => handleBlurField("cvv")}
+                            className={`w-full rounded-xl border bg-white dark:bg-[#0f1012] pl-3 pr-9 py-2 text-xs text-slate-900 dark:text-white outline-none font-mono text-center transition-colors ${
+                              tarjetaErrores.cvv && tarjetaTouched.cvv
+                                ? "border-red-500 focus:border-red-500"
+                                : tarjetaTouched.cvv && !tarjetaErrores.cvv && tarjetaCvv.length >= 3
+                                ? "border-emerald-500 focus:border-emerald-500"
+                                : "border-slate-300 dark:border-[#35363d] focus:border-brand"
+                            }`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setMostrarCvv((prev) => !prev)}
+                            title={mostrarCvv ? "Ocultar código de seguridad" : "Mostrar código de seguridad"}
+                            className="absolute right-2 top-2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer"
+                          >
+                            {mostrarCvv ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                        {tarjetaErrores.cvv && tarjetaTouched.cvv && (
+                          <p className="text-[11px] text-red-500 mt-1 flex items-center gap-1 animate-in fade-in">
+                            <AlertCircle className="w-3 h-3 shrink-0" />
+                            <span>{tarjetaErrores.cvv}</span>
+                          </p>
+                        )}
                       </div>
                     </div>
-                  </div>
-
-                  <div className="rounded-lg bg-blue-500/10 border border-blue-500/20 p-2.5 text-[11px] text-blue-700 dark:text-blue-300 flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-blue-500 shrink-0" />
-                    <span>
-                      <strong>Modo Simulación:</strong> El pago se aprobará en línea instantáneamente y tu pedido pasará directamente a <strong>CONFIRMADO</strong> en el panel de Chopper.
-                    </span>
                   </div>
                 </div>
               )}
 
-              {/* Opción 3: Efectivo en mostrador (Orden de Compra y reserva) */}
-              <label
-                onClick={() => {
-                  setFormData((prev) => ({ ...prev, pago: "EFECTIVO_LOCAL" }));
-                  setModalidadEntrega("RETIRO_LOCAL");
-                }}
-                className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all ${
-                  formData.pago === "EFECTIVO_LOCAL"
-                    ? "border-amber-500 bg-amber-500/10 shadow-sm"
-                    : "border-slate-200 dark:border-line hover:border-slate-300 dark:hover:border-slate-700"
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="pago"
-                  checked={formData.pago === "EFECTIVO_LOCAL"}
-                  onChange={() => {}}
-                  className="mt-0.5 accent-amber-500"
-                />
-                <div className="space-y-0.5">
-                  <span className="font-bold text-slate-900 dark:text-white block">
-                    💵 Efectivo en el Local (Orden de Compra / Reserva presencial)
-                  </span>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Generás tu <strong>Orden de Compra</strong> y tus repuestos quedan reservados en estantería. Te acercás a {config.direccion || "Av. Roque Sáenz Peña 1500"}, pagás en efectivo y listo.
-                  </p>
-                  <p className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold pt-0.5">
-                    ⚠️ Si el cliente no se acerca al local a pagar y retirar, la orden de compra se cancela automáticamente.
-                  </p>
-                </div>
-              </label>
+              {/* Opción 3: Efectivo en mostrador (Orden de Compra y reserva) - Exclusivo para Retiro en el Local */}
+              {modalidadEntrega === "RETIRO_LOCAL" && (
+                <label
+                  onClick={() => {
+                    setFormData((prev) => ({ ...prev, pago: "EFECTIVO_LOCAL" }));
+                  }}
+                  className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all ${
+                    formData.pago === "EFECTIVO_LOCAL"
+                      ? "border-amber-500 bg-amber-500/10 shadow-sm"
+                      : "border-slate-200 dark:border-line hover:border-slate-300 dark:hover:border-slate-700"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="pago"
+                    checked={formData.pago === "EFECTIVO_LOCAL"}
+                    onChange={() => {}}
+                    className="mt-0.5 accent-amber-500"
+                  />
+                  <div className="space-y-0.5">
+                    <span className="font-bold text-slate-900 dark:text-white block">
+                      💵 Efectivo en el Local (Orden de Compra / Reserva presencial)
+                    </span>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Generás tu <strong>Orden de Compra</strong> y tus repuestos quedan reservados en estantería. Te acercás a {config.direccion || "Av. Roque Sáenz Peña 1500"}, pagás en efectivo y listo.
+                    </p>
+                    <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium pt-0.5">
+                      Tu pedido quedará reservado para retirar en el local. Deberás abonar en efectivo al momento del retiro.
+                    </p>
+                  </div>
+                </label>
+              )}
             </div>
           </div>
         </div>
@@ -894,7 +1110,16 @@ export default function CheckoutPage() {
 
             <div className="flex justify-between border-t border-slate-200 dark:border-line pt-2 text-base font-black text-slate-900 dark:text-white">
               <span>Total a pagar</span>
-              <span className="text-brand">{formatPrice(totalConEnvio)}</span>
+              <div className="text-right">
+                <span className="text-brand">
+                  {formatPrice(totalConEnvio)}
+                </span>
+                {formData.pago === "TARJETA" && (
+                  <span className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                    1 solo pago (Tarjeta de Débito)
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 

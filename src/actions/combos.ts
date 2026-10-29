@@ -1,5 +1,6 @@
 "use server";
 
+import { cache } from "react";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { COMBOS_DATA } from "@/data/combos";
@@ -11,6 +12,10 @@ import {
   serializeProductMetadata,
   ProductSpec,
 } from "@/lib/productMetadata";
+import {
+  resolverCompatibilidadProducto,
+  resolverCompatibilidadCombo,
+} from "@/lib/motoCompatibility";
 
 export type { ProductSpec };
 
@@ -199,7 +204,7 @@ function mapDbComboToDTO(
     const categoriaNombre = prod?.categoria?.nombre || null;
     const prodMeta = prod?.ecommerce?.descripcion
       ? parseProductMetadata(prod.ecommerce.descripcion)
-      : { texto: null, especificaciones: [], motosCompatibles: [] };
+      : { texto: null, universal: false, especificaciones: [], motosCompatibles: [] };
 
     const baseSpecs: ProductSpec[] = [];
     if (effectiveMarca) {
@@ -219,7 +224,13 @@ function mapDbComboToDTO(
     });
 
     const allSpecs = [...baseSpecs, ...customSpecs];
-    const prodMotos = prodMeta.motosCompatibles || [];
+    const prodCompat = resolverCompatibilidadProducto({
+      nombre: prod?.nombre || "",
+      categoriaNombre: categoriaNombre || undefined,
+      motosCompatibles: prodMeta.motosCompatibles,
+      universal: prodMeta.universal,
+    });
+    const prodMotos = prodCompat.motos || [];
 
     if (allSpecs.length > 0 && prod) {
       especificacionesComponentes.push({
@@ -261,6 +272,16 @@ function mapDbComboToDTO(
     };
   });
 
+  const resCombo = resolverCompatibilidadCombo({
+    motosCompatibles: meta.motosCompatibles,
+    componentesMotos: motosCompatiblesComponentes,
+  });
+
+  const finalComboMotos =
+    resCombo.tipo === "UNIFICADO" && resCombo.motosKit.length > 0
+      ? resCombo.motosKit
+      : meta.motosCompatibles || [];
+
   return {
     id: c.id,
     nombre: c.nombre,
@@ -280,7 +301,7 @@ function mapDbComboToDTO(
     stockCalculado,
     items: itemsMapped,
     especificaciones: meta.especificaciones || [],
-    motosCompatibles: meta.motosCompatibles || [],
+    motosCompatibles: finalComboMotos,
     especificacionesComponentes,
     motosCompatiblesComponentes,
   };
@@ -289,7 +310,7 @@ function mapDbComboToDTO(
 /**
  * Obtiene los combos activos y públicos para la tienda
  */
-export async function getPublicCombosAction(): Promise<ComboDTO[]> {
+export const getPublicCombosAction = cache(async (): Promise<ComboDTO[]> => {
   try {
     const [combos, etiquetas] = await Promise.all([
       prisma.comboEcommerce.findMany({
@@ -305,7 +326,7 @@ export async function getPublicCombosAction(): Promise<ComboDTO[]> {
     console.error("Error al obtener combos públicos:", error);
     return [];
   }
-}
+});
 
 /**
  * Obtiene un combo por su ID para la página de detalle

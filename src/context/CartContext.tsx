@@ -511,9 +511,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       pedidos.length > 0 ? Math.max(...pedidos.map((p) => p.numero)) + 1 : 1001;
 
     const esEfectivo = datos.pago === "EFECTIVO_LOCAL" || datos.pago === "EFECTIVO";
-    const modEntrega: "RETIRO_LOCAL" | "MOTOMANDADO" = esEfectivo
-      ? "RETIRO_LOCAL"
-      : (datos.modalidadEntrega || "RETIRO_LOCAL");
+    if (datos.modalidadEntrega === "MOTOMANDADO" && esEfectivo) {
+      showToast("La modalidad Motomandado no admite pago en efectivo en el local.");
+      return null;
+    }
+    const modEntrega: "RETIRO_LOCAL" | "MOTOMANDADO" = datos.modalidadEntrega || "RETIRO_LOCAL";
 
     const costoEnvio = modEntrega === "MOTOMANDADO" ? 2500 : 0;
     const codigoTicket = esEfectivo ? `OC-${nextNumero}` : `TK-${nextNumero}`;

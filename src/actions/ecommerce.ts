@@ -1,10 +1,12 @@
 "use server";
 
+import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { COMBOS_DATA, COMBOS_CATEGORY_ID, COMBOS_CATEGORY_NAME } from "@/data/combos";
 import { getEtiquetasOfertaAction } from "@/actions/configuracion";
 import { formatBadgeWithEmoji } from "@/lib/etiquetas";
 import { ProductSpec, parseProductMetadata } from "@/lib/productMetadata";
+import { resolverCompatibilidadProducto } from "@/lib/motoCompatibility";
 
 export interface ProductItem {
   id: number;
@@ -39,7 +41,7 @@ export interface CategoryItem {
   count: number;
 }
 
-export async function getCategories(): Promise<CategoryItem[]> {
+export const getCategories = cache(async (): Promise<CategoryItem[]> => {
   try {
     const cats = await prisma.categoria.findMany({
       where: {
@@ -84,7 +86,7 @@ export async function getCategories(): Promise<CategoryItem[]> {
     console.error("Error fetching categories:", error);
     return [];
   }
-}
+});
 
 export async function getProducts(params?: {
   query?: string;
@@ -139,10 +141,28 @@ export async function getProducts(params?: {
       prisma.producto.findMany({
         where,
         take: params?.take,
-        include: {
+        select: {
+          id: true,
+          nombre: true,
+          marca: true,
+          codigo: true,
+          precioVenta: true,
+          cantidad: true,
+          imagen: true,
+          categoriaId: true,
           categoria: { select: { id: true, nombre: true } },
           marcaRelacionada: { select: { id: true, nombre: true } },
-          ecommerce: true,
+          ecommerce: {
+            select: {
+              publicadoOnline: true,
+              enOferta: true,
+              precioOferta: true,
+              destacado: true,
+              recomendado: true,
+              badgePromo: true,
+              descripcion: true,
+            },
+          },
         },
         orderBy: { nombre: "asc" },
       }),
@@ -185,6 +205,12 @@ export async function getProducts(params?: {
 
         const meta = parseProductMetadata(ecom?.descripcion);
         const nombreComercial = meta.tituloComercial?.trim() || p.nombre;
+        const compat = resolverCompatibilidadProducto({
+          nombre: p.nombre,
+          categoriaNombre: p.categoria?.nombre,
+          motosCompatibles: meta.motosCompatibles,
+          universal: meta.universal,
+        });
 
         return {
           id: p.id,
@@ -201,9 +227,9 @@ export async function getProducts(params?: {
           descuentoPorcentaje,
           badgePromo,
           descripcion: meta.texto || null,
-          universal: Boolean(meta.universal),
+          universal: compat.universal,
           especificaciones: meta.especificaciones,
-          motosCompatibles: meta.motosCompatibles,
+          motosCompatibles: compat.motos,
           destacado: Boolean(ecom?.destacado),
           recomendado: Boolean(ecom?.recomendado),
           publicadoOnline: ecom ? ecom.publicadoOnline : true,
@@ -223,10 +249,29 @@ export async function getProductById(id: number): Promise<ProductItem | null> {
     const [p, etiquetas] = await Promise.all([
       prisma.producto.findUnique({
         where: { id },
-        include: {
+        select: {
+          id: true,
+          nombre: true,
+          marca: true,
+          codigo: true,
+          precioVenta: true,
+          cantidad: true,
+          imagen: true,
+          activo: true,
+          categoriaId: true,
           categoria: { select: { id: true, nombre: true } },
           marcaRelacionada: { select: { id: true, nombre: true } },
-          ecommerce: true,
+          ecommerce: {
+            select: {
+              publicadoOnline: true,
+              enOferta: true,
+              precioOferta: true,
+              destacado: true,
+              recomendado: true,
+              badgePromo: true,
+              descripcion: true,
+            },
+          },
         },
       }),
       getEtiquetasOfertaAction(),
@@ -260,6 +305,12 @@ export async function getProductById(id: number): Promise<ProductItem | null> {
 
       const meta = parseProductMetadata(ecom?.descripcion);
       const nombreComercial = meta.tituloComercial?.trim() || p.nombre;
+      const compat = resolverCompatibilidadProducto({
+        nombre: p.nombre,
+        categoriaNombre: p.categoria?.nombre,
+        motosCompatibles: meta.motosCompatibles,
+        universal: meta.universal,
+      });
 
       return {
         id: p.id,
@@ -276,9 +327,9 @@ export async function getProductById(id: number): Promise<ProductItem | null> {
         descuentoPorcentaje,
         badgePromo,
         descripcion: meta.texto || null,
-        universal: Boolean(meta.universal),
+        universal: compat.universal,
         especificaciones: meta.especificaciones,
-        motosCompatibles: meta.motosCompatibles,
+        motosCompatibles: compat.motos,
         destacado: Boolean(ecom?.destacado),
         recomendado: Boolean(ecom?.recomendado),
         publicadoOnline: ecom ? ecom.publicadoOnline : true,
