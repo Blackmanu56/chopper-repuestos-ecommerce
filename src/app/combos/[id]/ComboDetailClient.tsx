@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
+import { getCatalogImageUrl } from "@/lib/storage-catalog";
 import { useRouter } from "next/navigation";
 import { ComboDTO } from "@/actions/combos";
 import { useCart } from "@/context/CartContext";
@@ -97,7 +98,7 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
       if (it.producto?.imagen && !gallery.some((g) => g.url === it.producto.imagen)) {
         gallery.push({
           id: `item-img-${it.producto.id}`,
-          url: it.producto.imagen,
+          url: getCatalogImageUrl(it.producto.imagen),
           label: it.producto.nombre || `Repuesto ${idx + 1}`,
         });
       }
@@ -682,7 +683,7 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
                       <div className="relative h-16 w-16 shrink-0 rounded-xl bg-white dark:bg-card border border-slate-100 dark:border-line/60 p-1.5 flex items-center justify-center overflow-hidden">
                         {it.producto.imagen ? (
                           <img
-                            src={it.producto.imagen}
+                            src={getCatalogImageUrl(it.producto.imagen)}
                             alt={it.producto.nombre}
                             className="h-full w-full object-contain"
                           />
@@ -772,7 +773,7 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
                           <div className="flex items-center gap-2.5">
                             {cs.imagen ? (
                               <img
-                                src={cs.imagen}
+                                src={getCatalogImageUrl(cs.imagen)}
                                 alt={cs.productoNombre}
                                 className="h-9 w-9 object-contain rounded-lg bg-white dark:bg-card border border-slate-200 dark:border-line p-0.5"
                               />
@@ -1095,7 +1096,7 @@ export default function ComboDetailClient({ combo, otherCombos }: ComboDetailCli
                         </div>
                       )}
                       <img
-                        src={c.imagen || "/combos/combo-service-motul.jpg"}
+                        src={getCatalogImageUrl(c.imagen) || "/combos/combo-service-motul.jpg"}
                         alt={c.nombre}
                         className="h-full w-full object-contain group-hover:scale-105 transition-transform"
                       />

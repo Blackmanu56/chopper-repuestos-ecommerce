@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
+import { getCatalogImageUrl } from "@/lib/storage-catalog";
 import { ProductItem, CategoryItem } from "@/actions/ecommerce";
 import { useCart } from "@/context/CartContext";
 import { useConfig } from "@/context/ConfigContext";
@@ -487,7 +488,7 @@ export default function OfertasClient({
                       >
                         {p.imagen ? (
                           <img
-                            src={p.imagen}
+                            src={getCatalogImageUrl(p.imagen)}
                             alt={p.nombre}
                             className="h-full w-full object-contain group-hover:scale-105 transition-transform"
                           />

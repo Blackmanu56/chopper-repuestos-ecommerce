@@ -34,6 +34,13 @@ import {
   validarVencimiento,
   enmascararNumeroTarjeta,
 } from "@/lib/cardValidation";
+import {
+  uploadReceiptImage,
+  rollbackReceiptUpload,
+  downloadReceiptBuffer,
+  resolverUrlComprobanteParaVista,
+  MAX_RECEIPT_FILE_SIZE,
+} from "@/lib/storage-service";
 
 export interface DatosTarjetaSimuladaInput {
   numero?: string;
@@ -179,7 +186,8 @@ async function verifyStaff(
 }
 
 /**
- * Elimina un comprobante temporal si el pedido falló antes de confirmarse, evitando archivos huérfanos en disco
+ * Elimina un comprobante temporal si el pedido falló antes de confirmarse,
+ * ejecutando rollback compensatorio en Supabase Storage y limpieza de archivos locales residuales.
  */
 export async function limpiarComprobanteHuerfanoAction(
   comprobanteUrl?: string | null
@@ -192,8 +200,16 @@ export async function limpiarComprobanteHuerfanoAction(
     if (!basename.startsWith("comprobante-checkout-")) {
       return { success: false };
     }
+
+    // Rollback en Supabase Storage
+    await rollbackReceiptUpload(`pedidos/${basename}`);
+
+    // Limpieza preventiva si quedara algún archivo residual en disco
     const fullPath = path.join(process.cwd(), "public", "uploads", "comprobantes", basename);
-    await fs.unlink(fullPath);
+    try {
+      await fs.unlink(fullPath);
+    } catch {}
+
     return { success: true };
   } catch (e) {
     return { success: false };
@@ -964,7 +980,7 @@ function mapPedidoToDTO(p: {
     estado: p.estado,
     estadoPago: p.estadoPago || "PENDIENTE",
     fechaPago: p.fechaPago || null,
-    comprobanteUrl: p.comprobanteUrl,
+    comprobanteUrl: resolverUrlComprobanteParaVista(p.comprobanteUrl),
     preparadorUsuarioId: p.preparadorUsuarioId,
     preparadorNombre: p.preparadorNombre,
     fechaPreparacion: p.fechaPreparacion,
@@ -1739,7 +1755,8 @@ export async function getStaffPreparadoresAction(_ignoredUserId?: number): Promi
 }
 
 /**
- * Sube el archivo de comprobante de transferencia durante el checkout validando tamaño, extensión y contenido binario real
+ * Sube el archivo de comprobante de transferencia durante el checkout validando tamaño, extensión y contenido binario real,
+ * persistiendo directamente en el bucket privado comprobantes-chopper de Supabase Storage.
  */
 export async function subirComprobanteDirectoAction(
   formData: FormData
@@ -1762,25 +1779,27 @@ export async function subirComprobanteDirectoAction(
     const file = formData.get("comprobante") as File | null;
     const validation = await validateUploadedFile(file, {
       allowPdf: true,
-      allowSvg: false,
+      allowSvg: true,
+      maxSizeBytes: MAX_RECEIPT_FILE_SIZE,
     });
 
     if (!validation.valid || !validation.buffer || !validation.ext) {
       return {
         success: false,
-        error: validation.error || "Formato no válido. Adjuntá JPG, PNG, WEBP o PDF (máx. 5 MB).",
+        error: validation.error || "Formato no válido. Adjuntá JPG, PNG, WEBP, PDF o SVG (máx. 10 MB).",
       };
     }
 
-    const uploadsDir = path.join(process.cwd(), "public", "uploads", "comprobantes");
-    await fs.mkdir(uploadsDir, { recursive: true });
+    // Subida directa a Supabase Storage (bucket privado 'comprobantes-chopper')
+    const uploadRes = await uploadReceiptImage(validation.buffer, file?.name);
+    if (!uploadRes.success || !uploadRes.objectPath) {
+      return {
+        success: false,
+        error: uploadRes.error || "No se pudo subir el comprobante a Supabase Storage.",
+      };
+    }
 
-    const filename = `comprobante-checkout-${Date.now()}-${Math.random().toString(36).substring(2, 8)}${validation.ext}`;
-    const filePath = path.join(uploadsDir, filename);
-    await fs.writeFile(filePath, validation.buffer);
-
-    const comprobanteUrl = `/uploads/comprobantes/${filename}`;
-    return { success: true, comprobanteUrl };
+    return { success: true, comprobanteUrl: uploadRes.objectPath };
   } catch (error) {
     console.error("Error al subir comprobante directo:", error);
     return { success: false, error: "Error al procesar el comprobante." };
@@ -1788,7 +1807,8 @@ export async function subirComprobanteDirectoAction(
 }
 
 /**
- * Sube el comprobante de transferencia y lo asocia al pedido verificando sesión, propiedad del pedido y contenido del archivo
+ * Sube el comprobante de transferencia y lo asocia al pedido verificando sesión, propiedad del pedido y contenido del archivo.
+ * Incluye rollback compensatorio en Supabase Storage si la actualización en PostgreSQL fallase.
  */
 export async function subirComprobantePedidoAction(
   pedidoNumero: number,
@@ -1855,32 +1875,42 @@ export async function subirComprobantePedidoAction(
     const file = formData.get("comprobante") as File | null;
     const validation = await validateUploadedFile(file, {
       allowPdf: true,
-      allowSvg: false,
+      allowSvg: true,
+      maxSizeBytes: MAX_RECEIPT_FILE_SIZE,
     });
 
     if (!validation.valid || !validation.buffer || !validation.ext) {
       return {
         success: false,
-        error: validation.error || "Formato no válido. Adjuntá JPG, PNG, WEBP o PDF (máx. 5 MB).",
+        error: validation.error || "Formato no válido. Adjuntá JPG, PNG, WEBP, PDF o SVG (máx. 10 MB).",
       };
     }
 
-    const uploadsDir = path.join(process.cwd(), "public", "uploads", "comprobantes");
-    await fs.mkdir(uploadsDir, { recursive: true });
+    // Subida directa a Supabase Storage (bucket privado 'comprobantes-chopper')
+    const uploadRes = await uploadReceiptImage(validation.buffer, file?.name);
+    if (!uploadRes.success || !uploadRes.objectPath) {
+      return {
+        success: false,
+        error: uploadRes.error || "No se pudo subir el comprobante a Supabase Storage.",
+      };
+    }
 
-    const filename = `comprobante-${pedidoNumero}-${Date.now()}${validation.ext}`;
-    const filePath = path.join(uploadsDir, filename);
-    await fs.writeFile(filePath, validation.buffer);
+    const comprobanteUrl = uploadRes.objectPath;
 
-    const comprobanteUrl = `/uploads/comprobantes/${filename}`;
-
-    await prisma.pedidoEcommerce.update({
-      where: { numero: pedidoNumero },
-      data: {
-        comprobanteUrl,
-        notas: "Comprobante de transferencia cargado. Pendiente de verificación por Ventas.",
-      },
-    });
+    try {
+      await prisma.pedidoEcommerce.update({
+        where: { numero: pedidoNumero },
+        data: {
+          comprobanteUrl,
+          notas: "Comprobante de transferencia cargado. Pendiente de verificación por Ventas.",
+        },
+      });
+    } catch (dbError) {
+      // Rollback compensatorio inmediato en Supabase Storage
+      console.warn("Fallo en actualización de base de datos; ejecutando rollback en Storage:", dbError);
+      await rollbackReceiptUpload(comprobanteUrl);
+      throw dbError;
+    }
 
     crearNotificacionStaffInternal({
       tipo: "NUEVO_PEDIDO_PENDIENTE_PAGO",
@@ -1913,7 +1943,10 @@ export async function subirComprobantePedidoAction(
       revalidatePath("/panel");
     } catch {}
 
-    return { success: true, comprobanteUrl };
+    return {
+      success: true,
+      comprobanteUrl: resolverUrlComprobanteParaVista(comprobanteUrl) || comprobanteUrl,
+    };
   } catch (error) {
     console.error("Error al subir comprobante:", error);
     return { success: false, error: "Error al procesar el comprobante." };
@@ -1921,7 +1954,7 @@ export async function subirComprobantePedidoAction(
 }
 
 /**
- * Obtiene y valida metadatos técnicos y existencia física del comprobante en disco
+ * Obtiene y valida metadatos técnicos y existencia del comprobante en Supabase Storage o almacenamiento local
  */
 export async function obtenerInfoComprobanteAction(
   comprobanteUrl: string,
@@ -1979,44 +2012,58 @@ export async function obtenerInfoComprobanteAction(
       }
     }
 
-    // 2. Archivos locales en el servidor
+    // 2. Archivos en Supabase Storage o local
     const safeFile = path.basename(cleanUrl);
     const ext = path.extname(safeFile).toLowerCase();
     const isPdf = ext === ".pdf";
     const isSvg = ext === ".svg";
     const isImage = ext === ".jpg" || ext === ".jpeg" || ext === ".png" || ext === ".webp" || isSvg;
 
-    let localPath = path.join(process.cwd(), "public", "uploads", "comprobantes", safeFile);
-    let stats: any = null;
+    let bytes = 0;
+    let fileFound = false;
+    let mimeType = "application/octet-stream";
 
-    try {
-      stats = await fs.stat(localPath);
-    } catch {
-      // Fallback a public/comprobantes (legacy)
-      const legacyPath = path.join(process.cwd(), "public", "comprobantes", safeFile);
+    // Intentar primero desde Supabase Storage
+    const storageRes = await downloadReceiptBuffer(`pedidos/${safeFile}`);
+    if (storageRes.success && storageRes.buffer) {
+      fileFound = true;
+      bytes = storageRes.buffer.length;
+      if (storageRes.contentType && storageRes.contentType !== "application/octet-stream") {
+        mimeType = storageRes.contentType;
+      }
+    } else {
+      // Fallback a archivos locales legacy
+      const localPath = path.join(process.cwd(), "public", "uploads", "comprobantes", safeFile);
       try {
-        stats = await fs.stat(legacyPath);
-        localPath = legacyPath;
+        const stats = await fs.stat(localPath);
+        bytes = stats.size;
+        fileFound = true;
       } catch {
-        stats = null;
+        const legacyPath = path.join(process.cwd(), "public", "comprobantes", safeFile);
+        try {
+          const stats = await fs.stat(legacyPath);
+          bytes = stats.size;
+          fileFound = true;
+        } catch {
+          fileFound = false;
+        }
       }
     }
 
-    if (!stats) {
+    if (!fileFound) {
       return {
         success: true,
         info: {
           existe: false,
-          url: cleanUrl,
+          url: `/api/comprobantes/${safeFile}`,
           nombreArchivo: safeFile,
           esPdf: isPdf,
           esImagen: isImage,
-          error: `El archivo "${safeFile}" no fue encontrado en el disco del servidor.`,
+          error: `El archivo "${safeFile}" no fue encontrado en el almacenamiento del sistema.`,
         },
       };
     }
 
-    const bytes = stats.size;
     let tamanoFormateado = `${bytes} B`;
     if (bytes >= 1024 * 1024) {
       tamanoFormateado = `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
@@ -2024,18 +2071,19 @@ export async function obtenerInfoComprobanteAction(
       tamanoFormateado = `${(bytes / 1024).toFixed(1)} KB`;
     }
 
-    let mimeType = "application/octet-stream";
-    if (isPdf) mimeType = "application/pdf";
-    else if (ext === ".jpg" || ext === ".jpeg") mimeType = "image/jpeg";
-    else if (ext === ".png") mimeType = "image/png";
-    else if (ext === ".webp") mimeType = "image/webp";
-    else if (ext === ".svg") mimeType = "image/svg+xml";
+    if (mimeType === "application/octet-stream") {
+      if (isPdf) mimeType = "application/pdf";
+      else if (ext === ".jpg" || ext === ".jpeg") mimeType = "image/jpeg";
+      else if (ext === ".png") mimeType = "image/png";
+      else if (ext === ".webp") mimeType = "image/webp";
+      else if (ext === ".svg") mimeType = "image/svg+xml";
+    }
 
     return {
       success: true,
       info: {
         existe: true,
-        url: cleanUrl,
+        url: `/api/comprobantes/${safeFile}`,
         nombreArchivo: safeFile,
         esPdf: isPdf,
         esImagen: isImage,

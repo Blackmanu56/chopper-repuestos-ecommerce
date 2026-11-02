@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import { getCatalogImageUrl } from "@/lib/storage-catalog";
 import { useRouter } from "next/navigation";
 import { useCart } from "@/context/CartContext";
 import { validarPreciosServerAction } from "@/actions/commercial";
@@ -320,7 +321,7 @@ export default function CarritoPage() {
                 >
                   {/* Foto del Producto / Combo (sin logos de marca) */}
                   <div className="relative flex h-20 w-20 sm:h-24 sm:w-24 shrink-0 items-center justify-center rounded-xl bg-white dark:bg-surface border border-slate-200 dark:border-line/70 overflow-hidden">
-                    <ProductImageThumb src={item.imagen} alt={item.nombre} />
+                    <ProductImageThumb src={getCatalogImageUrl(item.imagen)} alt={item.nombre} />
                     {item.esCombo && (
                       <span className="absolute top-1 left-1 rounded bg-amber-500 px-1.5 py-0.2 text-[9px] font-black uppercase text-slate-950">
                         Combo

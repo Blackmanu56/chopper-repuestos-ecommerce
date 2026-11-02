@@ -3,6 +3,7 @@
 import { cache } from "react";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
+import { getCatalogImageUrl } from "@/lib/storage-catalog";
 import { COMBOS_DATA } from "@/data/combos";
 import { getEtiquetasOfertaAction } from "@/actions/configuracion";
 import { formatBadgeWithEmoji } from "@/lib/etiquetas";
@@ -192,7 +193,7 @@ function mapDbComboToDTO(
     .split(",")
     .map((s: string) => s.trim())
     .filter(Boolean);
-  const imagenes = rawImages.length > 0 ? rawImages : ["/combos/combo-service-motul.jpg"];
+  const imagenes = (rawImages.length > 0 ? rawImages : ["/combos/combo-service-motul.jpg"]).map((img: string) => getCatalogImageUrl(img));
   const portada = imagenes[0];
 
   const especificacionesComponentes: ComponenteSpecsDTO[] = [];
@@ -239,7 +240,7 @@ function mapDbComboToDTO(
         marca: effectiveMarca,
         codigo: prod.codigo || null,
         cantidad: it.cantidad,
-        imagen: prod.imagen || null,
+        imagen: getCatalogImageUrl(prod.imagen) || null,
         specs: allSpecs,
       });
     }
@@ -265,7 +266,7 @@ function mapDbComboToDTO(
         categoriaNombre,
         precioVenta: prod?.precioVenta || 0,
         cantidad: prod?.cantidad || 0,
-        imagen: prod?.imagen || null,
+        imagen: getCatalogImageUrl(prod?.imagen) || null,
         especificaciones: allSpecs,
         motosCompatibles: prodMotos,
       },

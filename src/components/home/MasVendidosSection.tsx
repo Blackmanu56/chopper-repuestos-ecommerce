@@ -2,6 +2,7 @@
 
 import React, { useRef } from "react";
 import Link from "next/link";
+import { getCatalogImageUrl } from "@/lib/storage-catalog";
 import { ProductItem } from "@/actions/ecommerce";
 import { useCart } from "@/context/CartContext";
 import { useConfig } from "@/context/ConfigContext";
@@ -125,7 +126,7 @@ export default function MasVendidosSection({ products }: { products: ProductItem
               >
                 {prod.imagen ? (
                   <img
-                    src={prod.imagen}
+                    src={getCatalogImageUrl(prod.imagen)}
                     alt={prod.nombre}
                     loading="lazy"
                     decoding="async"

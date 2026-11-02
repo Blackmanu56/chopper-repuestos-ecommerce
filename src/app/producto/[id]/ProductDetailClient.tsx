@@ -2,6 +2,7 @@
 
 import React, { useState, useRef } from "react";
 import Link from "next/link";
+import { getCatalogImageUrl } from "@/lib/storage-catalog";
 import { useRouter } from "next/navigation";
 import { ProductItem } from "@/actions/ecommerce";
 import { parseMotoDetalle } from "@/lib/motoCompatibility";
@@ -44,7 +45,7 @@ export default function ProductDetailClient({
   const { config, shouldShowAhorroBadge } = useConfig();
   const router = useRouter();
 
-  const [activeImage, setActiveImage] = useState<string>(product.imagen || "");
+  const [activeImage, setActiveImage] = useState<string>(getCatalogImageUrl(product.imagen) || "");
   const [qty, setQty] = useState(1);
   const [activeTab, setActiveTab] = useState<"descripcion" | "specs" | "motos" | "compra_pagos">("descripcion");
   const [copied, setCopied] = useState(false);
@@ -77,7 +78,7 @@ export default function ProductDetailClient({
   // Galería basada exclusivamente en la imagen real del producto
   const getGalleryImages = () => {
     if (!product.imagen) return [];
-    return [{ id: 1, url: product.imagen, label: product.nombre }];
+    return [{ id: 1, url: getCatalogImageUrl(product.imagen), label: product.nombre }];
   };
 
   const galleryImages = getGalleryImages();
@@ -172,7 +173,7 @@ export default function ProductDetailClient({
           <div className="relative flex aspect-square w-full items-center justify-center rounded-2xl bg-white p-6 shadow-sm border border-line/60 overflow-hidden group">
             {activeImage || product.imagen ? (
               <img
-                src={activeImage || product.imagen || ""}
+                src={getCatalogImageUrl(activeImage || product.imagen || "")}
                 alt={product.nombre}
                 className="max-h-full max-w-full object-contain transition-transform duration-300 group-hover:scale-105"
               />
@@ -842,7 +843,7 @@ export default function ProductDetailClient({
                     >
                       {item.imagen ? (
                         <img
-                          src={item.imagen}
+                          src={getCatalogImageUrl(item.imagen)}
                           alt={item.nombre}
                           className="h-full w-full object-contain group-hover:scale-105 transition-transform"
                         />

@@ -2,6 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
+import { getCatalogImageUrl } from "@/lib/storage-catalog";
 import { ProductItem } from "@/actions/ecommerce";
 import { useCart } from "@/context/CartContext";
 import { useConfig } from "@/context/ConfigContext";
@@ -53,7 +54,7 @@ export default function ProductCard({ product }: { product: ProductItem }) {
         >
           {product.imagen ? (
             <img
-              src={product.imagen}
+              src={getCatalogImageUrl(product.imagen)}
               alt={product.nombre}
               className="h-full w-full object-contain p-2.5 transition-transform duration-300 group-hover/img:scale-108"
             />

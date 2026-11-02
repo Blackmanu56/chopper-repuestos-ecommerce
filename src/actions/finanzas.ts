@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireStaffSession } from "@/lib/session";
 import { registrarAuditoriaAction } from "@/actions/configuracion";
+import { resolverUrlComprobanteParaVista } from "@/lib/storage-service";
 import {
   ResumenFinanciero,
   OperacionFinanciera,
@@ -301,7 +302,7 @@ export async function getOperacionesFinancierasAction(filtros?: {
         costoEnvio: p.costoEnvio,
         estadoPedido: p.estado,
         estadoPago: p.estadoPago,
-        comprobanteUrl: p.comprobanteUrl,
+        comprobanteUrl: resolverUrlComprobanteParaVista(p.comprobanteUrl),
         confirmadoPor,
         modalidadEntrega: p.modalidadEntrega,
         reintegro: reintegroInfo,

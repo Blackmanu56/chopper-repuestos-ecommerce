@@ -21,9 +21,8 @@ import {
   SESSION_COOKIE_NAME,
 } from "@/lib/session";
 import { validateUploadedFile } from "@/lib/uploadValidation";
+import { uploadProfileImage, rollbackProfileUpload } from "@/lib/storage-service";
 
-const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads", "avatars");
-const SGI_UPLOAD_DIR = path.resolve(process.cwd(), "..", "sgi-repuestos", "public", "uploads", "avatars");
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 
 export interface AuthUserResponse {
@@ -1400,7 +1399,7 @@ export async function updateStaffProfileAction(
 }
 
 /**
- * Sube o reemplaza la foto de perfil del usuario autenticado (Staff o Cliente) en el disco y en PostgreSQL
+ * Sube o reemplaza la foto de perfil del usuario autenticado (Staff o Cliente) en Supabase Storage y PostgreSQL
  */
 export async function uploadStaffPhotoAction(
   _ignoredUserId: number,
@@ -1413,17 +1412,9 @@ export async function uploadStaffPhotoAction(
     }
 
     const file = formData.get("foto") as File | null;
-    const validation = await validateUploadedFile(file, {
-      allowPdf: false,
-      allowSvg: false,
-      maxSizeBytes: MAX_FILE_SIZE,
-    });
-
-    if (!validation.valid || !validation.buffer || !validation.ext) {
-      return { success: false, error: validation.error || "Imagen no válida." };
+    if (!file) {
+      return { success: false, error: "No se proporcionó ningún archivo." };
     }
-
-    await fs.mkdir(UPLOAD_DIR, { recursive: true });
 
     if (session.kind === "CLIENTE") {
       const credsMap = await getClientCredentialsMap();
@@ -1432,30 +1423,32 @@ export async function uploadStaffPhotoAction(
         return { success: false, error: "Cuenta de cliente no encontrada." };
       }
 
-      const filename = `avatar-cliente-${session.id}-${Date.now()}${validation.ext}`;
-      const filePath = path.join(UPLOAD_DIR, filename);
-      await fs.writeFile(filePath, validation.buffer);
-
-      if (cred.avatar && cred.avatar.startsWith("/uploads/avatars/")) {
-        const oldFilename = path.basename(cred.avatar);
-        try {
-          await fs.unlink(path.join(UPLOAD_DIR, oldFilename));
-        } catch {}
+      // Subir directamente a Supabase Storage (bucket perfiles-chopper, carpeta clientes)
+      const uploadRes = await uploadProfileImage(file, "clientes", session.id);
+      if (!uploadRes.success || !uploadRes.url || !uploadRes.objectPath) {
+        return { success: false, error: uploadRes.error || "Error al subir foto de perfil a Supabase Storage." };
       }
 
-      const publicUrl = `/uploads/avatars/${filename}`;
-      cred.avatar = publicUrl;
-      await prisma.credencialCliente.update({
-        where: { clienteId: session.id },
-        data: { avatar: publicUrl },
-      });
+      const publicUrl = uploadRes.url;
 
-      await setServerSessionCookie({
-        ...session,
-        fotoUrl: publicUrl,
-      });
+      try {
+        cred.avatar = publicUrl;
+        await prisma.credencialCliente.update({
+          where: { clienteId: session.id },
+          data: { avatar: publicUrl },
+        });
 
-      return { success: true, fotoUrl: publicUrl };
+        await setServerSessionCookie({
+          ...session,
+          fotoUrl: publicUrl,
+        });
+
+        return { success: true, fotoUrl: publicUrl };
+      } catch (dbError) {
+        // Compensating rollback en Supabase Storage
+        await rollbackProfileUpload(uploadRes.objectPath);
+        throw dbError;
+      }
     }
 
     // Si es STAFF
@@ -1465,40 +1458,34 @@ export async function uploadStaffPhotoAction(
       return { success: false, error: "Usuario no encontrado." };
     }
 
-    const filename = `avatar-${realUserId}-${Date.now()}${validation.ext}`;
-    const filePath = path.join(UPLOAD_DIR, filename);
-
-    // 1. Guardar en e-commerce
-    await fs.writeFile(filePath, validation.buffer);
-
-    // 2. Sincronizar en Sistema Integral si existe la carpeta
-    try {
-      await fs.mkdir(SGI_UPLOAD_DIR, { recursive: true });
-      await fs.writeFile(path.join(SGI_UPLOAD_DIR, filename), validation.buffer);
-    } catch {}
-
-    // 3. Eliminar foto anterior en AMBOS sistemas para no dejar archivos huérfanos
-    if (usuario.fotoUrl && usuario.fotoUrl.startsWith("/uploads/avatars/")) {
-      const oldFilename = path.basename(usuario.fotoUrl);
-      try {
-        await fs.unlink(path.join(UPLOAD_DIR, oldFilename));
-      } catch {}
-      try {
-        await fs.unlink(path.join(SGI_UPLOAD_DIR, oldFilename));
-      } catch {}
+    // Subir directamente a Supabase Storage (bucket perfiles-chopper, carpeta empleados)
+    const uploadRes = await uploadProfileImage(file, "empleados", realUserId);
+    if (!uploadRes.success || !uploadRes.url || !uploadRes.objectPath) {
+      return { success: false, error: uploadRes.error || "Error al subir foto de perfil a Supabase Storage." };
     }
 
-    const publicUrl = `/uploads/avatars/${filename}`;
+    const publicUrl = uploadRes.url;
 
-    await prisma.usuario.update({
-      where: { id: realUserId },
-      data: {
+    try {
+      await prisma.usuario.update({
+        where: { id: realUserId },
+        data: {
+          fotoUrl: publicUrl,
+          fotoActualizadaEn: new Date(),
+        },
+      });
+
+      await setServerSessionCookie({
+        ...session,
         fotoUrl: publicUrl,
-        fotoActualizadaEn: new Date(),
-      },
-    });
+      });
 
-    return { success: true, fotoUrl: publicUrl };
+      return { success: true, fotoUrl: publicUrl };
+    } catch (dbError) {
+      // Compensating rollback en Supabase Storage
+      await rollbackProfileUpload(uploadRes.objectPath);
+      throw dbError;
+    }
   } catch (error) {
     console.error("Error en uploadStaffPhotoAction:", error);
     return { success: false, error: "Error al guardar la foto de perfil." };
@@ -1520,11 +1507,7 @@ export async function deleteStaffPhotoAction(
     if (session.kind === "CLIENTE") {
       const credsMap = await getClientCredentialsMap();
       const cred = credsMap[String(session.id)];
-      if (cred && cred.avatar && cred.avatar.startsWith("/uploads/avatars/")) {
-        const filename = path.basename(cred.avatar);
-        try {
-          await fs.unlink(path.join(UPLOAD_DIR, filename));
-        } catch {}
+      if (cred) {
         cred.avatar = null;
         await prisma.credencialCliente.update({
           where: { clienteId: session.id },
@@ -1545,22 +1528,17 @@ export async function deleteStaffPhotoAction(
       return { success: false, error: "Usuario no encontrado." };
     }
 
-    if (usuario.fotoUrl && usuario.fotoUrl.startsWith("/uploads/avatars/")) {
-      const filename = path.basename(usuario.fotoUrl);
-      try {
-        await fs.unlink(path.join(UPLOAD_DIR, filename));
-      } catch {}
-      try {
-        await fs.unlink(path.join(SGI_UPLOAD_DIR, filename));
-      } catch {}
-    }
-
     await prisma.usuario.update({
       where: { id: realUserId },
       data: {
         fotoUrl: null,
         fotoActualizadaEn: new Date(),
       },
+    });
+
+    await setServerSessionCookie({
+      ...session,
+      fotoUrl: null,
     });
 
     return { success: true };

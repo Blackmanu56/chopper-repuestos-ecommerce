@@ -1,5 +1,7 @@
 "use server";
 
+import { uploadCatalogImage } from "@/lib/storage-service";
+
 import { cache } from "react";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
@@ -231,6 +233,14 @@ export async function uploadMediaAction(
     });
     if (!validation.valid || !validation.buffer || !validation.ext) {
       return { success: false, error: validation.error || "Archivo no válido." };
+    }
+
+    if (safeFolder === "productos" || safeFolder === "combos") {
+      const storageRes = await uploadCatalogImage(validation.buffer, safeFolder);
+      if (!storageRes.success || !storageRes.url) {
+        return { success: false, error: storageRes.error || "Error al subir imagen de catálogo a Supabase Storage." };
+      }
+      return { success: true, url: storageRes.url };
     }
 
     const targetDir = path.join(process.cwd(), "public", "uploads", safeFolder);

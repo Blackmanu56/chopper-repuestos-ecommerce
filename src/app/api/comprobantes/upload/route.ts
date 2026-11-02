@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import fs from "fs/promises";
-import path from "path";
 import { getServerSession, verifySessionToken, SESSION_COOKIE_NAME } from "@/lib/session";
 import { validateUploadedFile } from "@/lib/uploadValidation";
+import { uploadReceiptImage, MAX_RECEIPT_FILE_SIZE } from "@/lib/storage-service";
 
 export const dynamic = "force-dynamic";
 
@@ -37,25 +36,32 @@ export async function POST(request: NextRequest) {
 
     const validation = await validateUploadedFile(file, {
       allowPdf: true,
-      allowSvg: false,
+      allowSvg: true,
+      maxSizeBytes: MAX_RECEIPT_FILE_SIZE,
     });
 
     if (!validation.valid || !validation.buffer || !validation.ext) {
       return NextResponse.json(
-        { success: false, error: validation.error || "Formato no válido. Adjuntá JPG, PNG, WEBP o PDF (máx. 5 MB)." },
+        { success: false, error: validation.error || "Formato no válido. Adjuntá JPG, PNG, WEBP, PDF o SVG (máx. 10 MB)." },
         { status: 400 }
       );
     }
 
-    const uploadsDir = path.join(process.cwd(), "public", "uploads", "comprobantes");
-    await fs.mkdir(uploadsDir, { recursive: true });
+    // Subida directa a Supabase Storage (bucket privado 'comprobantes-chopper')
+    const uploadRes = await uploadReceiptImage(validation.buffer, file?.name);
+    if (!uploadRes.success || !uploadRes.objectPath) {
+      return NextResponse.json(
+        { success: false, error: uploadRes.error || "No se pudo subir el comprobante a Supabase Storage." },
+        { status: 500 }
+      );
+    }
 
-    const filename = `comprobante-checkout-${Date.now()}-${Math.random().toString(36).substring(2, 8)}${validation.ext}`;
-    const filePath = path.join(uploadsDir, filename);
-    await fs.writeFile(filePath, validation.buffer);
-
-    const comprobanteUrl = `/uploads/comprobantes/${filename}`;
-    return NextResponse.json({ success: true, comprobanteUrl });
+    // Retorna la ruta interna persistible en base de datos ("pedidos/<filename>")
+    return NextResponse.json({
+      success: true,
+      comprobanteUrl: uploadRes.objectPath,
+      internalUrl: uploadRes.internalUrl,
+    });
   } catch (error) {
     console.error("Error en API /api/comprobantes/upload:", error);
     return NextResponse.json(

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import { getCatalogImageUrl } from "@/lib/storage-catalog";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
@@ -927,7 +928,7 @@ export default function MisPedidosPage() {
                   >
                     {/* Imagen real del producto / combo o neutral fallback */}
                     <div className="h-14 w-14 rounded-lg bg-slate-50 dark:bg-surface border border-slate-200 dark:border-line/70 shrink-0 overflow-hidden flex items-center justify-center">
-                      <ProductThumbnail src={it.imagen} alt={it.nombre} />
+                      <ProductThumbnail src={getCatalogImageUrl(it.imagen)} alt={it.nombre} />
                     </div>
 
                     <div className="flex-1 min-w-0">

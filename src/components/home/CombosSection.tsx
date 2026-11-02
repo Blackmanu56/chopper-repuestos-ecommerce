@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
+import { getCatalogImageUrl } from "@/lib/storage-catalog";
 import { useCart } from "@/context/CartContext";
 import { useConfig } from "@/context/ConfigContext";
 import { ShoppingCart, ChevronRight, ChevronLeft, PackageCheck, Lock, Check } from "lucide-react";
@@ -193,7 +194,7 @@ export default function CombosSection({ initialCombos }: CombosSectionProps) {
                 className="relative mb-3 flex h-48 w-full items-center justify-center rounded-xl bg-slate-50 dark:bg-surface overflow-hidden p-2 border border-slate-100 dark:border-line/40 block cursor-pointer"
               >
                 <img
-                  src={combo.imagen || "/combos/combo-service-motul.jpg"}
+                  src={getCatalogImageUrl(combo.imagen) || "/combos/combo-service-motul.jpg"}
                   alt={combo.nombre}
                   loading="lazy"
                   decoding="async"

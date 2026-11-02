@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo } from "react";
 import Link from "next/link";
+import { getCatalogImageUrl } from "@/lib/storage-catalog";
 import { ComboDTO } from "@/actions/combos";
 import { useCart } from "@/context/CartContext";
 import { useConfig } from "@/context/ConfigContext";
@@ -342,7 +343,7 @@ export default function CombosClient({ initialCombos }: CombosClientProps) {
                         className="relative mb-3 flex h-44 w-full items-center justify-center rounded-xl bg-slate-50 dark:bg-surface text-slate-500 overflow-hidden p-2 border border-slate-100 dark:border-line/40 block cursor-pointer"
                       >
                         <img
-                          src={combo.imagen || "/combos/combo-service-motul.jpg"}
+                          src={getCatalogImageUrl(combo.imagen) || "/combos/combo-service-motul.jpg"}
                           alt={combo.nombre}
                           onError={(e) => {
                             (e.currentTarget as HTMLImageElement).src = "/combos/combo-service-motul.jpg";
