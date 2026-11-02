@@ -28,6 +28,7 @@ import {
 
 type AuthMode = "LOGIN" | "REGISTER" | "RECOVERY" | "STAFF";
 type RecoveryStep = "REQUEST_CODE" | "VERIFY_CODE" | "RESET_PASSWORD";
+type RegisterStep = "FORM" | "VERIFY_CODE";
 
 export default function LoginModal() {
   const {
@@ -35,6 +36,9 @@ export default function LoginModal() {
     closeLogin,
     loginClient,
     registerClient,
+    solicitarRegistro,
+    confirmarRegistro,
+    reenviarCodigoRegistro,
     loginStaff,
     sessionExpiredNotice,
     clearSessionExpiredNotice,
@@ -56,6 +60,12 @@ export default function LoginModal() {
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Register verification states
+  const [registerStep, setRegisterStep] = useState<RegisterStep>("FORM");
+  const [registerCode, setRegisterCode] = useState("");
+  const [registerEmailMasked, setRegisterEmailMasked] = useState("");
+  const [registerResendCooldown, setRegisterResendCooldown] = useState(0);
 
   // Recovery flow states
   const [recoveryStep, setRecoveryStep] = useState<RecoveryStep>("REQUEST_CODE");
@@ -83,6 +93,10 @@ export default function LoginModal() {
       setError("");
       setSuccessMsg("");
       setLoading(false);
+      setRegisterStep("FORM");
+      setRegisterCode("");
+      setRegisterEmailMasked("");
+      setRegisterResendCooldown(0);
       setRecoveryStep("REQUEST_CODE");
       setRecoveryEmail("");
       setRecoveryCode("");
@@ -95,7 +109,7 @@ export default function LoginModal() {
     }
   }, [isLoginOpen]);
 
-  // Temporizador para el botón de reenvío de código
+  // Temporizador para el botón de reenvío de código (Recuperación y Registro)
   useEffect(() => {
     if (resendCooldown <= 0) return;
     const timer = setInterval(() => {
@@ -103,6 +117,14 @@ export default function LoginModal() {
     }, 1000);
     return () => clearInterval(timer);
   }, [resendCooldown]);
+
+  useEffect(() => {
+    if (registerResendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setRegisterResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [registerResendCooldown]);
 
   if (!isLoginOpen) return null;
 
@@ -146,6 +168,7 @@ export default function LoginModal() {
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setSuccessMsg("");
     if (!nombreCompleto || !email || !password) {
       setError("Completá todos los campos requeridos");
       return;
@@ -159,7 +182,7 @@ export default function LoginModal() {
     }
     setLoading(true);
     try {
-      const res = await registerClient({
+      const res = await solicitarRegistro({
         nombreCompleto,
         email,
         telefono,
@@ -167,13 +190,67 @@ export default function LoginModal() {
         dni: dni.trim() || undefined,
       });
       if (!res.success) {
-        setError(res.error || "No se pudo crear la cuenta.");
+        setError(res.error || "No se pudo procesar el registro.");
+        if (res.cooldownSeconds) {
+          setRegisterResendCooldown(res.cooldownSeconds);
+        }
         return;
       }
-      setSuccessMsg("¡Cuenta creada con éxito! Ya podés hacer tus pedidos.");
+      setRegisterStep("VERIFY_CODE");
+      setRegisterCode("");
+      setRegisterEmailMasked(res.emailMasked || email);
+      setRegisterResendCooldown(res.cooldownSeconds || 60);
+      setSuccessMsg(res.message || "Te enviamos un código de verificación a tu correo.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyRegisterCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setSuccessMsg("");
+    const cleanCode = registerCode.trim();
+    if (cleanCode.length !== 6 || !/^\d{6}$/.test(cleanCode)) {
+      setError("Ingresá el código numérico de 6 dígitos.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await confirmarRegistro(email, cleanCode);
+      if (!res.success) {
+        setError(res.error || "Código incorrecto o no se pudo crear la cuenta.");
+        return;
+      }
+      setSuccessMsg("¡Correo verificado y cuenta creada con éxito! Ya podés hacer tus pedidos.");
       setTimeout(() => {
         closeLogin();
-      }, 1200);
+      }, 1300);
+    } catch {
+      setError("Error de comunicación al verificar el código.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendRegisterCode = async () => {
+    if (registerResendCooldown > 0 || loading) return;
+    setError("");
+    setSuccessMsg("");
+    setLoading(true);
+    try {
+      const res = await reenviarCodigoRegistro(email);
+      if (!res.success) {
+        setError(res.error || "No se pudo reenviar el código.");
+        if (res.cooldownSeconds) {
+          setRegisterResendCooldown(res.cooldownSeconds);
+        }
+        return;
+      }
+      setSuccessMsg(res.message || "Te enviamos un nuevo código de seguridad.");
+      setRegisterResendCooldown(res.cooldownSeconds || 60);
+    } catch {
+      setError("Error al reenviar el código de verificación.");
     } finally {
       setLoading(false);
     }
@@ -469,92 +546,171 @@ export default function LoginModal() {
 
         {/* 2. MODO CREAR CUENTA CLIENTE */}
         {mode === "REGISTER" && (
-          <form onSubmit={handleRegister} className="space-y-3 text-xs">
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">
-                Nombre y Apellido *
-              </label>
-              <input
-                required
-                value={nombreCompleto}
-                onChange={(e) => setNombreCompleto(e.target.value)}
-                placeholder="Ej: Marcelo Benítez"
-                className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-white placeholder-slate-500 outline-none focus:border-brand"
-              />
-            </div>
+          <div className="space-y-3.5 text-xs">
+            {/* Paso 1: Formulario de datos */}
+            {registerStep === "FORM" && (
+              <form onSubmit={handleRegister} className="space-y-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Nombre y Apellido *
+                  </label>
+                  <input
+                    required
+                    value={nombreCompleto}
+                    onChange={(e) => setNombreCompleto(e.target.value)}
+                    placeholder="Ej: Marcelo Benítez"
+                    className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-white placeholder-slate-500 outline-none focus:border-brand"
+                  />
+                </div>
 
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">
-                Teléfono / WhatsApp *
-              </label>
-              <input
-                required
-                value={telefono}
-                onChange={(e) => setTelefono(e.target.value)}
-                placeholder="Ej: 376 412-3456"
-                className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-white placeholder-slate-500 outline-none focus:border-brand"
-              />
-            </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Teléfono / WhatsApp *
+                  </label>
+                  <input
+                    required
+                    value={telefono}
+                    onChange={(e) => setTelefono(e.target.value)}
+                    placeholder="Ej: 376 412-3456"
+                    className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-white placeholder-slate-500 outline-none focus:border-brand"
+                  />
+                </div>
 
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">
-                DNI (para facturación y retiro)
-              </label>
-              <input
-                value={dni}
-                onChange={(e) => setDni(e.target.value)}
-                placeholder="Ej: 34.567.890"
-                className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-white placeholder-slate-500 outline-none focus:border-brand"
-              />
-            </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    DNI (para facturación y retiro)
+                  </label>
+                  <input
+                    value={dni}
+                    onChange={(e) => setDni(e.target.value)}
+                    placeholder="Ej: 34.567.890"
+                    className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-white placeholder-slate-500 outline-none focus:border-brand"
+                  />
+                </div>
 
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">
-                Correo Electrónico *
-              </label>
-              <input
-                required
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="tunombre@gmail.com"
-                className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-white placeholder-slate-500 outline-none focus:border-brand"
-              />
-            </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Correo Electrónico *
+                  </label>
+                  <input
+                    required
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="tunombre@gmail.com"
+                    className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-white placeholder-slate-500 outline-none focus:border-brand"
+                  />
+                </div>
 
-            <div>
-              <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1">
-                Crear Contraseña *
-              </label>
-              <div className="relative">
-                <input
-                  required
-                  type={showRegisterPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Mínimo 6 caracteres"
-                  className="w-full rounded-xl border border-line bg-surface px-3 py-2 pr-10 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 outline-none focus:border-brand"
-                />
+                <div>
+                  <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1">
+                    Crear Contraseña *
+                  </label>
+                  <div className="relative">
+                    <input
+                      required
+                      type={showRegisterPassword ? "text" : "password"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Mínimo 6 caracteres"
+                      className="w-full rounded-xl border border-line bg-surface px-3 py-2 pr-10 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 outline-none focus:border-brand"
+                    />
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={() => setShowRegisterPassword((prev) => !prev)}
+                      aria-label={showRegisterPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 p-0.5 rounded transition-colors"
+                    >
+                      {showRegisterPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+
                 <button
-                  type="button"
-                  tabIndex={-1}
-                  onClick={() => setShowRegisterPassword((prev) => !prev)}
-                  aria-label={showRegisterPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 p-0.5 rounded transition-colors"
+                  type="submit"
+                  disabled={loading}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 py-2.5 text-xs font-bold text-white shadow transition-all active:scale-95"
                 >
-                  {showRegisterPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  <UserPlus size={14} />
+                  <span>{loading ? "Enviando código..." : "Continuar y verificar correo"}</span>
                 </button>
-              </div>
-            </div>
+              </form>
+            )}
 
-            <button
-              type="submit"
-              className="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 py-2.5 text-xs font-bold text-white shadow transition-all active:scale-95"
-            >
-              <UserPlus size={14} />
-              <span>Registrarme como Cliente</span>
-            </button>
-          </form>
+            {/* Paso 2: Introducir código de 6 dígitos */}
+            {registerStep === "VERIFY_CODE" && (
+              <form onSubmit={handleVerifyRegisterCode} className="space-y-3.5">
+                <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-3 text-xs text-blue-300">
+                  <p className="font-semibold text-white">Verificación de seguridad requerida</p>
+                  <p className="mt-1 text-slate-300">
+                    Ingresá el código de 6 dígitos que enviamos a{" "}
+                    <strong className="text-white font-mono">{registerEmailMasked || email}</strong>.
+                  </p>
+                </div>
+
+                <div>
+                  <label htmlFor="register-code" className="block text-slate-300 font-semibold mb-1">
+                    Código de 6 dígitos *
+                  </label>
+                  <input
+                    id="register-code"
+                    required
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]{6}"
+                    maxLength={6}
+                    autoComplete="one-time-code"
+                    value={registerCode}
+                    onChange={(e) => setRegisterCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="123456"
+                    className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-center text-lg font-mono font-bold tracking-[8px] text-white placeholder-slate-500 outline-none focus:border-brand"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    El código vence en 5 minutos y tenés hasta 5 intentos.
+                  </p>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading || registerCode.length !== 6}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 py-2.5 text-xs font-bold text-white shadow transition-all active:scale-95"
+                >
+                  <CheckCircle size={14} />
+                  <span>{loading ? "Verificando..." : "Verificar correo y activar cuenta"}</span>
+                </button>
+
+                <div className="flex items-center justify-between pt-2 border-t border-line/50 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRegisterStep("FORM");
+                      setError("");
+                      setSuccessMsg("");
+                    }}
+                    className="text-slate-400 hover:text-white flex items-center gap-1 transition-colors"
+                  >
+                    <ArrowLeft size={13} />
+                    <span>Corregir datos</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={registerResendCooldown > 0 || loading}
+                    onClick={handleResendRegisterCode}
+                    className="text-brand hover:underline disabled:text-slate-500 disabled:no-underline flex items-center gap-1 font-semibold transition-colors"
+                  >
+                    <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
+                    <span>
+                      {registerResendCooldown > 0
+                        ? `Reenviar en ${registerResendCooldown}s`
+                        : "Reenviar código"}
+                    </span>
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
         )}
 
         {/* 3. MODO RECUPERAR CONTRASEÑA */}

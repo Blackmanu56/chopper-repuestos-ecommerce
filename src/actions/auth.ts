@@ -9,6 +9,7 @@ import { cookies, headers } from "next/headers";
 import {
   enviarEmailVerificacionCambioCorreo,
   enviarEmailRecuperacionPassword,
+  enviarEmailCodigoRegistro,
   enviarEmailBienvenidaCliente,
 } from "@/lib/email";
 import {
@@ -73,6 +74,74 @@ async function getClientCredentialsMap(): Promise<Record<string, StoredClientCre
   }
 
   return map;
+}
+
+const REGISTRO_PENDIENTE_KEY_PREFIX = "registro_pendiente_";
+
+export interface SolicitudRegistroPendiente {
+  email: string;
+  nombreCompleto: string;
+  telefono: string;
+  direccion: string | null;
+  dni: string | null;
+  passwordHash: string; // Hash bcrypt (nunca contraseña en texto plano)
+  codigoHmac: string; // HMAC-SHA256 del código numérico de 6 dígitos
+  intentosFallidos: number;
+  reenviosRealizados: number;
+  ultimoEnvioEn: string;
+  expiraEn: string;
+  creadoEn: string;
+}
+
+function getVerificationSecret(): string {
+  return process.env.JWT_SECRET || "chopper_default_secure_secret_2026";
+}
+
+function calcularHmacCodigo(codigo: string): string {
+  return crypto.createHmac("sha256", getVerificationSecret()).update(codigo.trim()).digest("hex");
+}
+
+function verificarTimingSafeCodigo(codigoIngresado: string, hmacGuardado: string): boolean {
+  try {
+    const computedHmac = calcularHmacCodigo(codigoIngresado);
+    const bufA = Buffer.from(computedHmac, "hex");
+    const bufB = Buffer.from(hmacGuardado, "hex");
+    if (bufA.length !== bufB.length) return false;
+    return crypto.timingSafeEqual(bufA, bufB);
+  } catch {
+    return false;
+  }
+}
+
+async function getSolicitudRegistroPendiente(email: string): Promise<SolicitudRegistroPendiente | null> {
+  const clave = `${REGISTRO_PENDIENTE_KEY_PREFIX}${email.trim().toLowerCase()}`;
+  const row = await prisma.configuracionEcommerce.findUnique({ where: { clave } });
+  if (!row?.valor) return null;
+  try {
+    return JSON.parse(row.valor) as SolicitudRegistroPendiente;
+  } catch {
+    return null;
+  }
+}
+
+async function saveSolicitudRegistroPendiente(solicitud: SolicitudRegistroPendiente): Promise<void> {
+  const clave = `${REGISTRO_PENDIENTE_KEY_PREFIX}${solicitud.email.trim().toLowerCase()}`;
+  await prisma.configuracionEcommerce.upsert({
+    where: { clave },
+    update: { valor: JSON.stringify(solicitud) },
+    create: {
+      clave,
+      valor: JSON.stringify(solicitud),
+      descripcion: `Solicitud de registro temporal pendiente para ${solicitud.email}`,
+    },
+  });
+}
+
+async function deleteSolicitudRegistroPendiente(email: string): Promise<void> {
+  const clave = `${REGISTRO_PENDIENTE_KEY_PREFIX}${email.trim().toLowerCase()}`;
+  try {
+    await prisma.configuracionEcommerce.delete({ where: { clave } });
+  } catch {}
 }
 
 export interface SolicitudCambioEmail {
@@ -344,16 +413,25 @@ export async function loginClientAction(
 }
 
 /**
- * Registra un nuevo cliente en la tabla `clientes` con hash bcrypt y crea su sesión segura
+ * FASE 1 DEL REGISTRO:
+ * Valida los datos ingresados, comprueba unicidad en PostgreSQL, hashea la contraseña con bcrypt,
+ * genera un código seguro de 6 dígitos con HMAC-SHA256 y envía el código por correo.
+ * NO crea clientes ni credenciales en la base de datos hasta que el código sea confirmado.
  */
-export async function registerClientAction(input: {
+export async function solicitarRegistroClienteAction(input: {
   nombreCompleto: string;
   email: string;
   telefono: string;
   password: string;
   dni?: string;
   direccion?: string;
-}): Promise<{ success: boolean; user?: AuthUserResponse; error?: string }> {
+}): Promise<{
+  success: boolean;
+  message?: string;
+  emailMasked?: string;
+  cooldownSeconds?: number;
+  error?: string;
+}> {
   try {
     const cleanNombre = (input.nombreCompleto || "").trim();
     const cleanEmail = (input.email || "").trim().toLowerCase();
@@ -363,26 +441,36 @@ export async function registerClientAction(input: {
     const rawDni = (input.dni || "").trim();
     const cleanDni = rawDni.replace(/\D/g, "");
 
+    // 1. Validaciones de formato
     if (!cleanNombre || cleanNombre.length < 3) {
-      return { success: false, error: "Ingresá tu nombre y apellido completo." };
+      return { success: false, error: "Ingresá tu nombre y apellido completo (mínimo 3 caracteres)." };
     }
-    if (!cleanEmail || !cleanEmail.includes("@")) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!cleanEmail || !emailRegex.test(cleanEmail)) {
       return { success: false, error: "Ingresá un correo electrónico válido." };
     }
-    if (!cleanTel) {
-      return { success: false, error: "Ingresá un teléfono de contacto." };
+    if (!cleanTel || cleanTel.length < 6) {
+      return { success: false, error: "Ingresá un teléfono o WhatsApp de contacto válido." };
     }
     if (!cleanPass || cleanPass.length < 6) {
       return { success: false, error: "La contraseña debe tener al menos 6 caracteres." };
     }
 
+    // 2. Comprobar que el correo no esté en uso
     const credsMap = await getClientCredentialsMap();
     const emailTaken = Object.values(credsMap).some((c) => c.email.toLowerCase() === cleanEmail);
     if (emailTaken) {
       return { success: false, error: "Ya existe una cuenta registrada con ese correo electrónico." };
     }
 
-    // Separación estricta de dominios: las cuentas del personal administrativo no pueden registrarse como clientes
+    const existingByEmail = await prisma.cliente.findFirst({
+      where: { email: { equals: cleanEmail, mode: "insensitive" } },
+    });
+    if (existingByEmail && credsMap[String(existingByEmail.id)]) {
+      return { success: false, error: "Ya existe una cuenta registrada con ese correo electrónico." };
+    }
+
+    // 3. Separación de dominios con personal administrativo del SGI
     const staffConflict = await prisma.usuario.findFirst({
       where: {
         OR: [
@@ -399,31 +487,22 @@ export async function registerClientAction(input: {
       };
     }
 
-    const existingByEmail = await prisma.cliente.findFirst({
-      where: { email: { equals: cleanEmail, mode: "insensitive" } },
-    });
-    if (existingByEmail && credsMap[String(existingByEmail.id)]) {
-      return { success: false, error: "Ya existe una cuenta registrada con ese correo electrónico." };
-    }
-
-    let finalDni: string;
+    // 4. Validar DNI si fue ingresado
+    let finalDni: string | null = null;
     if (rawDni) {
       if (cleanDni.length < 7 || (cleanDni.length > 8 && cleanDni.length !== 11)) {
         return { success: false, error: "El DNI debe contener 7 u 8 dígitos numéricos." };
       }
 
-      // Validar si el DNI ya pertenece a cualquier otro cliente en PostgreSQL normalizando dígitos
       const existingByDni = await prisma.$queryRaw<Array<{ id: number; dni: string }>>`
         SELECT id, dni FROM clientes
         WHERE regexp_replace(COALESCE(dni, ''), '[^0-9]', '', 'g') = ${cleanDni}
         LIMIT 1
       `;
-
       if (existingByDni.length > 0) {
         return { success: false, error: "Este DNI ya se encuentra registrado en otra cuenta." };
       }
 
-      // Validar si el DNI ya figura registrado en el mapa de credenciales del e-commerce
       const existingInCreds = Object.values(credsMap).find(
         (c) => c.dni && c.dni.replace(/\D/g, "") === cleanDni
       );
@@ -432,34 +511,274 @@ export async function registerClientAction(input: {
       }
 
       finalDni = cleanDni;
-    } else {
-      // Generar DNI único si no fue provisto en el formulario rápido
-      finalDni = `EC${Date.now().toString().slice(-8)}`;
     }
 
+    // 5. Rate limiting y límites de reenvío sobre solicitudes pendientes existentes
+    const now = new Date();
+    const pendingExistente = await getSolicitudRegistroPendiente(cleanEmail);
+
+    if (pendingExistente) {
+      const elapsedMs = now.getTime() - new Date(pendingExistente.ultimoEnvioEn).getTime();
+      const COOLDOWN_MS = 60 * 1000;
+      if (elapsedMs < COOLDOWN_MS) {
+        const remainingSec = Math.ceil((COOLDOWN_MS - elapsedMs) / 1000);
+        return {
+          success: false,
+          cooldownSeconds: remainingSec,
+          error: `Ya enviamos un código recientemente. Por favor esperá ${remainingSec} segundos antes de solicitar otro.`,
+        };
+      }
+
+      if (pendingExistente.reenviosRealizados >= 3) {
+        return {
+          success: false,
+          error: "Superaste el límite máximo de 3 reenvíos de código. Por seguridad, esperá a que expire la solicitud (5 minutos) o comunicate con soporte.",
+        };
+      }
+    }
+
+    // 6. Generar código seguro de 6 dígitos e invalidar cualquier código anterior mediante nuevo HMAC
+    const codigoNum = crypto.randomInt(100000, 1000000).toString();
+    const codigoHmac = calcularHmacCodigo(codigoNum);
+
+    // 7. Enviar código de verificación por correo electrónico
+    const emailResult = await enviarEmailCodigoRegistro({
+      nombreCliente: cleanNombre,
+      email: cleanEmail,
+      codigo: codigoNum,
+    });
+
+    if (!emailResult.success) {
+      return {
+        success: false,
+        error: emailResult.error || "No se pudo despachar el correo de verificación. Revisá que la casilla sea correcta.",
+      };
+    }
+
+    // 8. Hashear la contraseña con bcrypt (NUNCA texto plano) y persistir solicitud temporal con expiración de 5 min
     const passwordHash = await bcrypt.hash(cleanPass, 10);
+    const expiraEn = new Date(now.getTime() + 5 * 60 * 1000).toISOString();
+
+    const nuevaSolicitud: SolicitudRegistroPendiente = {
+      email: cleanEmail,
+      nombreCompleto: cleanNombre,
+      telefono: cleanTel,
+      direccion: cleanDir,
+      dni: finalDni,
+      passwordHash,
+      codigoHmac,
+      intentosFallidos: 0,
+      reenviosRealizados: pendingExistente ? pendingExistente.reenviosRealizados + 1 : 0,
+      ultimoEnvioEn: now.toISOString(),
+      expiraEn,
+      creadoEn: pendingExistente ? pendingExistente.creadoEn : now.toISOString(),
+    };
+
+    await saveSolicitudRegistroPendiente(nuevaSolicitud);
+
+    const [userPart, domainPart] = cleanEmail.split("@");
+    const emailMasked = userPart.length > 2
+      ? `${userPart.slice(0, 2)}***@${domainPart}`
+      : `${userPart}***@${domainPart}`;
+
+    return {
+      success: true,
+      message: `Enviamos un código de 6 dígitos a ${emailMasked}. Revisá tu bandeja de entrada o spam.`,
+      emailMasked,
+      cooldownSeconds: 60,
+    };
+  } catch (error: any) {
+    console.error("Error en solicitarRegistroClienteAction:", error);
+    return { success: false, error: "No se pudo procesar la solicitud de registro." };
+  }
+}
+
+/**
+ * REENVÍO DEL CÓDIGO DE REGISTRO:
+ * Verifica que exista una solicitud pendiente, controla el límite de 3 reenvíos y el cooldown de 60 segundos.
+ * Genera un código nuevo, invalida el anterior y lo despacha por correo.
+ */
+export async function reenviarCodigoRegistroAction(emailInput: string): Promise<{
+  success: boolean;
+  message?: string;
+  cooldownSeconds?: number;
+  error?: string;
+}> {
+  try {
+    const cleanEmail = (emailInput || "").trim().toLowerCase();
+    if (!cleanEmail) {
+      return { success: false, error: "Correo electrónico no válido." };
+    }
+
+    const pending = await getSolicitudRegistroPendiente(cleanEmail);
+    if (!pending) {
+      return {
+        success: false,
+        error: "No hay ninguna solicitud de registro pendiente para este correo. Por favor iniciá el registro nuevamente.",
+      };
+    }
+
+    const now = new Date();
+    if (now.getTime() > new Date(pending.expiraEn).getTime()) {
+      await deleteSolicitudRegistroPendiente(cleanEmail);
+      return {
+        success: false,
+        error: "La solicitud de registro ha vencido (5 minutos). Por favor completá el formulario nuevamente.",
+      };
+    }
+
+    const elapsedMs = now.getTime() - new Date(pending.ultimoEnvioEn).getTime();
+    const COOLDOWN_MS = 60 * 1000;
+    if (elapsedMs < COOLDOWN_MS) {
+      const remainingSec = Math.ceil((COOLDOWN_MS - elapsedMs) / 1000);
+      return {
+        success: false,
+        cooldownSeconds: remainingSec,
+        error: `Debés esperar ${remainingSec} segundos antes de solicitar otro reenvío.`,
+      };
+    }
+
+    if (pending.reenviosRealizados >= 3) {
+      return {
+        success: false,
+        error: "Superaste el límite máximo de 3 reenvíos permitidos. Por seguridad, esperá a que expire la solicitud para comenzar de nuevo.",
+      };
+    }
+
+    // Generar código numérico nuevo y refrescar HMAC (invalida el código anterior)
+    const nuevoCodigo = crypto.randomInt(100000, 1000000).toString();
+    const nuevoHmac = calcularHmacCodigo(nuevoCodigo);
+
+    const emailResult = await enviarEmailCodigoRegistro({
+      nombreCliente: pending.nombreCompleto,
+      email: cleanEmail,
+      codigo: nuevoCodigo,
+    });
+
+    if (!emailResult.success) {
+      return {
+        success: false,
+        error: emailResult.error || "No se pudo reenviar el código. Intentalo nuevamente.",
+      };
+    }
+
+    pending.codigoHmac = nuevoHmac;
+    pending.reenviosRealizados += 1;
+    pending.ultimoEnvioEn = now.toISOString();
+    // Renovar ventana de expiración por 5 minutos a partir de este último reenvío
+    pending.expiraEn = new Date(now.getTime() + 5 * 60 * 1000).toISOString();
+
+    await saveSolicitudRegistroPendiente(pending);
+
+    return {
+      success: true,
+      message: "Te enviamos un nuevo código de seguridad. Revisá tu correo.",
+      cooldownSeconds: 60,
+    };
+  } catch (error: any) {
+    console.error("Error en reenviarCodigoRegistroAction:", error);
+    return { success: false, error: "Error al reenviar el código de verificación." };
+  }
+}
+
+/**
+ * FASE 2 DEL REGISTRO:
+ * Verifica el código de 6 dígitos ingresado por el cliente con comparación segura contra timing attacks.
+ * Controla límite de 5 intentos fallidos y vencimiento de 5 minutos.
+ * ÚNICAMENTE ante validación exitosa:
+ * 1. Inserta el registro en PostgreSQL (`clientes` y `credenciales_clientes`).
+ * 2. Emite la cookie de sesión httpOnly.
+ * 3. Elimina la solicitud temporal pendiente.
+ * 4. Envía correo de bienvenida.
+ */
+export async function confirmarRegistroClienteAction(
+  emailInput: string,
+  codigoInput: string
+): Promise<{ success: boolean; user?: AuthUserResponse; error?: string }> {
+  try {
+    const cleanEmail = (emailInput || "").trim().toLowerCase();
+    const cleanCode = (codigoInput || "").trim();
+
+    if (!cleanEmail) {
+      return { success: false, error: "Correo electrónico no válido." };
+    }
+    if (!cleanCode || !/^\d{6}$/.test(cleanCode)) {
+      return { success: false, error: "Ingresá el código numérico de 6 dígitos." };
+    }
+
+    const pending = await getSolicitudRegistroPendiente(cleanEmail);
+    if (!pending) {
+      return {
+        success: false,
+        error: "No hay ninguna solicitud de registro pendiente para este correo o ya fue confirmada.",
+      };
+    }
+
+    const now = new Date();
+
+    // 1. Control de vencimiento (5 minutos)
+    if (now.getTime() > new Date(pending.expiraEn).getTime()) {
+      await deleteSolicitudRegistroPendiente(cleanEmail);
+      return {
+        success: false,
+        error: "El código de verificación ha vencido (validez de 5 minutos). Por favor iniciá el registro nuevamente.",
+      };
+    }
+
+    // 2. Control de intentos fallidos (máximo 5)
+    if (pending.intentosFallidos >= 5) {
+      await deleteSolicitudRegistroPendiente(cleanEmail);
+      return {
+        success: false,
+        error: "Superaste el límite máximo de 5 intentos fallidos. Por seguridad, la solicitud fue cancelada; completá el formulario nuevamente.",
+      };
+    }
+
+    // 3. Comparación segura timing-safe
+    const esValido = verificarTimingSafeCodigo(cleanCode, pending.codigoHmac);
+    if (!esValido) {
+      pending.intentosFallidos += 1;
+
+      if (pending.intentosFallidos >= 5) {
+        await deleteSolicitudRegistroPendiente(cleanEmail);
+        return {
+          success: false,
+          error: "Código incorrecto. Se agotaron los 5 intentos permitidos. Por seguridad la solicitud fue cancelada.",
+        };
+      }
+
+      await saveSolicitudRegistroPendiente(pending);
+
+      const restantes = Math.max(0, 5 - pending.intentosFallidos);
+      return {
+        success: false,
+        error: `Código incorrecto. Te quedan ${restantes} intento(s).`,
+      };
+    }
+
+    // 4. Verificación exitosa: CREAR CLIENTE Y CREDENCIAL EN POSTGRESQL
+    const finalDni = pending.dni || `EC${Date.now().toString().slice(-8)}`;
     const username = cleanEmail.split("@")[0].toLowerCase();
 
     let cliente: any;
     try {
       cliente = await prisma.cliente.create({
         data: {
-          nombre: cleanNombre,
+          nombre: pending.nombreCompleto,
           dni: finalDni,
-          telefono: cleanTel,
+          telefono: pending.telefono,
           email: cleanEmail,
-          direccion: cleanDir,
+          direccion: pending.direccion,
           activo: true,
           credencial: {
             create: {
-              passwordHash,
+              passwordHash: pending.passwordHash,
               username,
             },
           },
         },
       });
     } catch (createErr: any) {
-      // Control atómico ante concurrencia (violación de restricción UNIQUE en PostgreSQL)
       if (createErr?.code === "P2002") {
         const target = createErr?.meta?.target;
         if (
@@ -481,6 +800,9 @@ export async function registerClientAction(input: {
       throw createErr;
     }
 
+    // 5. Eliminar la solicitud temporal para que no pueda ser reutilizada jamás
+    await deleteSolicitudRegistroPendiente(cleanEmail);
+
     const responseUser: AuthUserResponse = {
       id: cliente.id,
       username,
@@ -493,6 +815,7 @@ export async function registerClientAction(input: {
       cuit: cliente.cuit,
     };
 
+    // 6. Iniciar sesión emitiendo la cookie httpOnly
     await setServerSessionCookie({
       kind: "CLIENTE",
       id: responseUser.id,
@@ -506,7 +829,7 @@ export async function registerClientAction(input: {
       cuit: responseUser.cuit,
     });
 
-    // Enviar correo de bienvenida al cliente de forma no bloqueante (si falla el envío, la cuenta permanece creada)
+    // 7. Enviar correo de bienvenida de forma no bloqueante
     try {
       await enviarEmailBienvenidaCliente({
         nombreCliente: responseUser.nombreCompleto,
@@ -517,10 +840,32 @@ export async function registerClientAction(input: {
     }
 
     return { success: true, user: responseUser };
-  } catch (error) {
-    console.error("Error en registerClientAction:", error);
-    return { success: false, error: "No se pudo completar el registro." };
+  } catch (error: any) {
+    console.error("Error en confirmarRegistroClienteAction:", error);
+    return { success: false, error: "No se pudo completar la verificación del registro." };
   }
+}
+
+/**
+ * Wrapper de compatibilidad para código existente y llamadas legacy.
+ * Si se invoca directamente, ejecuta la fase 1 solicitando el código.
+ */
+export async function registerClientAction(input: {
+  nombreCompleto: string;
+  email: string;
+  telefono: string;
+  password: string;
+  dni?: string;
+  direccion?: string;
+}): Promise<{ success: boolean; user?: AuthUserResponse; error?: string }> {
+  const res = await solicitarRegistroClienteAction(input);
+  if (!res.success) {
+    return { success: false, error: res.error };
+  }
+  return {
+    success: false,
+    error: "Se envió un código de verificación a tu correo. Por favor confirmalo para activar tu cuenta.",
+  };
 }
 
 /**

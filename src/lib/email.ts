@@ -546,12 +546,18 @@ WhatsApp: +54 9 376 524-3554
 }
 
 /**
- * Lista de correos autorizados en modo de prueba / demo (Requisito 1).
- * Configurable mediante la variable de entorno SMTP_ALLOWED_EMAILS (separada por comas).
- * Por defecto, en entorno de demostración protege contra rebotes admitiendo solo las 3 cuentas reales:
- * - Manu (acumanu56@gmail.com / manuacu56@gmail.com)
- * - Lionel García (lionelgarcia3333@gmail.com)
- * - Santi (santi_777@hotmail.es)
+ * Determina si el entorno tiene activado el modo de simulación o pruebas.
+ * El modo de prueba solo se activa si se especifica EXPLÍCITAMENTE SMTP_TEST_MODE="true".
+ * Si no está configurado o es "false", el sistema opera en modo de envío general a cualquier cliente.
+ */
+export function isSmtpTestMode(): boolean {
+  return process.env.SMTP_TEST_MODE === "true";
+}
+
+/**
+ * Lista de correos autorizados en modo de prueba / demo opcional.
+ * Se lee exclusivamente de la variable de entorno SMTP_ALLOWED_EMAILS (separada por comas).
+ * Si no está definida ninguna lista, no hay lista fija en código: retorna array vacío.
  */
 export function getAllowedEmails(): string[] {
   const envAllowed = process.env.SMTP_ALLOWED_EMAILS;
@@ -562,36 +568,36 @@ export function getAllowedEmails(): string[] {
       .filter(Boolean);
     if (parsed.length > 0) return parsed;
   }
-
-  // Direcciones oficiales identificadas de los 3 usuarios de prueba
-  return [
-    "acumanu56@gmail.com",
-    "manuacu56@gmail.com",
-    "lionelgarcia3333@gmail.com",
-    "santi_777@hotmail.es",
-  ];
+  return [];
 }
 
 /**
- * Determina si el entorno está operando con filtro de destinatarios (modo prueba / demo).
- * En producción (cuando SMTP_TEST_MODE !== "true" y no está definida una lista restrictiva),
- * se permiten todas las direcciones de clientes reales.
+ * Evalúa si una dirección de correo es un destinatario válido para el despacho de mensajes.
+ * 
+ * Regla de negocio y seguridad:
+ * 1. Debe ser un correo no vacío y con formato sintáctico válido.
+ * 2. Si SMTP_TEST_MODE !== "true", se permite el envío libre a CUALQUIER cliente real.
+ * 3. Si SMTP_TEST_MODE === "true":
+ *    - Si existe una lista en SMTP_ALLOWED_EMAILS, restringe solo a esos correos.
+ *    - Si no existe lista en SMTP_ALLOWED_EMAILS, NO bloquea correos válidos por defecto.
  */
 export function isEmailAllowed(email: string): boolean {
   const clean = (email || "").trim().toLowerCase();
   if (!clean || !clean.includes("@")) return false;
 
-  const isTestMode =
-    process.env.SMTP_TEST_MODE === "true" ||
-    process.env.NODE_ENV !== "production" ||
-    Boolean(process.env.SMTP_ALLOWED_EMAILS);
-
-  if (!isTestMode) {
-    return true; // En producción sin modo de pruebas, se admite cualquier cliente real
+  // Si no está explícitamente activado el modo de pruebas, se admite cualquier cliente
+  if (!isSmtpTestMode()) {
+    return true;
   }
 
+  // Si está activado SMTP_TEST_MODE="true", verificar si se definió una lista blanca en env
   const allowed = getAllowedEmails();
-  return allowed.includes(clean);
+  if (allowed.length > 0) {
+    return allowed.includes(clean);
+  }
+
+  // Si SMTP_TEST_MODE="true" pero no se configuró SMTP_ALLOWED_EMAILS, se admite el envío
+  return true;
 }
 
 /**
@@ -1113,6 +1119,131 @@ Si no solicitaste restablecer tu contraseña, ignorá este mensaje. Tu cuenta pe
     return { success: true };
   } catch (err: any) {
     console.error("[EMAIL_SERVICE: ERROR SMTP] Error al enviar código de recuperación:", err?.message || err);
+    return { success: false, error: err?.message || "Fallo de conexión SMTP." };
+  }
+}
+
+/**
+ * Envía un código de 6 dígitos para verificar el correo electrónico al registrar una cuenta de cliente.
+ * Utiliza plantilla HTML institucional de seguridad con validez de 5 minutos.
+ */
+export async function enviarEmailCodigoRegistro(params: {
+  nombreCliente: string;
+  email: string;
+  codigo: string;
+}): Promise<{ success: boolean; simulated?: boolean; error?: string }> {
+  const { nombreCliente, email, codigo } = params;
+  const cleanEmail = (email || "").trim().toLowerCase();
+
+  const subject = `Tu código de verificación es ${codigo} · Chopper Repuestos`;
+
+  const html = `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>${subject}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #0f172a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1e293b;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #0f172a; padding: 32px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width: 540px; background-color: #ffffff; border-radius: 16px; border: 1px solid #334155; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);">
+          <tr>
+            <td style="background-color: #dc2626; padding: 24px 28px; text-align: left;">
+              <span style="display: inline-block; background-color: rgba(255,255,255,0.2); color: #ffffff; font-size: 11px; font-weight: 800; letter-spacing: 1px; padding: 3px 8px; border-radius: 6px; text-transform: uppercase;">
+                Verificación de Cuenta
+              </span>
+              <h1 style="margin: 8px 0 0 0; color: #ffffff; font-size: 22px; font-weight: 900; letter-spacing: -0.5px;">
+                CHOPPER REPUESTOS
+              </h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px 28px;">
+              <h2 style="margin: 0 0 12px 0; color: #0f172a; font-size: 18px; font-weight: 800;">
+                Confirmá tu correo electrónico
+              </h2>
+              <p style="margin: 0 0 16px 0; color: #475569; font-size: 14px; line-height: 1.6;">
+                Hola <strong>${nombreCliente}</strong>, para completar la creación de tu cuenta en Chopper Repuestos, ingresá este código de verificación de 6 dígitos:
+              </p>
+              <div style="background-color: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 18px; text-align: center; margin: 20px 0;">
+                <span style="display: inline-block; font-family: 'Courier New', Courier, monospace; font-size: 32px; font-weight: 900; letter-spacing: 10px; color: #dc2626; padding-left: 10px;">
+                  ${codigo}
+                </span>
+              </div>
+              <div style="background-color: #eff6ff; border-left: 4px solid #3b82f6; padding: 12px 14px; border-radius: 6px; margin-bottom: 22px;">
+                <p style="margin: 0; color: #1e40af; font-size: 12px; line-height: 1.5;">
+                  ⏱ <strong>Validez:</strong> Este código expira en <strong>5 minutos</strong> y solo puede utilizarse una vez.
+                </p>
+              </div>
+              <p style="margin: 0 0 8px 0; color: #64748b; font-size: 12px; line-height: 1.5;">
+                Si vos no estabas creando una cuenta con este correo en Chopper Repuestos, podés desestimar este mensaje. Ninguna cuenta será activada sin este código.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 18px 24px; text-align: center; color: #94a3b8; font-size: 11px; line-height: 1.5;">
+              Chopper Repuestos · Posadas, Misiones<br/>
+              Av. Roque Sáenz Peña 1500 · WhatsApp: +54 9 376 524-3554
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `.trim();
+
+  const text = `
+CHOPPER REPUESTOS · Posadas, Misiones
+Confirmá tu correo electrónico
+----------------------------------------
+Hola ${nombreCliente}, para completar la creación de tu cuenta, ingresá el siguiente código de 6 dígitos:
+
+${codigo}
+
+Este código expira en 5 minutos y solo puede utilizarse una vez.
+
+Si vos no solicitaste crear esta cuenta, ignorá este mensaje.
+  `.trim();
+
+  if (!isSmtpConfigured()) {
+    console.log(
+      `[EMAIL_SERVICE: DRY-RUN] Código de registro para ${cleanEmail}: ${codigo}`
+    );
+    return { success: true, simulated: true };
+  }
+
+  // Filtro de lista blanca en modo pruebas/demo
+  if (!isEmailAllowed(cleanEmail)) {
+    console.warn(
+      `[EMAIL_SERVICE: OMITIDO (MODO DEMO)] Código de registro para '${cleanEmail}' omitido (destinatario no en lista blanca de pruebas). Código: ${codigo}`
+    );
+    return {
+      success: true,
+      simulated: true,
+    };
+  }
+
+  try {
+    const transporter = createTransporter();
+    const config = getSmtpConfig();
+    if (!transporter || !config) {
+      return { success: false, error: "Transporter SMTP no configurado." };
+    }
+    await transporter.sendMail({
+      from: config.from,
+      to: cleanEmail,
+      subject,
+      text,
+      html,
+    });
+    console.log(`[EMAIL_SERVICE: ENVIADO] Código de registro enviado a ${cleanEmail}`);
+    return { success: true };
+  } catch (err: any) {
+    console.error("[EMAIL_SERVICE: ERROR SMTP] Error al enviar código de registro:", err?.message || err);
     return { success: false, error: err?.message || "Fallo de conexión SMTP." };
   }
 }

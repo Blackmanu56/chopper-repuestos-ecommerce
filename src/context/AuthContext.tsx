@@ -4,6 +4,9 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 import {
   loginClientAction,
   registerClientAction,
+  solicitarRegistroClienteAction,
+  confirmarRegistroClienteAction,
+  reenviarCodigoRegistroAction,
   loginStaffAction,
   logoutAction,
   updateStaffProfileAction,
@@ -51,6 +54,21 @@ interface AuthContextType {
     dni?: string;
     direccion?: string;
   }) => Promise<{ success: boolean; error?: string }>;
+  solicitarRegistro: (data: {
+    nombreCompleto: string;
+    email: string;
+    telefono: string;
+    password: string;
+    dni?: string;
+    direccion?: string;
+  }) => Promise<{ success: boolean; message?: string; emailMasked?: string; cooldownSeconds?: number; error?: string }>;
+  confirmarRegistro: (
+    email: string,
+    codigo: string
+  ) => Promise<{ success: boolean; error?: string }>;
+  reenviarCodigoRegistro: (
+    email: string
+  ) => Promise<{ success: boolean; message?: string; cooldownSeconds?: number; error?: string }>;
   loginStaff: (username: string, pass: string) => Promise<{ success: boolean; error?: string }>;
   updateUserProfile: (
     data: Partial<UserSession> & { currentPassword?: string; newPassword?: string }
@@ -75,6 +93,9 @@ const AuthContext = createContext<AuthContextType>({
   login: async () => false,
   loginClient: async () => ({ success: false }),
   registerClient: async () => ({ success: false }),
+  solicitarRegistro: async () => ({ success: false }),
+  confirmarRegistro: async () => ({ success: false }),
+  reenviarCodigoRegistro: async () => ({ success: false }),
   loginStaff: async () => ({ success: false }),
   updateUserProfile: async () => ({ success: false }),
   uploadProfilePhoto: async () => ({ success: false }),
@@ -245,6 +266,72 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       console.error("Error al registrar cliente:", err);
       return { success: false, error: "Error de comunicación con el servidor." };
+    }
+  };
+
+  /**
+   * Solicita el envío del código de 6 dígitos para verificar el correo de registro
+   */
+  const solicitarRegistro = async (data: {
+    nombreCompleto: string;
+    email: string;
+    telefono: string;
+    password: string;
+    dni?: string;
+    direccion?: string;
+  }): Promise<{ success: boolean; message?: string; emailMasked?: string; cooldownSeconds?: number; error?: string }> => {
+    try {
+      return await solicitarRegistroClienteAction(data);
+    } catch (err) {
+      console.error("Error al solicitar registro:", err);
+      return { success: false, error: "Error de comunicación con el servidor." };
+    }
+  };
+
+  /**
+   * Confirma el código de 6 dígitos, crea la cuenta y activa la sesión
+   */
+  const confirmarRegistro = async (
+    email: string,
+    codigo: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await confirmarRegistroClienteAction(email, codigo);
+      if (res.success && res.user) {
+        const sessionUser: UserSession = {
+          id: res.user.id,
+          username: res.user.username,
+          nombreCompleto: res.user.nombreCompleto,
+          rol: "CLIENTE",
+          correo: res.user.correo || email,
+          telefono: res.user.telefono || undefined,
+          direccion: res.user.direccion || undefined,
+          dni: res.user.dni || undefined,
+          cuit: res.user.cuit || undefined,
+        };
+        setUser(sessionUser);
+        localStorage.setItem("chopper_user", JSON.stringify(sessionUser));
+        setSessionExpiredNotice(null);
+        return { success: true };
+      }
+      return { success: false, error: res.error || "Código incorrecto o no se pudo crear la cuenta." };
+    } catch (err) {
+      console.error("Error al confirmar registro:", err);
+      return { success: false, error: "Error de comunicación con el servidor." };
+    }
+  };
+
+  /**
+   * Reenvía un nuevo código de 6 dígitos con cooldown e invalidación del anterior
+   */
+  const reenviarCodigoRegistro = async (
+    email: string
+  ): Promise<{ success: boolean; message?: string; cooldownSeconds?: number; error?: string }> => {
+    try {
+      return await reenviarCodigoRegistroAction(email);
+    } catch (err) {
+      console.error("Error al reenviar código de registro:", err);
+      return { success: false, error: "Error al solicitar nuevo código." };
     }
   };
 
@@ -427,6 +514,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         login,
         loginClient,
         registerClient,
+        solicitarRegistro,
+        confirmarRegistro,
+        reenviarCodigoRegistro,
         loginStaff,
         updateUserProfile,
         uploadProfilePhoto,
