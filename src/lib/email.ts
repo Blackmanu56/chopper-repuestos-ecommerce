@@ -686,6 +686,18 @@ export interface EmailAdjunto {
   contentType?: string;
 }
 
+// Candado de envíos en vuelo para evitar duplicación ante llamadas concurrentes al mismo evento
+const inFlightPedidoEmails = new Map<
+  string,
+  Promise<{
+    success: boolean;
+    skipped?: boolean;
+    simulated?: boolean;
+    reason?: string;
+    error?: string;
+  }>
+>();
+
 /**
  * Envía el correo automático al cliente garantizando estricta idempotencia y tolerancia a fallos
  */
@@ -730,137 +742,158 @@ export async function enviarEmailPedidoEvento(params: {
   // Clave única de idempotencia: pedido_{id}_{evento}
   const idempotencyKey = `pedido_${pedido.id}_${evento}`;
 
-  // Filtro estricto de seguridad para entorno de demostración / pruebas (Requisito 1)
-  // Omite envíos a correos ficticios de pedidos anteriores sin generar reintentos ni marcarlos como enviados
-  if (!isEmailAllowed(emailDestino)) {
-    console.warn(
-      `[EMAIL_SERVICE: OMITIDO (MODO DEMO)] Pedido #ORD-${pedido.numero}: destinatario '${emailDestino}' no autorizado en lista blanca. Envío bloqueado sin reintentos.`
-    );
-    await markEmailAsBlocked(
-      idempotencyKey,
-      evento,
-      emailDestino,
-      "Destinatario no autorizado en lista blanca de pruebas (SMTP_ALLOWED_EMAILS)"
-    );
-    return {
-      success: true,
-      skipped: true,
-      reason: `Destinatario '${emailDestino}' omitido por filtro de pruebas/demo. No se generarán reintentos ni fallos SMTP.`,
-    };
+  // Si no se fuerza reenvío y ya existe un envío idéntico en vuelo (concurrente), reutilizar la promesa
+  if (!forzarReenvio && inFlightPedidoEmails.has(idempotencyKey)) {
+    return inFlightPedidoEmails.get(idempotencyKey)!;
   }
 
-  if (!forzarReenvio) {
-    const logs = await getSentEmailLogs();
-    if (logs[idempotencyKey]) {
-      return { success: true, skipped: true, reason: `Correo para '${evento}' ya fue enviado previamente a ${emailDestino}.` };
+  const runSending = async (): Promise<{
+    success: boolean;
+    skipped?: boolean;
+    simulated?: boolean;
+    reason?: string;
+    error?: string;
+  }> => {
+    // Filtro estricto de seguridad para entorno de demostración / pruebas (Requisito 1)
+    // Omite envíos a correos ficticios de pedidos anteriores sin generar reintentos ni marcarlos como enviados
+    if (!isEmailAllowed(emailDestino)) {
+      console.warn(
+        `[EMAIL_SERVICE: OMITIDO (MODO DEMO)] Pedido #ORD-${pedido.numero}: destinatario '${emailDestino}' no autorizado en lista blanca. Envío bloqueado sin reintentos.`
+      );
+      await markEmailAsBlocked(
+        idempotencyKey,
+        evento,
+        emailDestino,
+        "Destinatario no autorizado en lista blanca de pruebas (SMTP_ALLOWED_EMAILS)"
+      );
+      return {
+        success: true,
+        skipped: true,
+        reason: `Destinatario '${emailDestino}' omitido por filtro de pruebas/demo. No se generarán reintentos ni fallos SMTP.`,
+      };
     }
-  }
 
-  // Para Pago Confirmado, adjuntar automáticamente el Comprobante de Compra PDF adaptado del SGI (Requisitos 1 a 4)
-  let adjuntosFinales = params.adjuntos ? [...params.adjuntos] : [];
-  if (evento === "TRANSFERENCIA_APROBADA" && adjuntosFinales.length === 0) {
+    if (!forzarReenvio) {
+      const logs = await getSentEmailLogs();
+      if (logs[idempotencyKey]) {
+        return { success: true, skipped: true, reason: `Correo para '${evento}' ya fue enviado previamente a ${emailDestino}.` };
+      }
+    }
+
+    // Para Pago Confirmado, adjuntar automáticamente el Comprobante de Compra PDF adaptado del SGI (Requisitos 1 a 4)
+    let adjuntosFinales = params.adjuntos ? [...params.adjuntos] : [];
+    if (evento === "TRANSFERENCIA_APROBADA" && adjuntosFinales.length === 0) {
+      try {
+        const pedidoIdentificador = pedido.id || pedido.numero;
+        let pdfBuffer = await generarComprobantePdfPorPedidoId(pedidoIdentificador);
+
+        // Respaldo robusto: si la consulta directa falla pero tenemos los datos de items en memoria, generarlo directamente
+        if ((!pdfBuffer || pdfBuffer.length === 0) && pedido.items && pedido.items.length > 0) {
+          pdfBuffer = await buildComprobantePdf({
+            numero: pedido.numero,
+            creadoEn: new Date(),
+            fechaPago: new Date(),
+            nombreCliente: pedido.nombreCliente,
+            direccionEnvio: pedido.direccionEnvio,
+            modalidadEntrega: pedido.modalidadEntrega,
+            metodoPago: pedido.metodoPago,
+            costoEnvio: pedido.costoEnvio,
+            total: pedido.total,
+            items: pedido.items.map((it) => ({
+              nombre: it.nombre,
+              marca: it.marca,
+              cantidad: it.cantidad,
+              precioUnitario: it.precioUnitario,
+              subtotal: it.subtotal,
+            })),
+          });
+        }
+
+        if (pdfBuffer && Buffer.isBuffer(pdfBuffer) && pdfBuffer.length > 0) {
+          adjuntosFinales.push({
+            filename: `Comprobante-Compra-ORD-${pedido.numero}.pdf`,
+            content: pdfBuffer,
+            contentType: "application/pdf",
+          });
+        } else {
+          console.warn(`[COMPROBANTE_PDF] Comprobante no generado o vacío para pedido #${pedido.numero}. Se omitirá anuncio de adjunto.`);
+        }
+      } catch (pdfErr) {
+        console.error(`[COMPROBANTE_PDF] Error al adjuntar comprobante para pedido #${pedido.numero}:`, pdfErr);
+      }
+    }
+
+    // Comprobar estrictamente que exista un adjunto PDF válido y con bytes antes de anunciarlo en el cuerpo del correo
+    const tieneComprobanteAdjunto = adjuntosFinales.some((a) => {
+      const isPdf = a.contentType === "application/pdf" || a.filename?.toLowerCase().endsWith(".pdf");
+      const hasBytes = Buffer.isBuffer(a.content) ? a.content.length > 0 : typeof a.content === "string" ? a.content.length > 0 : false;
+      return isPdf && hasBytes;
+    });
+
+    const template = renderEmailTemplate(evento, {
+      numero: pedido.numero,
+      nombreCliente: pedido.nombreCliente,
+      emailCliente: emailDestino,
+      modalidadEntrega: pedido.modalidadEntrega,
+      metodoPago: pedido.metodoPago,
+      costoEnvio: pedido.costoEnvio,
+      total: pedido.total,
+      items: pedido.items,
+      direccionEnvio: pedido.direccionEnvio,
+      motivoCancelacion,
+      estadoPago: pedido.estadoPago,
+      adjuntoComprobante: tieneComprobanteAdjunto,
+    });
+
+    // Si no hay credenciales SMTP configuradas (modo local/dev/mock)
+    if (!isSmtpConfigured()) {
+      console.log(
+        `[EMAIL_SERVICE: DRY-RUN] Para: ${emailDestino} | Asunto: "${template.subject}" | Evento: ${evento} (SMTP no configurado en entorno: defina SMTP_USER y SMTP_PASS para envíos reales)`
+      );
+      return { success: true, simulated: true, reason: "SMTP_USER/SMTP_PASS no configurado; evento simulado (DRY-RUN)." };
+    }
+
     try {
-      const pedidoIdentificador = pedido.id || pedido.numero;
-      let pdfBuffer = await generarComprobantePdfPorPedidoId(pedidoIdentificador);
-
-      // Respaldo robusto: si la consulta directa falla pero tenemos los datos de items en memoria, generarlo directamente
-      if ((!pdfBuffer || pdfBuffer.length === 0) && pedido.items && pedido.items.length > 0) {
-        pdfBuffer = await buildComprobantePdf({
-          numero: pedido.numero,
-          creadoEn: new Date(),
-          fechaPago: new Date(),
-          nombreCliente: pedido.nombreCliente,
-          direccionEnvio: pedido.direccionEnvio,
-          modalidadEntrega: pedido.modalidadEntrega,
-          metodoPago: pedido.metodoPago,
-          costoEnvio: pedido.costoEnvio,
-          total: pedido.total,
-          items: pedido.items.map((it) => ({
-            nombre: it.nombre,
-            marca: it.marca,
-            cantidad: it.cantidad,
-            precioUnitario: it.precioUnitario,
-            subtotal: it.subtotal,
-          })),
-        });
+      const transporter = createTransporter();
+      const config = getSmtpConfig();
+      if (!transporter || !config) {
+        return { success: false, error: "Transporter SMTP no pudo ser inicializado con la configuración provista." };
       }
 
-      if (pdfBuffer && Buffer.isBuffer(pdfBuffer) && pdfBuffer.length > 0) {
-        adjuntosFinales.push({
-          filename: `Comprobante-Compra-ORD-${pedido.numero}.pdf`,
-          content: pdfBuffer,
-          contentType: "application/pdf",
-        });
-      } else {
-        console.warn(`[COMPROBANTE_PDF] Comprobante no generado o vacío para pedido #${pedido.numero}. Se omitirá anuncio de adjunto.`);
-      }
-    } catch (pdfErr) {
-      console.error(`[COMPROBANTE_PDF] Error al adjuntar comprobante para pedido #${pedido.numero}:`, pdfErr);
+      const mailOptions: SendMailOptions = {
+        from: config.from,
+        to: emailDestino,
+        subject: template.subject,
+        text: template.text,
+        html: template.html,
+        attachments: adjuntosFinales.map((a) => ({
+          filename: a.filename,
+          content: a.content,
+          contentType: a.contentType || "application/pdf",
+          contentDisposition: "attachment" as const,
+        })),
+      };
+
+      const sendInfo = await transporter.sendMail(mailOptions);
+      console.log(
+        `[EMAIL_SERVICE: ENVIADO] Pedido #ORD-${pedido.numero} | Evento: ${evento} | Destino: ${emailDestino} | Adjuntos: ${mailOptions.attachments?.length || 0} | MessageId: ${sendInfo.messageId}`
+      );
+
+      await markEmailAsSent(idempotencyKey, evento);
+      return { success: true };
+    } catch (err: any) {
+      console.error(`[EMAIL_SERVICE: ERROR SMTP] No se pudo enviar correo de evento ${evento} a ${emailDestino}:`, err?.message || err);
+      // Un error de correo no debe romper el flujo de la aplicación
+      return { success: false, error: err?.message || "Fallo de conexión SMTP." };
     }
-  }
+  };
 
-  // Comprobar estrictamente que exista un adjunto PDF válido y con bytes antes de anunciarlo en el cuerpo del correo
-  const tieneComprobanteAdjunto = adjuntosFinales.some((a) => {
-    const isPdf = a.contentType === "application/pdf" || a.filename?.toLowerCase().endsWith(".pdf");
-    const hasBytes = Buffer.isBuffer(a.content) ? a.content.length > 0 : typeof a.content === "string" ? a.content.length > 0 : false;
-    return isPdf && hasBytes;
-  });
-
-  const template = renderEmailTemplate(evento, {
-    numero: pedido.numero,
-    nombreCliente: pedido.nombreCliente,
-    emailCliente: emailDestino,
-    modalidadEntrega: pedido.modalidadEntrega,
-    metodoPago: pedido.metodoPago,
-    costoEnvio: pedido.costoEnvio,
-    total: pedido.total,
-    items: pedido.items,
-    direccionEnvio: pedido.direccionEnvio,
-    motivoCancelacion,
-    estadoPago: pedido.estadoPago,
-    adjuntoComprobante: tieneComprobanteAdjunto,
-  });
-
-  // Si no hay credenciales SMTP configuradas (modo local/dev/mock)
-  if (!isSmtpConfigured()) {
-    console.log(
-      `[EMAIL_SERVICE: DRY-RUN] Para: ${emailDestino} | Asunto: "${template.subject}" | Evento: ${evento} (SMTP no configurado en entorno: defina SMTP_USER y SMTP_PASS para envíos reales)`
-    );
-    return { success: true, simulated: true, reason: "SMTP_USER/SMTP_PASS no configurado; evento simulado (DRY-RUN)." };
-  }
-
+  const promise = runSending();
+  inFlightPedidoEmails.set(idempotencyKey, promise);
   try {
-    const transporter = createTransporter();
-    const config = getSmtpConfig();
-    if (!transporter || !config) {
-      return { success: false, error: "Transporter SMTP no pudo ser inicializado con la configuración provista." };
-    }
-
-    const mailOptions: SendMailOptions = {
-      from: config.from,
-      to: emailDestino,
-      subject: template.subject,
-      text: template.text,
-      html: template.html,
-      attachments: adjuntosFinales.map((a) => ({
-        filename: a.filename,
-        content: a.content,
-        contentType: a.contentType || "application/pdf",
-        contentDisposition: "attachment" as const,
-      })),
-    };
-
-    const sendInfo = await transporter.sendMail(mailOptions);
-    console.log(
-      `[EMAIL_SERVICE: ENVIADO] Pedido #ORD-${pedido.numero} | Evento: ${evento} | Destino: ${emailDestino} | Adjuntos: ${mailOptions.attachments?.length || 0} | MessageId: ${sendInfo.messageId}`
-    );
-
-    await markEmailAsSent(idempotencyKey, evento);
-    return { success: true };
-  } catch (err: any) {
-    console.error(`[EMAIL_SERVICE: ERROR SMTP] No se pudo enviar correo de evento ${evento} a ${emailDestino}:`, err?.message || err);
-    // Un error de correo no debe romper el flujo de la aplicación
-    return { success: false, error: err?.message || "Fallo de conexión SMTP." };
+    return await promise;
+  } finally {
+    inFlightPedidoEmails.delete(idempotencyKey);
   }
 }
 
