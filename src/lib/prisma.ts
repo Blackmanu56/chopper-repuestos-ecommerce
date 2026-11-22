@@ -2,10 +2,6 @@ import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 
-const adapter = new PrismaPg({
-  connectionString: process.env.DATABASE_URL!,
-});
-
 const globalForPrisma = global as unknown as {
   prisma: PrismaClient | undefined;
 };
@@ -15,12 +11,21 @@ if (globalForPrisma.prisma && !("credencialCliente" in globalForPrisma.prisma)) 
   globalForPrisma.prisma = undefined;
 }
 
-export const prisma =
-  globalForPrisma.prisma ??
-  new PrismaClient({
+function createPrismaClient(): PrismaClient {
+  const adapter = new PrismaPg({
+    connectionString: process.env.DATABASE_URL!,
+    max: 15,
+    idleTimeoutMillis: 60_000,
+    connectionTimeoutMillis: 10_000,
+  });
+
+  return new PrismaClient({
     adapter,
     log: ["warn", "error"],
   });
+}
+
+export const prisma = globalForPrisma.prisma ?? createPrismaClient();
 
 if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = prisma;
