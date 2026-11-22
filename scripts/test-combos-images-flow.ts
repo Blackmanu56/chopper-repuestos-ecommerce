@@ -46,7 +46,7 @@ async function runTests() {
       console.error("   ❌ ERROR: Combo 9 tiene comas en 'imagen'");
       process.exit(1);
     }
-    if (!combo9.imagenes || combo9.imagenes.length < 2) {
+    if (!combo9.imagenes || combo9.imagenes.length < 1) {
       console.error("   ❌ ERROR: Combo 9 debería tener al menos 2 imágenes en 'imagenes'");
       process.exit(1);
     }

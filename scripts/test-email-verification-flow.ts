@@ -1,3 +1,26 @@
+import nodemailer from "nodemailer";
+
+// Configuración estricta de entorno aislado para evitar envíos SMTP reales
+(process.env as any).NODE_ENV = "test";
+process.env.MOCK_EMAIL = "true";
+
+// Interceptar createTransport de Nodemailer con mock en memoria
+const mockSentEmails: Array<{ to: string; subject: string; text?: string; html?: string }> = [];
+(nodemailer as any).createTransport = () => {
+  return {
+    sendMail: async (options: any) => {
+      mockSentEmails.push({
+        to: options.to,
+        subject: options.subject,
+        text: options.text,
+        html: options.html,
+      });
+      return { messageId: `mock_${Date.now()}_${Math.random().toString(36).substring(2)}` };
+    },
+    verify: async () => true,
+  } as any;
+};
+
 import { prisma } from "../src/lib/prisma";
 import {
   solicitarRegistroClienteAction,
@@ -166,6 +189,7 @@ async function main() {
 
     // Simular que pasaron 60 segundos para permitir reenvíos 1, 2 y 3
     for (let r = 1; r <= 3; r++) {
+      await new Promise((resolve) => setTimeout(resolve, 4100)); // Superar debounce de seguridad (4s)
       const rowR = await prisma.configuracionEcommerce.findUnique({
         where: { clave: `registro_pendiente_${solReenvioEmail}` },
       });
@@ -182,6 +206,7 @@ async function main() {
     }
 
     // El 4to reenvío debe ser bloqueado por superar el máximo de 3
+    await new Promise((resolve) => setTimeout(resolve, 4100));
     const rowR4 = await prisma.configuracionEcommerce.findUnique({
       where: { clave: `registro_pendiente_${solReenvioEmail}` },
     });

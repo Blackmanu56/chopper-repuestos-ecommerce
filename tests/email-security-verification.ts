@@ -57,6 +57,8 @@ const originalCreateTransport = nodemailer.createTransport;
 };
 
 // Variables para pruebas controladas
+(process.env as any).NODE_ENV = "test";
+process.env.MOCK_EMAIL = "true";
 process.env.SMTP_USER = "chopper.test.audit@gmail.com";
 process.env.SMTP_PASS = "mock_app_password_audit";
 process.env.SMTP_TEST_MODE = "false"; // Permitir evaluación sin listas blancas para mocks locales

@@ -555,6 +555,77 @@ export function isSmtpTestMode(): boolean {
 }
 
 /**
+ * Dominios y patrones reservados o sintéticos utilizados exclusivamente en pruebas,
+ * auditorías y desarrollo local. NUNCA deben enviarse al servidor SMTP real de Gmail.
+ */
+export const TEST_DOMAINS = [
+  "chopper.com",
+  "chopperrepuestos.com",
+  "choppertest.com",
+  "test-dedup.com",
+  "chopper-repuestos-test.com",
+  "example.com",
+  "example.org",
+  "example.net",
+  "test.com",
+  "test.org",
+  "test.net",
+  "invalid",
+  "localhost",
+];
+
+/**
+ * Determina si una dirección de correo corresponde a una prueba sintética, mock o desarrollo.
+ */
+export function isTestEmail(email: string): boolean {
+  const clean = (email || "").trim().toLowerCase();
+  if (!clean || !clean.includes("@")) return false;
+
+  const [localPart, domain] = clean.split("@");
+  if (!domain || !localPart) return false;
+
+  // 1. Dominios reservados o sintéticos de prueba
+  if (
+    TEST_DOMAINS.includes(domain) ||
+    domain.endsWith(".test") ||
+    domain.endsWith(".example") ||
+    domain.endsWith(".invalid") ||
+    domain.endsWith(".localhost")
+  ) {
+    return true;
+  }
+
+  // 2. Prefijos o patrones específicos de pruebas y reenvíos
+  if (
+    localPart.startsWith("test.") ||
+    localPart.startsWith("test_") ||
+    localPart.startsWith("test-") ||
+    localPart.includes(".test.") ||
+    localPart.includes("_test_") ||
+    localPart.includes("-test-") ||
+    localPart.includes(".reenvios.") ||
+    localPart.includes("test.reenvios") ||
+    localPart.includes("test_audit")
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Determina si el entorno actual está ejecutando pruebas automatizadas o mocks.
+ */
+export function isTestingEnvironment(): boolean {
+  return (
+    process.env.NODE_ENV === "test" ||
+    process.env.MOCK_EMAIL === "true" ||
+    process.env.VITEST === "true" ||
+    Boolean(process.env.JEST_WORKER_ID)
+  );
+}
+
+/**
  * Lista de correos autorizados en modo de prueba / demo opcional.
  * Se lee exclusivamente de la variable de entorno SMTP_ALLOWED_EMAILS (separada por comas).
  * Si no está definida ninguna lista, no hay lista fija en código: retorna array vacío.
@@ -576,16 +647,33 @@ export function getAllowedEmails(): string[] {
  * 
  * Regla de negocio y seguridad:
  * 1. Debe ser un correo no vacío y con formato sintáctico válido.
- * 2. Si SMTP_TEST_MODE !== "true", se permite el envío libre a CUALQUIER cliente real.
- * 3. Si SMTP_TEST_MODE === "true":
- *    - Si existe una lista en SMTP_ALLOWED_EMAILS, restringe solo a esos correos.
- *    - Si no existe lista en SMTP_ALLOWED_EMAILS, NO bloquea correos válidos por defecto.
+ * 2. En entorno de mocks explícito (MOCK_EMAIL="true"), se permite el flujo hacia el
+ *    transporte en memoria para validar la lógica interna sin tocar la red.
+ * 3. Bloqueo estricto contra spam de pruebas: si es una dirección o dominio de prueba
+ *    (isTestEmail = true), JAMÁS se despacha hacia el servidor SMTP real.
+ * 4. Si SMTP_TEST_MODE !== "true", se permite el envío libre a CUALQUIER cliente real.
+ * 5. Si SMTP_TEST_MODE === "true", restringe a la lista blanca SMTP_ALLOWED_EMAILS.
  */
 export function isEmailAllowed(email: string): boolean {
   const clean = (email || "").trim().toLowerCase();
   if (!clean || !clean.includes("@")) return false;
 
-  // Si no está explícitamente activado el modo de pruebas, se admite cualquier cliente
+  // En entorno de mocks explícito (MOCK_EMAIL="true"), se admite para evaluación en memoria
+  if (process.env.MOCK_EMAIL === "true") {
+    return true;
+  }
+
+  // Bloqueo estricto contra spam y rebotes de pruebas en SMTP real
+  if (isTestEmail(clean)) {
+    return false;
+  }
+
+  // Si estamos en entorno de testing sin mocks configurados, bloquear por seguridad
+  if (isTestingEnvironment()) {
+    return false;
+  }
+
+  // Si no está explícitamente activado el modo de pruebas, se admite cualquier cliente real
   if (!isSmtpTestMode()) {
     return true;
   }

@@ -5,6 +5,18 @@
  * 3. Gestión y filtrado de notificaciones internas de Staff por rol
  */
 
+import nodemailer from "nodemailer";
+
+// Configuración estricta de entorno aislado para evitar envíos SMTP reales
+(process.env as any).NODE_ENV = "test";
+process.env.MOCK_EMAIL = "true";
+
+// Mock en memoria de Nodemailer
+(nodemailer as any).createTransport = () => ({
+  sendMail: async () => ({ messageId: `mock_${Date.now()}` }),
+  verify: async () => true,
+});
+
 import { renderEmailTemplate, enviarEmailPedidoEvento, EmailEventoPedido } from "../src/lib/email";
 import {
   crearNotificacionStaffInternal,
