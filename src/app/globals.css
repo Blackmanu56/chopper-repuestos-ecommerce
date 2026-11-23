@@ -2,6 +2,7 @@
 
 /* Enforce class-based dark mode so OS dark mode does NOT interfere with light mode */
 @custom-variant dark (&:where(.dark, .dark *));
+@custom-variant desk (@media (min-width: 1280px) and (min-height: 800px));
 
 @theme {
   --color-brand: #d62828;

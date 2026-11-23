@@ -288,7 +288,7 @@ export default function CombosClient({ initialCombos }: CombosClientProps) {
         {/* LISTADO DE COMBOS */}
         <main className="lg:col-span-9 space-y-4">
           {filteredCombos.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 desk:gap-4">
               {filteredCombos.map((combo) => {
                 const hasOffer = Boolean(combo.enOferta && combo.precioRegular && combo.precioRegular > combo.precio);
                 const regular = hasOffer && combo.precioRegular ? combo.precioRegular : combo.precio;
@@ -314,24 +314,24 @@ export default function CombosClient({ initialCombos }: CombosClientProps) {
                 return (
                   <div
                     key={`combo-card-${combo.id}`}
-                    className="group flex flex-col justify-between rounded-2xl border border-slate-200 dark:border-line bg-white dark:bg-card p-4 hover:border-amber-500/70 hover:shadow-xl transition-all shadow-sm"
+                    className="group flex flex-col justify-between rounded-xl desk:rounded-2xl border border-slate-200 dark:border-line bg-white dark:bg-card p-2.5 desk:p-4 hover:border-amber-500/70 hover:shadow-xl transition-all shadow-sm"
                   >
                     <div>
                       {/* Badges superiores: Ahorro & Promo */}
-                      <div className="flex items-center justify-between gap-1.5 mb-2.5">
+                      <div className="flex items-center justify-between gap-1.5 mb-1.5 desk:mb-2.5">
                         {hasOffer && shouldShowAhorroBadge(ahorro) ? (
-                          <span className="rounded-md bg-brand px-2 py-0.5 text-[10px] font-black uppercase text-white shadow-sm">
+                          <span className="rounded-md bg-brand px-1.5 desk:px-2 py-0.5 text-[9px] desk:text-[10px] font-black uppercase text-white shadow-sm">
                             {combo.descuentoPorcentaje}% OFF
                           </span>
                         ) : (
                           <span />
                         )}
                         {combo.badge ? (
-                          <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-500 dark:text-amber-400">
+                          <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 desk:px-2 py-0.5 text-[9px] desk:text-[10px] font-bold text-amber-500 dark:text-amber-400">
                             {combo.badge}
                           </span>
                         ) : combo.destacado ? (
-                          <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-500 dark:text-amber-400">
+                          <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 desk:px-2 py-0.5 text-[9px] desk:text-[10px] font-bold text-amber-500 dark:text-amber-400">
                             ⭐ Destacado
                           </span>
                         ) : null}
@@ -340,7 +340,7 @@ export default function CombosClient({ initialCombos }: CombosClientProps) {
                       {/* Imagen del Combo */}
                       <Link
                         href={`/combos/${combo.id}`}
-                        className="relative mb-3 flex h-44 w-full items-center justify-center rounded-xl bg-slate-50 dark:bg-surface text-slate-500 overflow-hidden p-2 border border-slate-100 dark:border-line/40 block cursor-pointer"
+                        className="relative mb-2 desk:mb-3 flex h-28 sm:h-32 desk:h-44 w-full items-center justify-center rounded-xl bg-slate-50 dark:bg-surface text-slate-500 overflow-hidden p-1.5 desk:p-2 border border-slate-100 dark:border-line/40 block cursor-pointer"
                       >
                         <img
                           src={getCatalogImageUrl(combo.imagen) || "/combos/combo-service-motul.jpg"}
@@ -362,7 +362,7 @@ export default function CombosClient({ initialCombos }: CombosClientProps) {
                       {/* Título del combo */}
                       <Link
                         href={`/combos/${combo.id}`}
-                        className="line-clamp-2 text-sm font-bold text-slate-900 dark:text-white hover:text-amber-500 transition-colors leading-snug min-h-[40px] block"
+                        className="line-clamp-2 text-xs desk:text-sm font-bold text-slate-900 dark:text-white hover:text-amber-500 transition-colors leading-snug min-h-[32px] desk:min-h-[40px] block"
                         title={combo.nombre}
                       >
                         {combo.nombre}

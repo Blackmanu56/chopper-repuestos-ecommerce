@@ -97,21 +97,21 @@ export default function CombosSection({ initialCombos }: CombosSectionProps) {
   return (
     <section id="combos" className="scroll-mt-24">
       {/* Encabezado con Botón Verde Ver Todo */}
-      <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-line mb-5">
+      <div className="flex items-center justify-between pb-2 desk:pb-3 border-b border-slate-200 dark:border-line mb-3 desk:mb-5">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white md:text-3xl">
+            <h2 className="text-xl font-black tracking-tight text-slate-900 dark:text-white desk:text-3xl">
               Combos Armados
             </h2>
           </div>
-          <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+          <p className="mt-0.5 desk:mt-1 text-[11px] desk:text-xs text-slate-600 dark:text-slate-400">
             Kits listos para tu moto. El mejor precio combinando repuestos esenciales en Posadas.
           </p>
         </div>
 
         <Link
           href="/combos"
-          className="flex items-center gap-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 px-4 py-2 text-xs font-bold text-white transition-all shadow-md active:scale-95"
+          className="flex items-center gap-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 px-3 py-1.5 desk:px-4 desk:py-2 text-[11px] desk:text-xs font-bold text-white transition-all shadow-md active:scale-95"
         >
           <span>Ver todo</span>
           <ChevronRight size={15} />
@@ -167,22 +167,22 @@ export default function CombosSection({ initialCombos }: CombosSectionProps) {
             return (
             <div
               key={combo.id}
-              className="w-[280px] sm:w-[320px] md:w-[340px] shrink-0 group flex flex-col justify-between rounded-2xl border border-slate-200 dark:border-line bg-white dark:bg-card p-4 hover:border-brand/70 hover:shadow-xl transition-all shadow-sm"
+              className="w-[215px] sm:w-[235px] desk:w-[340px] shrink-0 group flex flex-col justify-between rounded-xl desk:rounded-2xl border border-slate-200 dark:border-line bg-white dark:bg-card p-2.5 desk:p-4 hover:border-brand/70 hover:shadow-xl transition-all shadow-sm"
             >
             <div>
               {/* Badges superiores */}
-              <div className="flex items-center justify-between gap-2 mb-3">
+              <div className="flex items-center justify-between gap-2 mb-2 desk:mb-3">
                 {hasOffer && shouldShowAhorroBadge(combo.ahorro) ? (
-                  <span className="rounded-md bg-brand px-2 py-0.5 text-[10px] font-black uppercase text-white shadow-sm">
+                  <span className="rounded-md bg-brand px-1.5 desk:px-2 py-0.5 text-[9px] desk:text-[10px] font-black uppercase text-white shadow-sm">
                     AHORRÁ {formatPrice(combo.ahorro)}
                   </span>
                 ) : <span />}
                 {combo.badge ? (
-                  <span className="rounded-md border border-brand/40 bg-brand/10 px-2 py-0.5 text-[10px] font-bold text-brand">
+                  <span className="rounded-md border border-brand/40 bg-brand/10 px-1.5 desk:px-2 py-0.5 text-[9px] desk:text-[10px] font-bold text-brand">
                     {combo.badge}
                   </span>
                 ) : combo.destacado ? (
-                  <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                  <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 desk:px-2 py-0.5 text-[9px] desk:text-[10px] font-bold text-amber-600 dark:text-amber-400">
                     ⭐ Destacado
                   </span>
                 ) : null}
@@ -191,7 +191,7 @@ export default function CombosSection({ initialCombos }: CombosSectionProps) {
               {/* Imagen del Combo con enlace */}
               <Link
                 href={`/combos/${combo.id}`}
-                className="relative mb-3 flex h-48 w-full items-center justify-center rounded-xl bg-slate-50 dark:bg-surface overflow-hidden p-2 border border-slate-100 dark:border-line/40 block cursor-pointer"
+                className="relative mb-2 desk:mb-3 flex h-28 sm:h-32 desk:h-48 w-full items-center justify-center rounded-xl bg-slate-50 dark:bg-surface overflow-hidden p-1.5 desk:p-2 border border-slate-100 dark:border-line/40 block cursor-pointer"
               >
                 <img
                   src={getCatalogImageUrl(combo.imagen) || "/combos/combo-service-motul.jpg"}
@@ -210,25 +210,25 @@ export default function CombosSection({ initialCombos }: CombosSectionProps) {
                 href={`/combos/${combo.id}`}
                 className="block cursor-pointer"
               >
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white line-clamp-2 leading-snug group-hover:text-brand transition-colors">
+                <h3 className="text-xs desk:text-sm font-bold text-slate-900 dark:text-white line-clamp-2 leading-snug group-hover:text-brand transition-colors">
                   {combo.nombre}
                 </h3>
               </Link>
-              <p className="mt-1 text-xs text-slate-700 dark:text-slate-300 line-clamp-2">
+              <p className="mt-0.5 desk:mt-1 text-[11px] desk:text-xs text-slate-700 dark:text-slate-300 line-clamp-1 desk:line-clamp-2">
                 {combo.descripcion}
               </p>
             </div>
 
-            <div className="mt-4 pt-3 border-t border-slate-200 dark:border-line/60">
+            <div className="mt-2.5 desk:mt-4 pt-2 desk:pt-3 border-t border-slate-200 dark:border-line/60">
               {/* Precios: Izquierda (precios) / Derecha (ahorro) */}
               <div className="flex items-end justify-between gap-2">
                 <div>
                   {hasOffer && combo.precioRegular && (
-                    <div className="text-xs text-slate-500 line-through">
+                    <div className="text-[11px] desk:text-xs text-slate-500 line-through">
                       {formatPrice(combo.precioRegular)}
                     </div>
                   )}
-                  <div className="text-xl font-black text-brand tracking-tight">
+                  <div className="text-base desk:text-xl font-black text-brand tracking-tight">
                     {formatPrice(combo.precio)}
                   </div>
                 </div>

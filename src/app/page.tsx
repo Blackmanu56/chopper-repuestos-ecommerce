@@ -27,7 +27,7 @@ export default async function HomePage({ searchParams }: PageProps) {
   ]);
 
   return (
-    <div className="space-y-12">
+    <div className="space-y-6 desk:space-y-12">
       {/* 1. HERO Y MINI BANNERS (SCREENSHOT 1 Y 2) */}
       <HeroBanners initialBanners={banners} />
 

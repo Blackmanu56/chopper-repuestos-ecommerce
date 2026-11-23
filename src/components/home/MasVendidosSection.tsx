@@ -43,19 +43,19 @@ export default function MasVendidosSection({ products }: { products: ProductItem
   return (
     <section id="mas-vendidos" className="scroll-mt-24">
       {/* Encabezado con Botón Verde Ver Todo */}
-      <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-line mb-5">
+      <div className="flex items-center justify-between pb-2 desk:pb-3 border-b border-slate-200 dark:border-line mb-3 desk:mb-5">
         <div>
-          <h2 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white md:text-3xl">
+          <h2 className="text-xl font-black tracking-tight text-slate-900 dark:text-white desk:text-3xl">
             Lo más vendido
           </h2>
-          <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+          <p className="mt-0.5 desk:mt-1 text-[11px] desk:text-xs text-slate-600 dark:text-slate-400">
             Lo más elegido por la comunidad motoquera de Posadas.
           </p>
         </div>
 
         <Link
           href="/ofertas?orden=mas_vendidos"
-          className="flex items-center gap-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 px-4 py-2 text-xs font-bold text-white transition-all shadow-md active:scale-95"
+          className="flex items-center gap-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 px-3 py-1.5 desk:px-4 desk:py-2 text-[11px] desk:text-xs font-bold text-white transition-all shadow-md active:scale-95"
         >
           <span>Ver todo</span>
           <ChevronRight size={15} />
@@ -98,11 +98,11 @@ export default function MasVendidosSection({ products }: { products: ProductItem
             return (
             <div
               key={prod.id}
-              className="w-[185px] sm:w-[210px] md:w-[220px] shrink-0 group flex flex-col justify-between rounded-2xl border border-slate-200 dark:border-line bg-white dark:bg-card p-3 hover:border-brand/70 hover:shadow-xl transition-all shadow-sm"
+              className="w-[155px] sm:w-[175px] desk:w-[220px] shrink-0 group flex flex-col justify-between rounded-xl desk:rounded-2xl border border-slate-200 dark:border-line bg-white dark:bg-card p-2 desk:p-3 hover:border-brand/70 hover:shadow-xl transition-all shadow-sm"
             >
             <div>
               {/* Badges superiores */}
-              <div className="flex items-center justify-between gap-1 mb-2">
+              <div className="flex items-center justify-between gap-1 mb-1.5 desk:mb-2">
                 <span className="rounded-md bg-slate-100 dark:bg-surface border border-slate-200 dark:border-line px-1.5 py-0.5 text-[9px] font-bold uppercase text-slate-600 dark:text-slate-400 truncate max-w-[90px]">
                   {prod.marca || "Original"}
                 </span>
@@ -114,7 +114,7 @@ export default function MasVendidosSection({ products }: { products: ProductItem
               </div>
 
               {prod.badge && (
-                <div className="mb-2 rounded-md border border-brand/40 bg-brand/10 px-1.5 py-0.5 text-[9px] font-bold text-brand w-fit truncate max-w-[130px]">
+                <div className="mb-1.5 desk:mb-2 rounded-md border border-brand/40 bg-brand/10 px-1.5 py-0.5 text-[9px] font-bold text-brand w-fit truncate max-w-[130px]">
                   {prod.badge}
                 </div>
               )}
@@ -122,7 +122,7 @@ export default function MasVendidosSection({ products }: { products: ProductItem
               {/* Imagen del Producto */}
               <Link
                 href={`/producto/${prod.id}`}
-                className="relative mb-2 flex h-36 items-center justify-center rounded-xl bg-slate-50 dark:bg-surface text-slate-500 overflow-hidden p-2 border border-slate-100 dark:border-line/40"
+                className="relative mb-1.5 desk:mb-2 flex h-24 sm:h-28 desk:h-36 items-center justify-center rounded-xl bg-slate-50 dark:bg-surface text-slate-500 overflow-hidden p-1.5 desk:p-2 border border-slate-100 dark:border-line/40"
               >
                 {prod.imagen ? (
                   <img
@@ -150,18 +150,18 @@ export default function MasVendidosSection({ products }: { products: ProductItem
               {/* Título */}
               <Link
                 href={`/producto/${prod.id}`}
-                className="line-clamp-2 text-xs font-bold text-slate-900 dark:text-white hover:text-brand transition-colors min-h-[34px] leading-snug"
+                className="line-clamp-2 text-[11px] desk:text-xs font-bold text-slate-900 dark:text-white hover:text-brand transition-colors min-h-[30px] desk:min-h-[34px] leading-snug"
                 title={prod.nombre}
               >
                 {prod.nombre}
               </Link>
             </div>
 
-            <div className="mt-3 pt-2 border-t border-slate-200 dark:border-line/60">
+            <div className="mt-2 desk:mt-3 pt-1.5 desk:pt-2 border-t border-slate-200 dark:border-line/60">
               {/* Precio Original Tachado (izq) y Ahorrás (der) solo si hay oferta real */}
               {prod.enOferta && prod.ahorro > 0 ? (
-                <div className="flex items-center justify-between gap-1 mb-1">
-                  <span className="text-[11px] text-slate-500 line-through">
+                <div className="flex items-center justify-between gap-1 mb-0.5 desk:mb-1">
+                  <span className="text-[10px] desk:text-[11px] text-slate-500 line-through">
                     {formatPrice(prod.precioOriginal)}
                   </span>
                   {shouldShowAhorroBadge(prod.ahorro) && (
@@ -171,10 +171,10 @@ export default function MasVendidosSection({ products }: { products: ProductItem
                   )}
                 </div>
               ) : (
-                <div className="text-[11px] text-transparent select-none mb-1">-</div>
+                <div className="text-[10px] desk:text-[11px] text-transparent select-none mb-0.5 desk:mb-1">-</div>
               )}
               <div className="flex items-baseline justify-between gap-1">
-                <div className="text-base font-black text-brand tracking-tight">
+                <div className="text-sm desk:text-base font-black text-brand tracking-tight">
                   {formatPrice(prod.precio)}
                 </div>
                 {isLowStock && (

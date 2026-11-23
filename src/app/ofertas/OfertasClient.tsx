@@ -447,7 +447,7 @@ export default function OfertasClient({
         {/* GRILLA DE PRODUCTOS */}
         <main className="lg:col-span-9 space-y-4">
           {filteredProducts.length > 0 ? (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2.5 desk:gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4">
               {filteredProducts.map((p, idx) => {
                 const regular = p.precioRegular ?? p.precio;
                 const ahorro = p.enOferta ? Math.max(0, regular - p.precio) : 0;
@@ -464,13 +464,13 @@ export default function OfertasClient({
                 return (
                   <div
                     key={`oferta-card-${esCombo ? "combo" : "prod"}-${p.id}-${idx}`}
-                    className="group flex flex-col justify-between rounded-2xl border border-slate-200 dark:border-line bg-white dark:bg-card p-3 hover:border-brand/70 hover:shadow-xl transition-all shadow-sm"
+                    className="group flex flex-col justify-between rounded-xl desk:rounded-2xl border border-slate-200 dark:border-line bg-white dark:bg-card p-2 desk:p-3 hover:border-brand/70 hover:shadow-xl transition-all shadow-sm"
                   >
                     <div>
                       {/* Badge Ahorra & Promo */}
-                      <div className="space-y-1 mb-2">
+                      <div className="space-y-1 mb-1.5 desk:mb-2">
                         {p.enOferta && shouldShowAhorroBadge(ahorro) && (
-                          <span className="inline-block rounded-md bg-brand px-2 py-0.5 text-[9px] font-black uppercase text-white shadow-sm">
+                          <span className="inline-block rounded-md bg-brand px-1.5 desk:px-2 py-0.5 text-[9px] font-black uppercase text-white shadow-sm">
                             AHORRÁ {formatPrice(ahorro)} ({p.descuentoPorcentaje}% OFF)
                           </span>
                         )}
@@ -484,7 +484,7 @@ export default function OfertasClient({
                       {/* Imagen con enlace adecuado */}
                       <Link
                         href={itemHref}
-                        className="relative mb-2 flex h-36 items-center justify-center rounded-xl bg-slate-50 dark:bg-surface text-slate-500 overflow-hidden p-2 border border-slate-100 dark:border-line/40"
+                        className="relative mb-1.5 desk:mb-2 flex h-24 sm:h-28 desk:h-36 items-center justify-center rounded-xl bg-slate-50 dark:bg-surface text-slate-500 overflow-hidden p-1.5 desk:p-2 border border-slate-100 dark:border-line/40"
                       >
                         {p.imagen ? (
                           <img
@@ -514,7 +514,7 @@ export default function OfertasClient({
                       {/* Título */}
                       <Link
                         href={itemHref}
-                        className="line-clamp-2 text-xs font-bold text-slate-900 dark:text-white hover:text-brand transition-colors leading-snug min-h-[32px]"
+                        className="line-clamp-2 text-[11px] desk:text-xs font-bold text-slate-900 dark:text-white hover:text-brand transition-colors leading-snug min-h-[28px] desk:min-h-[32px]"
                         title={p.nombre}
                       >
                         {p.nombre}
@@ -522,7 +522,7 @@ export default function OfertasClient({
                     </div>
 
                     {/* Precios */}
-                    <div className="mt-3 pt-3 border-t border-slate-200 dark:border-line/60">
+                    <div className="mt-2 desk:mt-3 pt-2 desk:pt-3 border-t border-slate-200 dark:border-line/60">
                       {p.enOferta && ahorro > 0 ? (
                         <div className="text-[11px] text-slate-500 line-through">
                           {formatPrice(precioOriginal)}

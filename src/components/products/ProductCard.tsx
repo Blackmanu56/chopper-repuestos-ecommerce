@@ -21,11 +21,11 @@ export default function ProductCard({ product }: { product: ProductItem }) {
   const isLowStock = product.stock > 0 && product.stock <= 5;
 
   return (
-    <div className="group relative flex flex-col justify-between rounded-2xl border border-slate-200 dark:border-line bg-white dark:bg-card p-3.5 hover:border-brand/60 hover:shadow-xl transition-all shadow-sm">
+    <div className="group relative flex flex-col justify-between rounded-xl desk:rounded-2xl border border-slate-200 dark:border-line bg-white dark:bg-card p-2 desk:p-3.5 hover:border-brand/60 hover:shadow-xl transition-all shadow-sm">
       <div>
         {/* Badges Superiores */}
-        <div className="flex items-center justify-between gap-1 mb-2">
-          <span className="rounded-md bg-slate-100 dark:bg-surface border border-slate-200 dark:border-line px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 group-hover:text-brand transition-colors truncate max-w-[100px]">
+        <div className="flex items-center justify-between gap-1 mb-1.5 desk:mb-2">
+          <span className="rounded-md bg-slate-100 dark:bg-surface border border-slate-200 dark:border-line px-1.5 desk:px-2 py-0.5 text-[9px] desk:text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 group-hover:text-brand transition-colors truncate max-w-[100px]">
             {product.marca || "Original"}
           </span>
 
@@ -42,7 +42,7 @@ export default function ProductCard({ product }: { product: ProductItem }) {
 
         {/* Badge Promocional Personalizado si existe */}
         {product.badgePromo && (
-          <div className="mb-2 rounded-md border border-brand/40 bg-brand/10 px-1.5 py-0.5 text-[9px] font-bold text-brand w-fit truncate max-w-[150px]">
+          <div className="mb-1.5 desk:mb-2 rounded-md border border-brand/40 bg-brand/10 px-1.5 py-0.5 text-[9px] font-bold text-brand w-fit truncate max-w-[150px]">
             {product.badgePromo}
           </div>
         )}
@@ -50,13 +50,13 @@ export default function ProductCard({ product }: { product: ProductItem }) {
         {/* Imagen del Producto */}
         <Link
           href={`/producto/${product.id}`}
-          className="relative mb-3 flex h-36 items-center justify-center rounded-xl bg-slate-50 dark:bg-surface text-slate-500 hover:text-brand transition-colors overflow-hidden group/img border border-slate-100 dark:border-line/40"
+          className="relative mb-2 desk:mb-3 flex h-24 sm:h-28 desk:h-36 items-center justify-center rounded-xl bg-slate-50 dark:bg-surface text-slate-500 hover:text-brand transition-colors overflow-hidden group/img border border-slate-100 dark:border-line/40"
         >
           {product.imagen ? (
             <img
               src={getCatalogImageUrl(product.imagen)}
               alt={product.nombre}
-              className="h-full w-full object-contain p-2.5 transition-transform duration-300 group-hover/img:scale-108"
+              className="h-full w-full object-contain p-1.5 desk:p-2.5 transition-transform duration-300 group-hover/img:scale-108"
             />
           ) : (
             <div className="flex flex-col items-center justify-center text-slate-400">
@@ -79,7 +79,7 @@ export default function ProductCard({ product }: { product: ProductItem }) {
         {/* Título del Producto */}
         <Link
           href={`/producto/${product.id}`}
-          className="line-clamp-2 text-sm font-bold text-slate-900 dark:text-white hover:text-brand transition-colors min-h-[40px] leading-snug"
+          className="line-clamp-2 text-xs desk:text-sm font-bold text-slate-900 dark:text-white hover:text-brand transition-colors min-h-[32px] desk:min-h-[40px] leading-snug"
           title={product.nombre}
         >
           {product.nombre}
@@ -88,44 +88,44 @@ export default function ProductCard({ product }: { product: ProductItem }) {
 
       <div>
         {/* Precio y Condiciones de Pago */}
-        <div className="mt-2 pt-2 border-t border-slate-200 dark:border-line/60">
+        <div className="mt-1.5 desk:mt-2 pt-1.5 desk:pt-2 border-t border-slate-200 dark:border-line/60">
           {product.enOferta && ahorro > 0 ? (
-            <div className="flex items-center justify-between gap-1 mb-1">
-              <span className="text-[11px] text-slate-500 line-through">
+            <div className="flex items-center justify-between gap-1 mb-0.5 desk:mb-1">
+              <span className="text-[10px] desk:text-[11px] text-slate-500 line-through">
                 {formatPrice(precioRegular)}
               </span>
               {shouldShowAhorroBadge(ahorro) && (
-                <span className="rounded-md bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800/60 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-400 shrink-0">
+                <span className="rounded-md bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800/60 px-1.5 desk:px-2 py-0.5 text-[9px] desk:text-[10px] font-bold text-emerald-700 dark:text-emerald-400 shrink-0">
                   Ahorrás {formatPrice(ahorro)}
                 </span>
               )}
             </div>
           ) : (
-            <div className="text-[11px] text-transparent select-none mb-1">-</div>
+            <div className="text-[10px] desk:text-[11px] text-transparent select-none mb-0.5 desk:mb-1">-</div>
           )}
 
-          <div className="text-lg font-black text-brand tracking-tight">
+          <div className="text-base desk:text-lg font-black text-brand tracking-tight">
             {formatPrice(product.precio)}
           </div>
-          <div className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
+          <div className="text-[10px] desk:text-[11px] font-medium text-slate-600 dark:text-slate-400">
             Efectivo / Transferencia
           </div>
         </div>
 
         {/* Tag de Retiro en Local y Disponibilidad de Stock */}
-        <div className="mt-2 space-y-1">
-          <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
+        <div className="mt-1.5 desk:mt-2 space-y-0.5 desk:space-y-1">
+          <div className="flex items-center gap-1.5 text-[10px] desk:text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
             <MapPin size={12} className="shrink-0" />
             <span className="truncate">Retiro en {config.direccion || "Av. Roque Sáenz Peña 1500"}</span>
           </div>
 
           {product.stock <= 0 ? (
-            <div className="flex items-center gap-1.5 text-[11px] text-red-600 dark:text-red-400 font-semibold">
+            <div className="flex items-center gap-1.5 text-[10px] desk:text-[11px] text-red-600 dark:text-red-400 font-semibold">
               <AlertCircle size={12} className="shrink-0" />
               <span>Sin stock en el local</span>
             </div>
           ) : isLowStock ? (
-            <div className="flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400 font-bold">
+            <div className="flex items-center gap-1.5 text-[10px] desk:text-[11px] text-amber-600 dark:text-amber-400 font-bold">
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
               <span>{product.stock === 1 ? "¡Última unidad disponible!" : `¡Últimas ${product.stock} unidades!`}</span>
             </div>
@@ -133,7 +133,7 @@ export default function ProductCard({ product }: { product: ProductItem }) {
         </div>
 
         {/* Botón de Acción */}
-        <div className="mt-3 pt-1">
+        <div className="mt-2 desk:mt-3 pt-0.5 desk:pt-1 [&_button]:py-1.5 desk:[&_button]:py-2.5">
           {product.stock <= 0 ? (
             <button
               disabled

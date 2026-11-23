@@ -61,49 +61,49 @@ export default function HeroBanners({ initialBanners = [] }: HeroBannersProps) {
   const shopName = config.nombre_tienda || "Chopper Repuestos";
 
   return (
-    <section className="mt-4 space-y-6">
+    <section className="mt-2 desk:mt-4 space-y-3 desk:space-y-6">
       {/* 3 Mini banners superiores tipo Maximus */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-2 desk:gap-3 sm:grid-cols-3">
         {quickCategories.map((item, idx) => (
           <Link
             key={idx}
             href={`/ofertas?marca=${encodeURIComponent(item.marca)}`}
-            className="group relative overflow-hidden rounded-2xl border border-line bg-card p-4 transition-all hover:border-brand/60 hover:shadow-lg"
+            className="group relative overflow-hidden rounded-xl desk:rounded-2xl border border-line bg-card p-2.5 desk:p-4 transition-all hover:border-brand/60 hover:shadow-lg"
           >
             <div className="flex items-center justify-between">
-              <span className="rounded-full bg-brand/10 border border-brand/30 px-2 py-0.5 text-[10px] font-bold text-brand uppercase tracking-wider">
+              <span className="rounded-full bg-brand/10 border border-brand/30 px-2 py-0.5 text-[9px] desk:text-[10px] font-bold text-brand uppercase tracking-wider">
                 {item.pill}
               </span>
-              <span className="text-xs text-slate-400 group-hover:text-brand transition-colors">
+              <span className="text-[11px] desk:text-xs text-slate-400 group-hover:text-brand transition-colors">
                 Ver ofertas →
               </span>
             </div>
-            <h3 className="mt-2 text-base font-extrabold text-white group-hover:text-brand transition-colors">
+            <h3 className="mt-1 desk:mt-2 text-sm desk:text-base font-extrabold text-white group-hover:text-brand transition-colors">
               {item.title}
             </h3>
-            <p className="mt-0.5 text-xs text-slate-400 line-clamp-1">{item.desc}</p>
+            <p className="mt-0.5 text-[11px] desk:text-xs text-slate-400 line-clamp-1">{item.desc}</p>
           </Link>
         ))}
       </div>
 
       {/* Banner Principal Hero Adaptativo (Modo Oscuro / Modo Claro) */}
-      <div className="hero-banner-adaptive relative overflow-hidden rounded-2xl border border-slate-200 dark:border-line bg-gradient-to-r from-red-50/60 via-white to-slate-50 dark:from-[#17181d] dark:via-[#14151a] dark:to-[#101114] p-6 md:p-10 shadow-lg transition-colors">
+      <div className="hero-banner-adaptive relative overflow-hidden rounded-xl desk:rounded-2xl border border-slate-200 dark:border-line bg-gradient-to-r from-red-50/60 via-white to-slate-50 dark:from-[#17181d] dark:via-[#14151a] dark:to-[#101114] p-4 md:p-5 desk:p-10 shadow-lg transition-colors">
         {currentBanner?.imagenUrl && (
           <div
             className="absolute inset-0 bg-cover bg-center opacity-15 dark:opacity-25 pointer-events-none transition-all duration-500"
             style={{ backgroundImage: `url(${currentBanner.imagenUrl})` }}
           />
         )}
-        <div className="relative z-10 grid gap-8 lg:grid-cols-12 lg:items-center">
-          <div className="lg:col-span-8 space-y-4">
-            <div className="inline-flex items-center gap-2 rounded-full border border-brand/40 bg-brand/10 dark:bg-brand/15 px-3 py-1 text-xs font-semibold text-brand">
-              <Flame size={14} className="fill-brand animate-pulse" />
+        <div className="relative z-10 grid gap-4 desk:gap-8 lg:grid-cols-12 lg:items-center">
+          <div className="lg:col-span-8 space-y-2.5 desk:space-y-4">
+            <div className="inline-flex items-center gap-1.5 desk:gap-2 rounded-full border border-brand/40 bg-brand/10 dark:bg-brand/15 px-2.5 desk:px-3 py-0.5 desk:py-1 text-[11px] desk:text-xs font-semibold text-brand">
+              <Flame size={13} className="fill-brand animate-pulse desk:w-3.5 desk:h-3.5" />
               <span className="tracking-wide uppercase">
                 {currentBanner?.badge || `${shopName} · POSADAS, MISIONES`}
               </span>
             </div>
 
-            <h1 className="text-3xl font-black tracking-tight text-slate-900 dark:text-white md:text-5xl leading-tight">
+            <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white md:text-3xl desk:text-5xl leading-tight">
               {currentBanner ? (
                 currentBanner.titulo
               ) : (
@@ -116,7 +116,7 @@ export default function HeroBanners({ initialBanners = [] }: HeroBannersProps) {
               )}
             </h1>
 
-            <p className="max-w-2xl text-sm md:text-base text-slate-700 dark:text-slate-300 leading-relaxed font-medium">
+            <p className="max-w-2xl text-xs md:text-sm desk:text-base text-slate-700 dark:text-slate-300 leading-relaxed font-medium">
               {currentBanner?.descripcion || (
                 <>
                   Buscá tu repuesto, armá el pedido online y pasá a retirarlo por nuestro local en{" "}
@@ -127,22 +127,22 @@ export default function HeroBanners({ initialBanners = [] }: HeroBannersProps) {
               )}
             </p>
 
-            <div className="flex flex-wrap items-center gap-3 pt-2">
+            <div className="flex flex-wrap items-center gap-2 desk:gap-3 pt-1 desk:pt-2">
               <Link
                 href={currentBanner?.enlace || "/ofertas"}
-                className="flex items-center gap-2 rounded-xl bg-brand px-6 py-3 text-sm font-bold text-white hover:bg-brandhover shadow-lg shadow-brand/30 transition-all active:scale-95"
+                className="flex items-center gap-2 rounded-xl bg-brand px-4 py-2 desk:px-6 desk:py-3 text-xs desk:text-sm font-bold text-white hover:bg-brandhover shadow-lg shadow-brand/30 transition-all active:scale-95"
               >
                 <span>Ver productos en oferta</span>
-                <ArrowRight size={16} />
+                <ArrowRight size={15} className="desk:w-4 desk:h-4" />
               </Link>
 
               <a
                 href={waLink}
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-5 py-3 text-sm font-bold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-all active:scale-95"
+                className="flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3.5 py-2 desk:px-5 desk:py-3 text-xs desk:text-sm font-bold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-all active:scale-95"
               >
-                <MessageCircle size={16} />
+                <MessageCircle size={15} className="desk:w-4 desk:h-4" />
                 <span>Contactar por WhatsApp</span>
               </a>
             </div>
@@ -188,38 +188,38 @@ export default function HeroBanners({ initialBanners = [] }: HeroBannersProps) {
           </div>
 
           {/* Tarjetas de Beneficios Laterales */}
-          <div className="lg:col-span-4 grid gap-3">
-            <div className="benefit-card rounded-xl border border-slate-200 dark:border-line/80 bg-white dark:bg-[#1e2029]/80 p-3.5 backdrop-blur flex items-start gap-3 shadow-sm">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand/15 text-brand">
-                <CreditCard size={20} />
+          <div className="lg:col-span-4 grid gap-2 desk:gap-3">
+            <div className="benefit-card rounded-xl border border-slate-200 dark:border-line/80 bg-white dark:bg-[#1e2029]/80 p-2.5 desk:p-3.5 backdrop-blur flex items-start gap-2.5 desk:gap-3 shadow-sm">
+              <div className="flex h-8 w-8 desk:h-10 desk:w-10 shrink-0 items-center justify-center rounded-lg bg-brand/15 text-brand">
+                <CreditCard size={17} className="desk:w-5 desk:h-5" />
               </div>
               <div>
-                <h4 className="text-xs font-bold text-slate-900 dark:text-white">Pagás al recibir</h4>
-                <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                <h4 className="text-[11px] desk:text-xs font-bold text-slate-900 dark:text-white">Pagás al recibir</h4>
+                <p className="text-[10px] desk:text-[11px] text-slate-600 dark:text-slate-300 leading-snug">
                   Efectivo o transferencia en mostrador o con el motomandado.
                 </p>
               </div>
             </div>
 
-            <div className="benefit-card rounded-xl border border-slate-200 dark:border-line/80 bg-white dark:bg-[#1e2029]/80 p-3.5 backdrop-blur flex items-start gap-3 shadow-sm">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-                <Bike size={20} />
+            <div className="benefit-card rounded-xl border border-slate-200 dark:border-line/80 bg-white dark:bg-[#1e2029]/80 p-2.5 desk:p-3.5 backdrop-blur flex items-start gap-2.5 desk:gap-3 shadow-sm">
+              <div className="flex h-8 w-8 desk:h-10 desk:w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                <Bike size={17} className="desk:w-5 desk:h-5" />
               </div>
               <div>
-                <h4 className="text-xs font-bold text-slate-900 dark:text-white">Motomandado en Posadas</h4>
-                <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                <h4 className="text-[11px] desk:text-xs font-bold text-slate-900 dark:text-white">Motomandado en Posadas</h4>
+                <p className="text-[10px] desk:text-[11px] text-slate-600 dark:text-slate-300 leading-snug">
                   Envíos rápidos por cadetería y Moto Uber en toda la ciudad.
                 </p>
               </div>
             </div>
 
-            <div className="benefit-card rounded-xl border border-slate-200 dark:border-line/80 bg-white dark:bg-[#1e2029]/80 p-3.5 backdrop-blur flex items-start gap-3 shadow-sm">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
-                <ShieldCheck size={20} />
+            <div className="benefit-card rounded-xl border border-slate-200 dark:border-line/80 bg-white dark:bg-[#1e2029]/80 p-2.5 desk:p-3.5 backdrop-blur flex items-start gap-2.5 desk:gap-3 shadow-sm">
+              <div className="flex h-8 w-8 desk:h-10 desk:w-10 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                <ShieldCheck size={17} className="desk:w-5 desk:h-5" />
               </div>
               <div>
-                <h4 className="text-xs font-bold text-slate-900 dark:text-white">100% Repuestos Nuevos</h4>
-                <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                <h4 className="text-[11px] desk:text-xs font-bold text-slate-900 dark:text-white">100% Repuestos Nuevos</h4>
+                <p className="text-[10px] desk:text-[11px] text-slate-600 dark:text-slate-300 leading-snug">
                   Garantía de fábrica en cajas selladas. Sin usados.
                 </p>
               </div>
