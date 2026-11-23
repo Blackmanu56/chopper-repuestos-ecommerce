@@ -290,9 +290,15 @@ export default function PanelPage() {
   const [comprobanteInfo, setComprobanteInfo] = useState<InfoComprobanteDTO | null>(null);
   const [loadingComprobanteInfo, setLoadingComprobanteInfo] = useState<boolean>(false);
   const [selectedPedido, setSelectedPedido] = useState<PedidoDTO | null>(null);
-  const [filtroSoloComprobante, setFiltroSoloComprobante] = useState<boolean>(false);
   const [checkedStockItems, setCheckedStockItems] = useState<Record<string, boolean>>({});
   const [savingChecklistItems, setSavingChecklistItems] = useState<Record<string, boolean>>({});
+  const [actionConfirmLoading, setActionConfirmLoading] = useState(false);
+  const [actionConfirmModal, setActionConfirmModal] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    onConfirm: () => Promise<void> | void;
+  } | null>(null);
 
   // Catálogo & Productos
   const [products, setProducts] = useState<CommercialProductItem[]>([]);
@@ -855,10 +861,6 @@ export default function PanelPage() {
 
   const pedidosFiltrados = useMemo(() => {
     return pedidos.filter((p) => {
-      // Filtro de solo con comprobante
-      if (filtroSoloComprobante && !p.comprobanteUrl) {
-        return false;
-      }
       // Filtro de estado
       if (filtroEstadoPedido === "CANCELACION_SOLICITADA") {
         const notas = p.notas || "";
@@ -897,14 +899,11 @@ export default function PanelPage() {
       }
       return true;
     });
-  }, [pedidos, filtroEstadoPedido, filtroModalidadPedido, filtroEmpleadoPedido, filtroSoloComprobante, busquedaPedido]);
+  }, [pedidos, filtroEstadoPedido, filtroModalidadPedido, filtroEmpleadoPedido, busquedaPedido]);
 
-  // Colección para el tablero Kanban: respeta búsqueda, modalidad, empleado y comprobante sin excluir columnas por filtroEstadoPedido
+  // Colección para el tablero Kanban: respeta búsqueda, modalidad y empleado sin excluir columnas por filtroEstadoPedido
   const pedidosTablero = useMemo(() => {
     return pedidos.filter((p) => {
-      if (filtroSoloComprobante && !p.comprobanteUrl) {
-        return false;
-      }
       if (filtroModalidadPedido !== "TODOS" && p.modalidadEntrega !== filtroModalidadPedido) {
         return false;
       }
@@ -924,7 +923,7 @@ export default function PanelPage() {
       }
       return true;
     });
-  }, [pedidos, filtroModalidadPedido, filtroEmpleadoPedido, filtroSoloComprobante, busquedaPedido]);
+  }, [pedidos, filtroModalidadPedido, filtroEmpleadoPedido, busquedaPedido]);
 
   // Contadores para chips y KPI cards
   const countPendientes = useMemo(() => pedidos.filter((p) => p.estado === "PENDIENTE").length, [pedidos]);
@@ -958,7 +957,6 @@ export default function PanelPage() {
       }).length,
     [pedidos]
   );
-  const countConComprobante = useMemo(() => pedidos.filter((p) => !!p.comprobanteUrl).length, [pedidos]);
   const totalMontoPedidos = useMemo(() => pedidos.reduce((acc, p) => acc + (p.total || 0), 0), [pedidos]);
 
   // ════════════════════════════════════════════════════════════
@@ -2618,7 +2616,6 @@ export default function PanelPage() {
       setBusquedaPedido("");
       setFiltroModalidadPedido("TODOS");
       setFiltroEmpleadoPedido("TODOS");
-      setFiltroSoloComprobante(false);
       setFiltroEstadoPedido("TODOS");
     }
 
@@ -2650,7 +2647,6 @@ export default function PanelPage() {
       setBusquedaPedido("");
       setFiltroModalidadPedido("TODOS");
       setFiltroEmpleadoPedido("TODOS");
-      setFiltroSoloComprobante(false);
       setModoVisualizacionPedidos("listado");
       if (filtroEstado) {
         setFiltroEstadoPedido(filtroEstado);
@@ -3168,14 +3164,12 @@ export default function PanelPage() {
                   {(filtroEstadoPedido !== "TODOS" ||
                     filtroModalidadPedido !== "TODOS" ||
                     filtroEmpleadoPedido !== "TODOS" ||
-                    filtroSoloComprobante ||
                     busquedaPedido) && (
                     <button
                       onClick={() => {
                         setFiltroEstadoPedido("TODOS");
                         setFiltroModalidadPedido("TODOS");
                         setFiltroEmpleadoPedido("TODOS");
-                        setFiltroSoloComprobante(false);
                         setBusquedaPedido("");
                       }}
                       className="px-2.5 py-2 bg-[#1a1b20] hover:bg-[#26272e] border border-[#35363d] rounded-lg text-xs font-semibold text-[#9a9ba3] hover:text-white transition-colors flex items-center gap-1"
@@ -3252,18 +3246,6 @@ export default function PanelPage() {
                       </button>
                     ))}
                   </div>
-
-                  <button
-                    onClick={() => setFiltroSoloComprobante(!filtroSoloComprobante)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 border ${
-                      filtroSoloComprobante
-                        ? "bg-sky-600 text-white border-sky-500 shadow-md shadow-sky-600/30"
-                        : "bg-[#0f1012] border-[#26272e] text-sky-400 hover:text-white hover:border-sky-500/40"
-                    }`}
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    <span>Con Comprobante ({countConComprobante})</span>
-                  </button>
                 </div>
               </div>
             </div>
@@ -3289,11 +3271,6 @@ export default function PanelPage() {
                           #ORD-{p.numero}
                         </span>
                         <EstadoChip estado={p.estado} />
-                        {p.comprobanteUrl && (
-                          <span className="bg-sky-950/40 text-sky-400 text-[10px] font-bold px-2 py-0.5 rounded-full border border-sky-800/40 flex items-center gap-1">
-                            <FileText className="w-3 h-3" /> Comprobante
-                          </span>
-                        )}
                         {p.preparadorNombre && (
                           <span className="bg-indigo-950/40 text-indigo-400 text-[10px] font-bold px-2 py-0.5 rounded-full border border-indigo-800/40 flex items-center gap-1">
                             <UserCheck className="w-3 h-3" /> Preparando: {p.preparadorNombre}
@@ -3459,9 +3436,14 @@ export default function PanelPage() {
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              if (confirm("¿Seguro que deseás cancelar esta orden?")) {
-                                handleCambiarEstadoPedido(p.id, "CANCELADO", "Cancelado por el administrador");
-                              }
+                              setActionConfirmModal({
+                                title: `Cancelar orden #ORD-${p.numero}`,
+                                message: "¿Seguro que deseás cancelar esta orden?",
+                                confirmLabel: "Confirmar cancelación",
+                                onConfirm: async () => {
+                                  await handleCambiarEstadoPedido(p.id, "CANCELADO", "Cancelado por el administrador");
+                                },
+                              });
                             }}
                             disabled={saving}
                             className="px-3 py-1.5 bg-transparent border border-[#35363d] text-[#6b6c75] hover:text-red-400 hover:border-red-500/50 rounded-lg text-xs transition-colors"
@@ -9573,7 +9555,12 @@ export default function PanelPage() {
         )}
         {/* ════════════════════════════════════════════════════════════ */}
         {selectedPedido && (
-          <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div
+            className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setSelectedPedido(null);
+            }}
+          >
             <div className="bg-[#16171c] border border-[#26272e] rounded-2xl max-w-3xl w-full p-6 shadow-2xl space-y-6 my-8">
               {/* Header Modal */}
               <div className="flex items-start justify-between border-b border-[#26272e] pb-4">
@@ -9836,16 +9823,24 @@ export default function PanelPage() {
                           {selectedPedido.comprobanteUrl && (
                             <button
                               type="button"
-                              onClick={async () => {
-                                if (!confirm("¿Rechazar el comprobante? El pedido permanece en PENDIENTE y se le informará al cliente.")) return;
-                                const res = await rechazarComprobantePedidoAction(selectedPedido.id, user.id, "Comprobante rechazado por Ventas");
-                                if (res.success) {
-                                  showFeedback("success", "Comprobante rechazado. El pedido permanece en PENDIENTE.");
-                                  setPedidos((prev) => prev.map((p) => p.id === selectedPedido.id ? { ...p, estado: "PENDIENTE", comprobanteUrl: null } : p));
-                                  setSelectedPedido(null);
-                                } else {
-                                  showFeedback("error", res.error || "No se pudo rechazar el comprobante.");
-                                }
+                              onClick={() => {
+                                const pedidoId = selectedPedido.id;
+                                const pedidoNumero = selectedPedido.numero;
+                                setActionConfirmModal({
+                                  title: `Rechazar comprobante #ORD-${pedidoNumero}`,
+                                  message: "¿Rechazar el comprobante? El pedido permanece en PENDIENTE y se le informará al cliente.",
+                                  confirmLabel: "Rechazar comprobante",
+                                  onConfirm: async () => {
+                                    const res = await rechazarComprobantePedidoAction(pedidoId, user.id, "Comprobante rechazado por Ventas");
+                                    if (res.success) {
+                                      showFeedback("success", "Comprobante rechazado. El pedido permanece en PENDIENTE.");
+                                      setPedidos((prev) => prev.map((p) => p.id === pedidoId ? { ...p, estado: "PENDIENTE", comprobanteUrl: null } : p));
+                                      setSelectedPedido(null);
+                                    } else {
+                                      showFeedback("error", res.error || "No se pudo rechazar el comprobante.");
+                                    }
+                                  },
+                                });
                               }}
                               disabled={saving}
                               className="w-full py-2 bg-transparent border border-red-500/40 text-red-400 hover:bg-red-500/10 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
@@ -9904,7 +9899,7 @@ export default function PanelPage() {
                       <p className="text-[11px] text-[#9a9ba3] leading-relaxed">
                         El comprobante lo adjunta el cliente directamente desde la tienda web al pagar o en &quot;Mis Pedidos&quot;. Como empleado de ventas o administrador, podés verificar y confirmar la orden para Stock:
                       </p>
-                      {selectedPedido.estado === "PENDIENTE" && (
+                      {selectedPedido.estado === "PENDIENTE" && !selectedPedido.comprobanteUrl && (
                         <button
                           type="button"
                           onClick={() => {
@@ -10849,18 +10844,26 @@ export default function PanelPage() {
                     {comprobanteModalPedido.estadoPago !== "PAGADO" && (user.rol === "ADMINISTRADOR" || user.rol === "ENCARGADO_VENTAS") && (
                       <button
                         type="button"
-                        onClick={async () => {
-                          if (!confirm("¿Rechazar el comprobante? El pedido vuelve a PENDIENTE y se notificará al cliente.")) return;
-                          const res = await rechazarComprobantePedidoAction(comprobanteModalPedido.id, user.id, "Comprobante rechazado tras revisión en visor");
-                          if (res.success) {
-                            showFeedback("success", "Comprobante rechazado.");
-                            setPedidos((prev) => prev.map((p) => p.id === comprobanteModalPedido.id ? { ...p, estado: "PENDIENTE", comprobanteUrl: null } : p));
-                            setComprobanteModalUrl(null);
-                            setComprobanteModalPedido(null);
-                            setSelectedPedido(null);
-                          } else {
-                            showFeedback("error", res.error || "No se pudo rechazar.");
-                          }
+                        onClick={() => {
+                          const pedidoId = comprobanteModalPedido.id;
+                          const pedidoNumero = comprobanteModalPedido.numero;
+                          setActionConfirmModal({
+                            title: `Rechazar comprobante #ORD-${pedidoNumero}`,
+                            message: "¿Rechazar el comprobante? El pedido vuelve a PENDIENTE y se notificará al cliente.",
+                            confirmLabel: "Rechazar comprobante",
+                            onConfirm: async () => {
+                              const res = await rechazarComprobantePedidoAction(pedidoId, user.id, "Comprobante rechazado tras revisión en visor");
+                              if (res.success) {
+                                showFeedback("success", "Comprobante rechazado.");
+                                setPedidos((prev) => prev.map((p) => p.id === pedidoId ? { ...p, estado: "PENDIENTE", comprobanteUrl: null } : p));
+                                setComprobanteModalUrl(null);
+                                setComprobanteModalPedido(null);
+                                setSelectedPedido(null);
+                              } else {
+                                showFeedback("error", res.error || "No se pudo rechazar.");
+                              }
+                            },
+                          });
                         }}
                         disabled={saving}
                         className="px-3 py-1.5 bg-transparent border border-red-500/40 text-red-400 hover:bg-red-500/10 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer"
@@ -10888,6 +10891,60 @@ export default function PanelPage() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Tarjeta Modal de Confirmación (Cancelar / Rechazar) */}
+        {actionConfirmModal && (
+          <div
+            className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in"
+            onClick={(e) => {
+              if (e.target === e.currentTarget && !actionConfirmLoading) {
+                setActionConfirmModal(null);
+              }
+            }}
+          >
+            <div className="w-full max-w-sm rounded-2xl border border-[#2e303d] bg-[#16171c] p-5 shadow-2xl space-y-4 animate-in zoom-in-95">
+              <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl border border-red-500/25 bg-red-500/10 text-red-400">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+
+              <div className="text-center space-y-1.5">
+                <h3 className="text-base font-bold text-white">
+                  {actionConfirmModal.title}
+                </h3>
+                <p className="text-xs text-[#9a9ba3] leading-relaxed">
+                  {actionConfirmModal.message}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2.5 pt-1">
+                <button
+                  type="button"
+                  disabled={actionConfirmLoading}
+                  onClick={() => setActionConfirmModal(null)}
+                  className="flex-1 rounded-xl border border-[#35363d] bg-[#1d1e24] py-2 text-xs font-semibold text-gray-300 hover:text-white hover:border-[#4c4d57] transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  Volver
+                </button>
+                <button
+                  type="button"
+                  disabled={actionConfirmLoading}
+                  onClick={async () => {
+                    try {
+                      setActionConfirmLoading(true);
+                      await actionConfirmModal.onConfirm();
+                      setActionConfirmModal(null);
+                    } finally {
+                      setActionConfirmLoading(false);
+                    }
+                  }}
+                  className="flex-1 rounded-xl bg-red-600 hover:bg-red-700 py-2 text-xs font-bold text-white shadow-md shadow-red-600/20 transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                >
+                  {actionConfirmLoading ? "Procesando..." : actionConfirmModal.confirmLabel}
+                </button>
+              </div>
             </div>
           </div>
         )}
